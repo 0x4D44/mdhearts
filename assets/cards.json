@@ -1,0 +1,12 @@
+{
+  "cols": 13,
+  "rows": 4,
+  "card_w": 224,
+  "card_h": 312,
+  "order": [
+    "spades",
+    "hearts",
+    "diamonds",
+    "clubs"
+  ]
+}

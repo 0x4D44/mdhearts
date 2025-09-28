@@ -1,0 +1,7 @@
+﻿[workspace]
+members = [
+    "crates/hearts-core",
+    "crates/hearts-ui",
+    "crates/hearts-app"
+]
+resolver = "2"

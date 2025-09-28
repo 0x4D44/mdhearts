@@ -1,0 +1,403 @@
+use std::cell::RefCell;
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+
+use crate::controller::GameController;
+use hearts_core::model::card::Card as ModelCard;
+use hearts_core::model::rank::Rank;
+use hearts_core::model::suit::Suit;
+use hearts_core::model::player::PlayerPosition;
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D_SIZE_F, D2D_SIZE_U, D2D1_COLOR_F,
+};
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE, D2D1_FACTORY_OPTIONS,
+    D2D1_FACTORY_TYPE_MULTI_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_PRESENT_OPTIONS_NONE,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1CreateFactory,
+    ID2D1Bitmap, ID2D1BitmapRenderTarget, ID2D1Factory, ID2D1HwndRenderTarget,
+};
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_MEASURING_MODE, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_CENTER, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+};
+use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT};
+use windows::Win32::Graphics::Imaging::{
+    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmapFrameDecode,
+    IWICFormatConverter, IWICImagingFactory, WICBitmapDitherTypeNone, WICBitmapPaletteTypeCustom,
+    WICDecodeMetadataCacheOnLoad,
+};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance,
+    CoInitializeEx,
+};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::WindowsAndMessaging::{ WM_LBUTTONDOWN, WM_KEYDOWN, WM_COMMAND,
+    CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, GWLP_USERDATA, GetClientRect, GetMessageW, IDC_ARROW, IDI_APPLICATION,
+    LoadCursorW, LoadIconW, MSG, PostQuitMessage, RegisterClassExW, SW_SHOW, SetWindowLongPtrW,
+    ShowWindow, TranslateMessage, WM_DESTROY, WM_NCCREATE, WM_PAINT, WM_SIZE, WNDCLASSEXW,
+    WS_OVERLAPPEDWINDOW, CreateMenu, CreatePopupMenu, AppendMenuW, SetMenu,
+    DrawMenuBar, TranslateAcceleratorW, CreateAcceleratorTableW, ACCEL, HACCEL,
+    MF_STRING, MF_POPUP, MF_SEPARATOR, FVIRTKEY, FCONTROL,
+};
+const VK_F2: u32 = 0x71; const VK_RETURN: u32 = 0x0D; const VK_ESCAPE: u32 = 0x1B;
+
+const ID_GAME_NEW: u32 = 1001;
+const ID_GAME_RESTART: u32 = 1002;
+const ID_GAME_EXIT: u32 = 1003;
+const ID_HELP_ABOUT: u32 = 1301;
+use windows::Win32::Graphics::Gdi::InvalidateRect;
+use windows::core::{PCWSTR, Result, w};
+use serde::Deserialize;
+
+const D2DERR_RECREATE_TARGET: i32 = 0x8899_000C_u32 as i32;
+
+pub fn run() -> Result<()> {
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE).ok()?;
+    }
+
+    let module = unsafe { GetModuleHandleW(None)? };
+    let hinstance = HINSTANCE(module.0);
+
+    let class_name = w!("MDHEARTS_WIN32");
+
+    let wc = WNDCLASSEXW {
+        cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(window_proc),
+        cbClsExtra: 0,
+        cbWndExtra: std::mem::size_of::<*const RefCell<AppState>>() as i32,
+        hInstance: hinstance,
+        hIcon: unsafe { LoadIconW(None, IDI_APPLICATION)? },
+        hCursor: unsafe { LoadCursorW(None, IDC_ARROW)? },
+        hbrBackground: HBRUSH::default(),
+        lpszMenuName: PCWSTR::null(),
+        lpszClassName: class_name,
+        hIconSm: Default::default(),
+    };
+    unsafe {
+        RegisterClassExW(&wc);
+    }
+
+    let hwnd = unsafe {
+        CreateWindowExW(
+            Default::default(),
+            class_name,
+            w!("mdhearts"),
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            1024,
+            768,
+            None,
+            None,
+            Some(hinstance),
+            None,
+        )
+    }?;
+
+    let haccel = unsafe { init_menu_and_accels(hwnd) };
+
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOW);
+    }
+
+    let mut msg = MSG::default();
+    unsafe {
+        while GetMessageW(&mut msg, None, 0, 0).into() {
+            if TranslateAcceleratorW(hwnd, haccel, &mut msg) != 0 {
+                continue;
+            }
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        let _ = DestroyWindow(hwnd);
+    }
+
+    Ok(())
+}
+
+struct AppState {
+    factory: ID2D1Factory,
+    text_format: IDWriteTextFormat,
+    render_target: Option<ID2D1HwndRenderTarget>,
+    offscreen: Option<SceneSurface>,
+    controller: GameController,
+    passing_select: Vec<hearts_core::model::card::Card>,
+    wic: IWICImagingFactory,
+    atlas: AtlasMeta,felt_texture_path: String,}
+
+unsafe fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
+    use windows::core::PCWSTR;
+    unsafe {
+        // Menu bar
+        let hmenu = CreateMenu().expect("create menu bar");
+        // Game menu
+        let game = CreatePopupMenu().expect("create Game menu");
+        let _ = AppendMenuW(game, MF_STRING, ID_GAME_NEW as usize, w!("&New Game\tCtrl+N")).expect("append New Game");
+        let _ = AppendMenuW(game, MF_SEPARATOR, 0, PCWSTR::null()).expect("append sep");
+        let _ = AppendMenuW(game, MF_STRING, ID_GAME_EXIT as usize, w!("E&xit")).expect("append Exit");
+        let _ = AppendMenuW(hmenu, MF_POPUP, game.0 as usize, w!("&Game")).expect("attach Game");
+
+        // View menu
+        let view = CreatePopupMenu().expect("create View menu");
+        let _ = AppendMenuW(view, MF_STRING, REMOVED_ID as usize, w!("&Felt Background")).expect("append felt");
+        let _ = AppendMenuW(view, MF_STRING, REMOVED_ID as usize, w!("Show &Opponent Card Backs")).expect("append backs");\n    let _ = DrawMenuBar(hwnd);
+
+        // Accelerators
+        let accels = [ACCEL { fVirt: FVIRTKEY | FCONTROL, key: b'N' as u16, cmd: ID_GAME_NEW as u16 }];
+        CreateAcceleratorTableW(&accels).expect("create accelerators")
+    }
+}
+
+impl AppState {
+    fn new() -> Result<Self> {
+        let factory: ID2D1Factory = unsafe {
+            D2D1CreateFactory::<ID2D1Factory>(
+                D2D1_FACTORY_TYPE_MULTI_THREADED,
+                Some(&D2D1_FACTORY_OPTIONS::default()),
+            )?
+        };
+
+        let dwrite: IDWriteFactory =
+            unsafe { DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED)? };
+
+        let text_format: IDWriteTextFormat = unsafe {
+            let format = dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                18.0,
+                w!("en-us"),
+            )?;
+            format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+            format
+        };
+
+        let controller = GameController::new_with_seed(Some(0), PlayerPosition::North);
+
+        let wic: IWICImagingFactory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
+
+        let atlas = AtlasMeta::load_from_assets().unwrap_or_else(|_| AtlasMeta::default());
+
+        // Determine default theme path from hearts-ui manifest
+        let _ = DrawMenuBar(hwnd); }
+                        unsafe { let _ = InvalidateRect(Some(hwnd), None, true); }
+                    }
+                    REMOVED_ID => {
+                         }
+                        unsafe { let _ = InvalidateRect(Some(hwnd), None, true); }
+                    }
+                    ID_HELP_ABOUT => {
+                        let title = string_to_wide("About MD Hearts");
+                        let text = string_to_wide(&format!("{} ? {}", hearts_core::AppInfo::name(), hearts_core::AppInfo::version()));
+                        unsafe { let _ = windows::Win32::UI::WindowsAndMessaging::MessageBoxW(Some(hwnd), PCWSTR(text.as_ptr()), PCWSTR(title.as_ptr()), windows::Win32::UI::WindowsAndMessaging::MESSAGEBOX_STYLE(0)); }
+                    }
+                    _ => {
+                        // Theme selection range
+                        let _ = DrawMenuBar(hwnd); }
+                            unsafe { let _ = InvalidateRect(Some(hwnd), None, true); }
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        }WM_LBUTTONDOWN => {
+            let x = (lparam.0 & 0xFFFF) as i16 as i32;
+            let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+            if let Some(cell) = state_cell(hwnd) {
+                let mut state = cell.borrow_mut();
+                let size = client_size(hwnd);
+                let south_hand = state.controller.hand(PlayerPosition::South);
+                let rects = compute_south_hand_rects(size, south_hand.len());
+                let xf = x as f32; let yf = y as f32;
+                for (i, r) in rects.iter().enumerate() {
+                    if xf >= r.left && xf <= r.right && yf >= r.top && yf <= r.bottom {
+                        if state.controller.in_passing_phase() {
+                            if let Some(card) = south_hand.get(i).copied() {
+                                if let Some(pos) = state.passing_select.iter().position(|c| *c == card) {
+                                    state.passing_select.remove(pos);
+                                } else if state.passing_select.len() < 3 {
+                                    state.passing_select.push(card);
+                                }
+                                unsafe { let _ = InvalidateRect(Some(hwnd), None, true); }
+                            }
+                        } else {
+                            let legal = state.controller.legal_moves_set(PlayerPosition::South);
+                            if let Some(card) = south_hand.get(i).copied() {
+                                if legal.contains(&card) {
+                                    let _ = state.controller.play(PlayerPosition::South, card);
+                                    state.controller.autoplay_simple_until(PlayerPosition::South);
+                                    unsafe { let _ = InvalidateRect(Some(hwnd), None, true); }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_DESTROY => {
+            if let Some(ptr) = state_ptr(hwnd) {
+                unsafe {
+                    drop(Box::from_raw(ptr));
+                }
+            }
+            unsafe {
+                PostQuitMessage(0);
+            }
+            LRESULT(0)
+        }
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn state_ptr(hwnd: HWND) -> Option<*mut RefCell<AppState>> {
+    let ptr =
+        unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    if ptr == 0 {
+        None
+    } else {
+        Some(ptr as *mut RefCell<AppState>)
+    }
+}
+
+fn state_cell(hwnd: HWND) -> Option<&'static RefCell<AppState>> {
+    state_ptr(hwnd).map(|ptr| unsafe { &*ptr })
+}
+
+fn string_to_wide(value: &str) -> Vec<u16> {
+    OsStr::new(value).encode_wide().collect()
+}
+
+fn compute_north_hand_rects(size: D2D_SIZE_U, count: usize) -> Vec<D2D_RECT_F> {
+    let width = size.width as f32;
+    let height = size.height as f32;
+    let min_edge = width.min(height);
+    let card_w = (min_edge * 0.09).clamp(60.0, 120.0);
+    let card_h = card_w * 1.4;
+    let spacing = card_w * 0.4;
+    let total_w = card_w + spacing * (count.saturating_sub(1) as f32);
+    let left_start = (width - total_w) * 0.5;
+    let top = height * 0.06;
+    (0..count)
+        .map(|i| {
+            let left = left_start + (i as f32) * spacing;
+            D2D_RECT_F { left, top, right: left + card_w, bottom: top + card_h }
+        })
+        .collect()
+}
+
+fn compute_east_hand_rects(size: D2D_SIZE_U, count: usize) -> Vec<D2D_RECT_F> {
+    let width = size.width as f32;
+    let height = size.height as f32;
+    let min_edge = width.min(height);
+    let card_w = (min_edge * 0.09).clamp(60.0, 120.0);
+    let card_h = card_w * 1.4;
+    let spacing = card_h * 0.35;
+    let total_h = card_h + spacing * (count.saturating_sub(1) as f32);
+    let top_start = (height - total_h) * 0.5;
+    let left = width - card_w - width * 0.06;
+    (0..count)
+        .map(|i| {
+            let top = top_start + (i as f32) * spacing;
+            D2D_RECT_F { left, top, right: left + card_w, bottom: top + card_h }
+        })
+        .collect()
+}
+
+fn compute_west_hand_rects(size: D2D_SIZE_U, count: usize) -> Vec<D2D_RECT_F> {
+    let width = size.width as f32;
+    let height = size.height as f32;
+    let min_edge = width.min(height);
+    let card_w = (min_edge * 0.09).clamp(60.0, 120.0);
+    let card_h = card_w * 1.4;
+    let spacing = card_h * 0.35;
+    let total_h = card_h + spacing * (count.saturating_sub(1) as f32);
+    let top_start = (height - total_h) * 0.5;
+    let left = width * 0.06;
+    (0..count)
+        .map(|i| {
+            let top = top_start + (i as f32) * spacing;
+            D2D_RECT_F { left, top, right: left + card_w, bottom: top + card_h }
+        })
+        .collect()
+}
+
+
+fn client_rect(hwnd: HWND) -> RECT {
+    unsafe {
+        let mut rect = RECT::default();
+        let _ = GetClientRect(hwnd, &mut rect);
+        rect
+    }
+}
+
+fn client_size(hwnd: HWND) -> D2D_SIZE_U {
+    let rect = client_rect(hwnd);
+    let width = if rect.right > rect.left {
+        (rect.right - rect.left) as u32
+    } else {
+        0
+    };
+    let height = if rect.bottom > rect.top {
+        (rect.bottom - rect.top) as u32
+    } else {
+        0
+    };
+    D2D_SIZE_U { width, height }
+}
+
+
+
+
+
+
+
+
+
+
+
+fn card_label_wide(card: hearts_core::model::card::Card) -> Vec<u16> {
+    use hearts_core::model::rank::Rank;
+        let rank = match card.rank { Rank::Ten => "10".to_string(), _ => card.rank.to_string() };
+    let suit = card.suit.to_string();
+    let s = format!("{}{}", rank, suit);
+    string_to_wide(&s)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
