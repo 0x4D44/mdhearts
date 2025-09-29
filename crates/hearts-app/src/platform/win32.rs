@@ -82,8 +82,8 @@ pub fn run() -> Result<()> {
             WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            1024,
-            768,
+            1120,
+            860,
             None,
             None,
             Some(hinstance),
@@ -312,6 +312,8 @@ impl AppState {
             let felt = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 0.06, g: 0.22, b: 0.12, a: 1.0 }, None)?;
             let border = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 0.2, g: 0.5, b: 0.3, a: 1.0 }, None)?;
             let text_brush = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 0.95 }, None)?;
+            let sel_brush = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 1.0, g: 0.85, b: 0.2, a: 1.0 }, None)?;
+            let shadow = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.35 }, None)?;
             rt.FillRectangle(&table, &felt);
             rt.DrawRectangle(&table, &border, 2.0, None);
 
@@ -321,12 +323,30 @@ impl AppState {
             let atlas_bmp_opt = self.cards_bitmap.clone();
             let rects = compute_south_hand_rects(size, south_labels.len());
             for (i, rect) in rects.iter().enumerate() {
-                let rounded = D2D1_ROUNDED_RECT { rect: *rect, radiusX: 6.0, radiusY: 6.0 };
+                let selected = self.passing_select.iter().any(|c| Some(c) == south_hand.get(i));
+
+                // Raise selected cards during passing, but keep normal draw order
+                let mut draw_rect = *rect;
+                if selected && self.controller.in_passing_phase() {
+                    let h = rect.bottom - rect.top;
+                    let dy = h * 0.18; // modest lift within the hand band
+                    draw_rect.top -= dy;
+                    draw_rect.bottom -= dy;
+                }
+
+                // Subtle shadow for popped cards (will still layer under later cards)
+                if selected && self.controller.in_passing_phase() {
+                    let mut sh = draw_rect; sh.left += 2.0; sh.right += 2.0; sh.top += 4.0; sh.bottom += 4.0;
+                    let sh_r = D2D1_ROUNDED_RECT { rect: sh, radiusX: 6.0, radiusY: 6.0 };
+                    rt.FillRoundedRectangle(&sh_r, &shadow);
+                }
+
+                let rounded = D2D1_ROUNDED_RECT { rect: draw_rect, radiusX: 6.0, radiusY: 6.0 };
                 let mut drew_face = false;
                 if let Some(ref bmp) = atlas_bmp_opt {
                     if let Some(card) = south_hand.get(i).copied() {
                         if let Some(src) = self.atlas.src_rect_for(card) {
-                            rt.DrawBitmap(bmp, Some(rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                            rt.DrawBitmap(bmp, Some(&draw_rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
                             drew_face = true;
                         }
                     }
@@ -335,9 +355,8 @@ impl AppState {
                     let placeholder = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 0.93, g: 0.94, b: 0.98, a: 0.6 }, None)?;
                     rt.FillRoundedRectangle(&rounded, &placeholder);
                 }
-                let selected = self.passing_select.iter().any(|c| Some(c) == south_hand.get(i));
                 let legal = *south_legal.get(i).unwrap_or(&false);
-                let border_brush = if selected || legal { &border } else { &text_brush };
+                let border_brush = if selected && self.controller.in_passing_phase() { &sel_brush } else if legal { &border } else { &text_brush };
                 rt.DrawRoundedRectangle(&rounded, border_brush, 2.0, None);
             }
 
@@ -434,7 +453,7 @@ impl AppState {
 
             // On-screen hint for current action
             let hint = if self.collect.is_some() {
-                "Collecting trickâ€¦".to_string()
+                "Collecting trick…".to_string()
             } else if self.controller.in_passing_phase() {
                 format!("Passing: select 3 cards ({} selected) and press Enter", self.passing_select.len())
             } else {
@@ -443,10 +462,18 @@ impl AppState {
                     "Your turn: click a highlighted card".to_string()
                 } else {
                     let who = match turn { PlayerPosition::North => "North", PlayerPosition::East => "East", PlayerPosition::South => "South", PlayerPosition::West => "West" };
-                    format!("Waiting for {}…", who)
+                    format!("Waiting for {}...", who)
                 }
             };
-            let hint_rect = D2D_RECT_F { left: 0.0, top: size.height as f32 * 0.86, right: size.width as f32, bottom: size.height as f32 * 0.96 };
+            // Place hint below the South hand dynamically
+            let min_edge = (size.width as f32).min(size.height as f32);
+            let south_card_w = (min_edge * 0.14).clamp(80.0, 180.0);
+            let south_card_h = south_card_w * 1.4;
+            let south_top = size.height as f32 - south_card_h - (size.height as f32 * 0.06);
+            let south_bottom = south_top + south_card_h;
+            let hint_top = (south_bottom + size.height as f32 * 0.012).min(size.height as f32 * 0.97);
+            let hint_bottom = (hint_top + south_card_h * 0.20).min(size.height as f32 - 2.0);
+            let hint_rect = D2D_RECT_F { left: 0.0, top: hint_top, right: size.width as f32, bottom: hint_bottom };
             let hint_wide = string_to_wide(&hint);
             rt.DrawText(hint_wide.as_slice(), &self.text_format, &hint_rect, &text_brush, Default::default(), DWRITE_MEASURING_MODE::default());
 
@@ -539,7 +566,17 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                 let south_hand = state.controller.hand(PlayerPosition::South);
                 let rects = compute_south_hand_rects(size, south_hand.len());
                 let xf = x as f32; let yf = y as f32;
-                for (i, r) in rects.iter().enumerate() {
+                // Iterate right-to-left so the visually topmost card wins in overlaps
+                for i in (0..rects.len()).rev() {
+                    let mut r = rects[i];
+                    // During passing, selected cards are lifted; reflect that in hit testing
+                    if state.controller.in_passing_phase() {
+                        if let Some(card) = south_hand.get(i) {
+                            if state.passing_select.iter().any(|c| c == card) {
+                                let h = r.bottom - r.top; let dy = h * 0.18; r.top -= dy; r.bottom -= dy;
+                            }
+                        }
+                    }
                     if xf >= r.left && xf <= r.right && yf >= r.top && yf <= r.bottom {
                         if state.controller.in_passing_phase() {
                             if let Some(card) = south_hand.get(i).copied() {
@@ -552,7 +589,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                             if let Some(card) = south_hand.get(i).copied() {
                                 if legal.contains(&card) {
                                     debug_out("mdhearts: ", &format!("South plays {}", card));
-                                    let from = *r;
+                                    let from = r;
                                     let to = compute_trick_rect_for(size, PlayerPosition::South);
                                     let _ = state.controller.play(PlayerPosition::South, card);
                                     state.anim = Some(PlayAnim { seat: PlayerPosition::South, card, from, to, start: std::time::Instant::now(), dur_ms: 260 });
@@ -694,15 +731,27 @@ fn compute_east_hand_rects(size: D2D_SIZE_U, count: usize) -> Vec<D2D_RECT_F> {
     // AI backs smaller than player hand
     let card_w = (min_edge * 0.10).clamp(60.0, 120.0);
     let card_h = card_w * 1.4;
-    // After rotation, visual vertical height becomes card_w, so space by card_w
-    let spacing = card_w * 0.40;
-    let total_h = card_w + spacing * (count.saturating_sub(1) as f32);
-    let top_start = (height - total_h) * 0.5;
-    // Position so that the rotated width (card_h) stays inside a side margin
+    // Rotated 90°: rect width becomes original card_h, rect height becomes original card_w
+    let rect_w = card_h; // wider
+    let rect_h = card_w; // shorter
+    let spacing = rect_h * 0.40;
+    let total_h = rect_h + spacing * (count.saturating_sub(1) as f32);
+    // Keep the column clear of the South hand band
+    let south_card_w = (min_edge * 0.14).clamp(80.0, 180.0);
+    let south_card_h = south_card_w * 1.4;
+    let south_top = height - south_card_h - (height * 0.06);
+    let bottom_limit = (south_top - height * 0.015).max(0.0);
+    let top_limit = height * 0.10;
+    let centered = (height - total_h) * 0.5;
+    let top_start = centered.clamp(top_limit, (bottom_limit - total_h).max(top_limit));
     let margin = width * 0.06;
-    let cx = width - margin - card_h * 0.5;
-    let left = cx - card_w * 0.5;
-    (0..count).map(|i| { let top = top_start + (i as f32) * spacing; D2D_RECT_F { left, top, right: left + card_w, bottom: top + card_h } }).collect()
+    let left = width - margin - rect_w; // align to right margin
+    (0..count)
+        .map(|i| {
+            let top = top_start + (i as f32) * spacing;
+            D2D_RECT_F { left, top, right: left + rect_w, bottom: top + rect_h }
+        })
+        .collect()
 }
 
 fn compute_west_hand_rects(size: D2D_SIZE_U, count: usize) -> Vec<D2D_RECT_F> {
@@ -712,13 +761,25 @@ fn compute_west_hand_rects(size: D2D_SIZE_U, count: usize) -> Vec<D2D_RECT_F> {
     // AI backs smaller than player hand
     let card_w = (min_edge * 0.10).clamp(60.0, 120.0);
     let card_h = card_w * 1.4;
-    let spacing = card_w * 0.40;
-    let total_h = card_w + spacing * (count.saturating_sub(1) as f32);
-    let top_start = (height - total_h) * 0.5;
+    let rect_w = card_h;
+    let rect_h = card_w;
+    let spacing = rect_h * 0.40;
+    let total_h = rect_h + spacing * (count.saturating_sub(1) as f32);
+    let south_card_w = (min_edge * 0.14).clamp(80.0, 180.0);
+    let south_card_h = south_card_w * 1.4;
+    let south_top = height - south_card_h - (height * 0.06);
+    let bottom_limit = (south_top - height * 0.015).max(0.0);
+    let top_limit = height * 0.10;
+    let centered = (height - total_h) * 0.5;
+    let top_start = centered.clamp(top_limit, (bottom_limit - total_h).max(top_limit));
     let margin = width * 0.06;
-    let cx = margin + card_h * 0.5;
-    let left = cx - card_w * 0.5;
-    (0..count).map(|i| { let top = top_start + (i as f32) * spacing; D2D_RECT_F { left, top, right: left + card_w, bottom: top + card_h } }).collect()
+    let left = margin; // align to left margin
+    (0..count)
+        .map(|i| {
+            let top = top_start + (i as f32) * spacing;
+            D2D_RECT_F { left, top, right: left + rect_w, bottom: top + rect_h }
+        })
+        .collect()
 }
 
 fn compute_trick_rect_for(size: D2D_SIZE_U, seat: PlayerPosition) -> D2D_RECT_F {
