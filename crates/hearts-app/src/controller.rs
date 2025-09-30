@@ -96,6 +96,26 @@ impl GameController {
     pub fn standings(&self) -> [u32; 4] {
         *self.match_state.scores().standings()
     }
+
+    pub fn penalties_this_round(&self) -> [u8; 4] {
+        self.match_state.round_penalties()
+    }
+
+    pub fn tricks_won_this_round(&self) -> [u8; 4] {
+        let mut counts = [0u8; 4];
+        let round = self.match_state.round();
+        for trick in round.trick_history() {
+            if let Some(w) = trick.winner() {
+                let idx = w.index();
+                counts[idx] = counts[idx].saturating_add(1);
+            }
+        }
+        counts
+    }
+
+    pub fn passing_direction(&self) -> hearts_core::model::passing::PassingDirection {
+        self.match_state.passing_direction()
+    }
 }
 
 #[derive(Debug, Clone)]

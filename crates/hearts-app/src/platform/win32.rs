@@ -15,9 +15,9 @@ use windows::Win32::Graphics::Direct2D::{
     ID2D1Bitmap, ID2D1Factory, ID2D1HwndRenderTarget,
 };
 use windows::Win32::Graphics::DirectWrite::{
-    DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, DWRITE_FACTORY_TYPE_SHARED,
+    DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout, DWRITE_FACTORY_TYPE_SHARED,
     DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_MEASURING_MODE, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER,
+    DWRITE_MEASURING_MODE, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_METRICS,
 };
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, HBRUSH, PAINTSTRUCT};
 use windows::Win32::Graphics::Imaging::{
@@ -108,6 +108,7 @@ pub fn run() -> Result<()> {
 
 struct AppState {
     factory: ID2D1Factory,
+    dwrite: IDWriteFactory,
     text_format: IDWriteTextFormat,
     render_target: Option<ID2D1HwndRenderTarget>,
     controller: GameController,
@@ -119,6 +120,7 @@ struct AppState {
     card_back_bitmap_rot90: Option<ID2D1Bitmap>,
     anim: Option<PlayAnim>,
     collect: Option<CollectAnim>,
+    pass: Option<PassAnim>,
     rotate_sides: bool,
 }
 
@@ -137,6 +139,32 @@ struct CollectAnim {
     start: std::time::Instant,
     delay_ms: u64,
     dur_ms: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PassPhase { Outgoing, Pause, Incoming }
+
+struct PassSprite {
+    from: D2D_RECT_F,
+    to: D2D_RECT_F,
+    card: Option<ModelCard>,
+    delay_ms: u64,
+    jx: f32,
+    jy: f32,
+}
+
+struct PassAnim {
+    phase: PassPhase,
+    start: std::time::Instant,
+    from_seat: PlayerPosition,
+    // move our chosen 3 out (faces)
+    out: Vec<PassSprite>,
+    // then move 3 in to South (backs)
+    inn: Vec<PassSprite>,
+    // timings
+    out_dur_ms: u64,
+    pause_ms: u64,
+    in_dur_ms: u64,
 }
 
 impl AppState {
@@ -167,7 +195,7 @@ impl AppState {
         // Default ON now that rotation is fast; disable with MDH_ROTATE_SIDES=0 if desired
         let rotate_sides = std::env::var("MDH_ROTATE_SIDES").map(|v| v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true")).unwrap_or(true);
         debug_out("mdhearts: ", &format!("rotate_sides={} (env MDH_ROTATE_SIDES)", rotate_sides));
-        Ok(Self { factory, text_format, render_target: None, controller, passing_select: Vec::new(), wic, cards_bitmap: None, atlas, card_back_bitmap: None, card_back_bitmap_rot90: None, anim: None, collect: None, rotate_sides })
+        Ok(Self { factory, dwrite, text_format, render_target: None, controller, passing_select: Vec::new(), wic, cards_bitmap: None, atlas, card_back_bitmap: None, card_back_bitmap_rot90: None, anim: None, collect: None, pass: None, rotate_sides })
     }
 
     fn ensure_render_target(&mut self, hwnd: HWND) -> Result<()> {
@@ -346,7 +374,9 @@ impl AppState {
                 if let Some(ref bmp) = atlas_bmp_opt {
                     if let Some(card) = south_hand.get(i).copied() {
                         if let Some(src) = self.atlas.src_rect_for(card) {
-                            rt.DrawBitmap(bmp, Some(&draw_rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                            let dest = snap_rect(draw_rect);
+                            let src = inset_rect(src, 0.5, 0.5);
+                            rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src));
                             drew_face = true;
                         }
                     }
@@ -378,17 +408,20 @@ impl AppState {
             let back_fallback = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 0.15, g: 0.12, b: 0.25, a: 1.0 }, None)?;
             for rect in compute_north_hand_rects(size, north_count) {
                 let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
-                if let Some(bmp) = back { rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None); }
+                let dest = snap_rect(rect);
+                if let Some(bmp) = back { rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None); }
                 else { rt.FillRoundedRectangle(&rounded, &back_fallback); rt.DrawRoundedRectangle(&rounded, &border, 1.5, None); }
             }
             for rect in compute_east_hand_rects(size, east_count) {
                 let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
-                if let Some(bmp) = back_rot { rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None); }
+                let dest = snap_rect(rect);
+                if let Some(bmp) = back_rot { rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None); }
                 else { rt.FillRoundedRectangle(&rounded, &back_fallback); rt.DrawRoundedRectangle(&rounded, &border, 1.5, None); }
             }
             for rect in compute_west_hand_rects(size, west_count) {
                 let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
-                if let Some(bmp) = back_rot { rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None); }
+                let dest = snap_rect(rect);
+                if let Some(bmp) = back_rot { rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None); }
                 else { rt.FillRoundedRectangle(&rounded, &back_fallback); rt.DrawRoundedRectangle(&rounded, &border, 1.5, None); }
             }
 
@@ -406,9 +439,10 @@ impl AppState {
                 for (pos, card) in plays {
                     if let Some(anim) = &self.anim { if anim.seat == pos { continue; } }
                     if let Some(src) = self.atlas.src_rect_for(card) {
-                        let rect = compute_trick_rect_for(size, pos);
+                        let rect = snap_rect(compute_trick_rect_for(size, pos));
                         let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
-                        rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                        let src = inset_rect(src, 0.5, 0.5);
+                        rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src));
                         let hl = if Some(pos) == leading_so_far { &text_brush } else { &border };
                         rt.DrawRoundedRectangle(&rounded, hl, 2.0, None);
                     }
@@ -422,7 +456,8 @@ impl AppState {
                 let rect = lerp_rect(anim.from, anim.to, ease_out(u));
                 if let Some(src) = self.atlas.src_rect_for(anim.card) {
                     let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
-                    rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                    let src = inset_rect(src, 0.5, 0.5);
+                    rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src));
                     rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
                 }
                 if t >= anim.dur_ms { self.anim = None; }
@@ -433,7 +468,8 @@ impl AppState {
                 let elapsed = (std::time::Instant::now() - coll.start).as_millis() as u64;
                 let moving = elapsed.saturating_sub(coll.delay_ms);
                 let u = (moving as f32 / coll.dur_ms as f32).clamp(0.0, 1.0);
-                let to_rect = compute_collect_target_rect_for(size, &self.controller, coll.winner);
+                let base_to = compute_collect_target_rect_for(size, &self.controller, coll.winner);
+                let to_rect = match coll.winner { PlayerPosition::East | PlayerPosition::West => ensure_portrait_centered(base_to), _ => base_to };
                 for (seat, card) in &coll.cards {
                     if let Some(src) = self.atlas.src_rect_for(*card) {
                         let from_rect = compute_trick_rect_for(size, *seat);
@@ -446,13 +482,133 @@ impl AppState {
                 if elapsed >= coll.delay_ms + coll.dur_ms { self.collect = None; }
             }
 
-            // Status text
+            // Passing overlay: our 3 selected fly out, short pause, then 3 fly in (staggered, with mid‑flight reveal)
+            // Preload back bitmaps we may need to avoid nested &mut borrows
+            let (need_back, need_back_rot) = if let Some(p) = self.pass.as_ref() {
+                (matches!(p.phase, PassPhase::Incoming), matches!(p.phase, PassPhase::Incoming) && self.rotate_sides && (p.from_seat == PlayerPosition::East || p.from_seat == PlayerPosition::West))
+            } else { (false, false) };
+            if need_back { self.ensure_card_back_bitmap(&rt)?; }
+            if need_back_rot { let _ = self.ensure_card_back_bitmap_rot90(&rt); }
+            if let Some(pass) = &mut self.pass {
+                let now = std::time::Instant::now();
+                match pass.phase {
+                    PassPhase::Outgoing => {
+                        // Per-sprite stagger via delay_ms
+                        // Draw our selected faces flying out
+                        if let Some(bmp) = atlas_bmp_opt.as_ref() {
+                            for s in &pass.out {
+                                let elapsed = (now - pass.start).as_millis() as u64;
+                                let moved = elapsed.saturating_sub(s.delay_ms);
+                                let u = (moved as f32 / pass.out_dur_ms as f32).clamp(0.0, 1.0);
+                                if let Some(card) = s.card {
+                                    if let Some(src) = self.atlas.src_rect_for(card) {
+                                        if u <= 0.0 { continue; }
+                                        let mut rect = lerp_rect(s.from, s.to, ease_out(u));
+                                        rect.left += s.jx; rect.right += s.jx; rect.top += s.jy; rect.bottom += s.jy;
+                                        let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
+                                        let src = inset_rect(src, 0.5, 0.5);
+                                        rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                                        rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
+                                    }
+                                }
+                            }
+                        }
+                        // Advance when the last stagger finishes
+                        let max_delay = pass.out.iter().map(|s| s.delay_ms).max().unwrap_or(0);
+                        if (now - pass.start).as_millis() as u64 >= max_delay + pass.out_dur_ms {
+                            pass.phase = PassPhase::Pause;
+                            pass.start = now;
+                        }
+                    }
+                    PassPhase::Pause => {
+                        if (now - pass.start).as_millis() as u64 >= pass.pause_ms {
+                            pass.phase = PassPhase::Incoming;
+                            pass.start = now;
+                        }
+                    }
+                    PassPhase::Incoming => {
+                        // Choose back bitmap orientation based on source seat
+                        let back_bmp = if self.rotate_sides && (pass.from_seat == PlayerPosition::East || pass.from_seat == PlayerPosition::West) {
+                            self.card_back_bitmap_rot90.as_ref().or(self.card_back_bitmap.as_ref())
+                        } else { self.card_back_bitmap.as_ref() };
+
+                        // Reveal faces mid-flight (e.g. after 55% progress per sprite)
+                        let reveal_at = 0.55_f32;
+                        let mut max_delay = 0u64;
+                        for s in &pass.inn {
+                            let elapsed = (now - pass.start).as_millis() as u64;
+                            max_delay = max_delay.max(s.delay_ms);
+                            let moved = elapsed.saturating_sub(s.delay_ms);
+                            let u = (moved as f32 / pass.in_dur_ms as f32).clamp(0.0, 1.0);
+                            if u <= 0.0 { continue; }
+                            let mut rect = lerp_rect(s.from, s.to, ease_out(u));
+                            rect.left += s.jx; rect.right += s.jx; rect.top += s.jy; rect.bottom += s.jy;
+                            let rounded = D2D1_ROUNDED_RECT { rect, radiusX: 6.0, radiusY: 6.0 };
+                            if u < reveal_at || s.card.is_none() {
+                                if let Some(b) = back_bmp { rt.DrawBitmap(b, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None); }
+                                else { rt.FillRoundedRectangle(&rounded, &border); }
+                            } else {
+                                // Crossfade: back fades out while face fades in
+                                let t = ((u - reveal_at) / (1.0 - reveal_at)).clamp(0.0, 1.0);
+                                let back_alpha = 1.0 - t;
+                                if let Some(b) = back_bmp { rt.DrawBitmap(b, Some(&rect), back_alpha, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None); }
+                                if let (Some(bmp), Some(card)) = (atlas_bmp_opt.as_ref(), s.card) {
+                                    if let Some(src) = self.atlas.src_rect_for(card) {
+                                        let src = inset_rect(src, 0.5, 0.5);
+                                        rt.DrawBitmap(bmp, Some(&rect), t.max(0.2), windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                                    }
+                                }
+                            }
+                            rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
+                        }
+                        if (now - pass.start).as_millis() as u64 >= max_delay + pass.in_dur_ms {
+                            // Finalize passes in the model now that animation is done
+                            let _ = self.controller.resolve_passes();
+                            self.passing_select.clear();
+                            self.pass = None;
+                        }
+                    }
+                }
+            }
+
+            // Status text (full-width centered header)
             let status_rect = D2D_RECT_F { left: 0.0, top: size.height as f32 * 0.02, right: size.width as f32, bottom: size.height as f32 * 0.08 };
             let status_wide = string_to_wide(&status);
             rt.DrawText(status_wide.as_slice(), &self.text_format, &status_rect, &text_brush, Default::default(), DWRITE_MEASURING_MODE::default());
 
+            // Small HUD: scores, hand points, and tricks
+            let scores = self.controller.standings();
+            let hand = self.controller.penalties_this_round();
+            let tricks = self.controller.tricks_won_this_round();
+            let hud = format!(
+                "Scores  N:{} E:{} S:{} W:{}\nThis Hand N:{} E:{} S:{} W:{}\nTricks N:{} E:{} S:{} W:{}",
+                scores[PlayerPosition::North.index()], scores[PlayerPosition::East.index()], scores[PlayerPosition::South.index()], scores[PlayerPosition::West.index()],
+                hand[PlayerPosition::North.index()], hand[PlayerPosition::East.index()], hand[PlayerPosition::South.index()], hand[PlayerPosition::West.index()],
+                tricks[PlayerPosition::North.index()], tricks[PlayerPosition::East.index()], tricks[PlayerPosition::South.index()], tricks[PlayerPosition::West.index()],
+            );
+            let hud_wide = string_to_wide(&hud);
+            // Measure HUD text to size the background box correctly
+            let layout: IDWriteTextLayout = self.dwrite.CreateTextLayout(hud_wide.as_slice(), &self.text_format, size.width as f32, size.height as f32)?;
+            let mut met = DWRITE_TEXT_METRICS::default();
+            let _ = layout.GetMetrics(&mut met);
+            let min_edge = (size.width as f32).min(size.height as f32);
+            let margin = min_edge * 0.02; // equal top/right margins
+            let pad_x = 8.0_f32; let pad_y = 4.0_f32;
+            let hud_w = met.width.max(120.0) + pad_x * 2.0;
+            let hud_h = met.height.max(20.0) + pad_y * 2.0;
+            let right = size.width as f32 - margin;
+            let top = margin;
+            let rect = D2D_RECT_F { left: right - hud_w, top, right, bottom: top + hud_h };
+            let hud_bg = rt.CreateSolidColorBrush(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.35 }, None)?;
+            rt.FillRectangle(&rect, &hud_bg);
+            // Draw text inside with padding
+            let text_rect = D2D_RECT_F { left: rect.left + pad_x, top: rect.top + pad_y, right: rect.right - pad_x, bottom: rect.bottom - pad_y };
+            rt.DrawText(hud_wide.as_slice(), &self.text_format, &text_rect, &text_brush, Default::default(), DWRITE_MEASURING_MODE::default());
+
             // On-screen hint for current action
-            let hint = if self.collect.is_some() {
+            let hint = if self.pass.is_some() {
+                "Passing cards…".to_string()
+            } else if self.collect.is_some() {
                 "Collecting trick…".to_string()
             } else if self.controller.in_passing_phase() {
                 format!("Passing: select 3 cards ({} selected) and press Enter", self.passing_select.len())
@@ -541,14 +697,71 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                 } else if key == VK_ESCAPE {
                     if !state.passing_select.is_empty() { state.passing_select.clear(); unsafe { let _ = InvalidateRect(Some(hwnd), None, true); } }
                 } else if key == VK_RETURN {
-                    if state.controller.in_passing_phase() && state.passing_select.len() == 3 {
+                    if state.controller.in_passing_phase() && state.passing_select.len() == 3 && state.pass.is_none() {
+                        // Build pass animation: capture positions BEFORE removing cards from hand
+                        let size = client_size(hwnd);
+                        let south_before = state.controller.hand(PlayerPosition::South);
+                        let south_rects = compute_south_hand_rects(size, south_before.len());
+                        // Map selected cards to their current rects (fallback to center if not found)
+                        let mut out_sprites: Vec<PassSprite> = Vec::new();
+                        // Target seat to which South passes
+                        let dir = state.controller.passing_direction();
+                        let to_seat = dir.target(PlayerPosition::South);
+                        let base_to_rect = compute_collect_target_rect_for(size, &state.controller, to_seat);
+                        let to_rect = match to_seat { PlayerPosition::East | PlayerPosition::West => ensure_portrait_centered(base_to_rect), _ => base_to_rect };
+                        for (idx, card) in south_before.iter().enumerate() {
+                            if state.passing_select.iter().any(|c| c == card) {
+                                let mut dest = to_rect;
+                                // Slight fan so the three cards don't perfectly overlap
+                                let iout = out_sprites.len() as u32;
+                                let offset = (iout as f32 - 1.0) * 8.0;
+                                dest.left += offset; dest.right += offset; dest.top += offset * 0.2; dest.bottom += offset * 0.2;
+                                let delay = (iout as u64) * 60; // 0,60,120ms
+                                let jx = (iout as f32 - 1.0) * 1.2; let jy = (1.0 - (iout as f32 - 1.0).abs()) * 0.6;
+                                out_sprites.push(PassSprite { from: south_rects[idx], to: dest, card: Some(*card), delay_ms: delay, jx, jy });
+                            }
+                        }
+                        if out_sprites.len() != 3 {
+                            // In case ordering changed, just take first three at center
+                            let mut fallback = Vec::new();
+                            let center = compute_collect_target_rect_for(size, &state.controller, PlayerPosition::South);
+                            for (i, c) in state.passing_select.iter().take(3).enumerate() {
+                                let mut dest = to_rect; let off = (i as f32 - 1.0) * 8.0; dest.left += off; dest.right += off;
+                                let delay = (i as u64) * 60;
+                                let jx = (i as f32 - 1.0) * 1.2; let jy = (1.0 - (i as f32 - 1.0).abs()) * 0.6;
+                                fallback.push(PassSprite { from: center, to: dest, card: Some(*c), delay_ms: delay, jx, jy });
+                            }
+                            out_sprites = fallback;
+                        }
+
+                        // Determine the seat that passes to South
+                        let from_seat = PlayerPosition::LOOP
+                            .iter()
+                            .copied()
+                            .find(|&s| dir.target(s) == PlayerPosition::South)
+                            .unwrap_or(PlayerPosition::North);
+                        let from_rect = compute_collect_target_rect_for(size, &state.controller, from_seat);
+                        let to_rect_in = compute_collect_target_rect_for(size, &state.controller, PlayerPosition::South);
+                        let mut inn_sprites: Vec<PassSprite> = Vec::new();
+                        // Try to determine the exact incoming cards (what from_seat will pass)
+                        let incoming_cards = state.controller.simple_pass_for(from_seat);
+                        for i in 0..3 {
+                            let mut fr = from_rect; let mut tr = to_rect_in;
+                            let off = (i as f32 - 1.0) * 8.0;
+                            fr.left += off; fr.right += off; tr.left += off; tr.right += off;
+                            let delay = (i as u64) * 60; // stagger
+                            let face = incoming_cards.map(|arr| arr[i]);
+                            let jx = (i as f32 - 1.0) * 1.2; let jy = (1.0 - (i as f32 - 1.0).abs()) * 0.6;
+                            inn_sprites.push(PassSprite { from: fr, to: tr, card: face, delay_ms: delay, jx, jy });
+                        }
+
+                        // Commit South's pass and auto-passes for others, but delay resolving until animation ends
                         let cards = [state.passing_select[0], state.passing_select[1], state.passing_select[2]];
                         debug_out("mdhearts: ", &format!("Submitting pass: {}, {}, {}", cards[0], cards[1], cards[2]));
                         if state.controller.submit_pass(PlayerPosition::South, cards).is_ok() {
                             let _ = state.controller.submit_auto_passes_for_others(PlayerPosition::South);
-                            let _ = state.controller.resolve_passes();
-                            state.passing_select.clear();
-                            debug_out("mdhearts: ", &format!("Pass resolved. Leader now {:?}", state.controller.trick_leader()));
+                            state.pass = Some(PassAnim { phase: PassPhase::Outgoing, start: std::time::Instant::now(), from_seat, out: out_sprites, inn: inn_sprites, out_dur_ms: 320, pause_ms: 220, in_dur_ms: 320 });
+                            debug_out("mdhearts: ", "Pass animation scheduled");
                             unsafe { let _ = InvalidateRect(Some(hwnd), None, true); }
                         }
                     }
@@ -561,7 +774,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
             if let Some(cell) = state_cell(hwnd) {
                 let mut state = cell.borrow_mut();
-                if state.collect.is_some() || state.anim.is_some() { return LRESULT(0); }
+                if state.collect.is_some() || state.anim.is_some() || state.pass.is_some() { return LRESULT(0); }
                 let size = client_size(hwnd);
                 let south_hand = state.controller.hand(PlayerPosition::South);
                 let rects = compute_south_hand_rects(size, south_hand.len());
@@ -861,6 +1074,18 @@ fn compute_collect_target_rect_for(
     }
 }
 
+// Ensure we preserve portrait aspect (width < height) by swapping w/h around the same center.
+fn ensure_portrait_centered(r: D2D_RECT_F) -> D2D_RECT_F {
+    let cx = 0.5 * (r.left + r.right);
+    let cy = 0.5 * (r.top + r.bottom);
+    let w = (r.right - r.left).abs();
+    let h = (r.bottom - r.top).abs();
+    if h >= w { return r; }
+    let pw = h; // portrait width should be previous height
+    let ph = w; // portrait height should be previous width
+    D2D_RECT_F { left: cx - pw * 0.5, top: cy - ph * 0.5, right: cx + pw * 0.5, bottom: cy + ph * 0.5 }
+}
+
 fn current_trick_leader_so_far(plays: &[(PlayerPosition, ModelCard)]) -> Option<PlayerPosition> {
     if plays.is_empty() { return None; }
     let lead_suit = plays.first().map(|(_, c)| c.suit)?;
@@ -876,6 +1101,14 @@ fn lerp_rect(a: D2D_RECT_F, b: D2D_RECT_F, t: f32) -> D2D_RECT_F {
     D2D_RECT_F { left: lerp(a.left, b.left, t), top: lerp(a.top, b.top, t), right: lerp(a.right, b.right, t), bottom: lerp(a.bottom, b.bottom, t) }
 }
 fn ease_out(t: f32) -> f32 { 1.0 - (1.0 - t) * (1.0 - t) }
+
+fn snap(v: f32) -> f32 { v.round() }
+fn snap_rect(r: D2D_RECT_F) -> D2D_RECT_F {
+    D2D_RECT_F { left: snap(r.left), top: snap(r.top), right: snap(r.right), bottom: snap(r.bottom) }
+}
+fn inset_rect(r: D2D_RECT_F, dx: f32, dy: f32) -> D2D_RECT_F {
+    D2D_RECT_F { left: r.left + dx, top: r.top + dy, right: r.right - dx, bottom: r.bottom - dy }
+}
 
 #[derive(Default, serde::Deserialize, Clone, Debug)]
 struct AtlasMeta {
