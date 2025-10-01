@@ -130,10 +130,10 @@ impl MatchState {
 mod tests {
     use super::MatchState;
     use crate::model::card::Card;
-    use crate::model::rank::Rank;
-    use crate::model::suit::Suit;
     use crate::model::passing::PassingDirection;
     use crate::model::player::PlayerPosition;
+    use crate::model::rank::Rank;
+    use crate::model::suit::Suit;
 
     #[test]
     fn new_match_starts_with_left_pass() {
@@ -188,8 +188,4 @@ mod tests {
         assert_eq!(round.starting_player(), expected);
         assert_eq!(round.current_trick().leader(), expected);
     }
-
 }
-
-
-

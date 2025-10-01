@@ -12,9 +12,24 @@ pub struct GameController {
 
 impl GameController {
     fn dbg(msg: &str) {
+        fn debug_enabled() -> bool {
+            static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *ON.get_or_init(|| {
+                std::env::var("MDH_DEBUG_LOGS")
+                    .map(|v| {
+                        v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")
+                    })
+                    .unwrap_or(false)
+            })
+        }
+        if !debug_enabled() {
+            return;
+        }
         let mut wide: Vec<u16> = msg.encode_utf16().collect();
         wide.push(0);
-        unsafe { OutputDebugStringW(PCWSTR(wide.as_ptr())); }
+        unsafe {
+            OutputDebugStringW(PCWSTR(wide.as_ptr()));
+        }
     }
     pub fn new_with_seed(seed: Option<u64>, starting: PlayerPosition) -> Self {
         let match_state = if let Some(s) = seed {
@@ -22,7 +37,10 @@ impl GameController {
         } else {
             MatchState::new(starting)
         };
-        Self { match_state, last_trick: None }
+        Self {
+            match_state,
+            last_trick: None,
+        }
     }
 
     pub fn status_text(&self) -> String {
@@ -148,7 +166,9 @@ impl GameController {
             return None;
         }
         let seat = self.expected_to_play();
-        if seat == stop_seat { return None; }
+        if seat == stop_seat {
+            return None;
+        }
         let legal = self.legal_moves(seat);
         if let Some(card) = legal.first().copied() {
             Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
@@ -160,7 +180,12 @@ impl GameController {
     }
 
     pub fn hand(&self, seat: PlayerPosition) -> Vec<Card> {
-        self.match_state.round().hand(seat).iter().copied().collect()
+        self.match_state
+            .round()
+            .hand(seat)
+            .iter()
+            .copied()
+            .collect()
     }
 
     pub fn legal_moves_set(&self, seat: PlayerPosition) -> std::collections::HashSet<Card> {
@@ -173,8 +198,7 @@ impl GameController {
     }
 
     pub fn trick_plays(&self) -> Vec<(PlayerPosition, Card)> {
-        self
-            .match_state
+        self.match_state
             .round()
             .current_trick()
             .plays()
@@ -212,12 +236,8 @@ impl GameController {
         let round_num = self.match_state.round_number();
         let passing = self.match_state.passing_direction();
         let starting = self.match_state.round().starting_player();
-        self.match_state = MatchState::with_seed_round_direction(
-            seed,
-            round_num,
-            passing,
-            starting,
-        );
+        self.match_state =
+            MatchState::with_seed_round_direction(seed, round_num, passing, starting);
     }
 
     pub fn finish_round_if_ready(&mut self) {
@@ -226,4 +246,3 @@ impl GameController {
         }
     }
 }
-

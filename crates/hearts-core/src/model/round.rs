@@ -201,7 +201,10 @@ impl RoundState {
             .map(|p| p.position.next())
             .unwrap_or(self.current_trick.leader());
         if expected != seat {
-            return Err(PlayError::OutOfTurn { expected, actual: seat });
+            return Err(PlayError::OutOfTurn {
+                expected,
+                actual: seat,
+            });
         }
 
         let lead_suit = self.current_trick.lead_suit();
@@ -266,14 +269,20 @@ impl RoundState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayOutcome {
     Played,
-    TrickCompleted { winner: PlayerPosition, penalties: u8 },
+    TrickCompleted {
+        winner: PlayerPosition,
+        penalties: u8,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayError {
     NotInPlayPhase,
     CardNotInHand(Card),
-    OutOfTurn { expected: PlayerPosition, actual: PlayerPosition },
+    OutOfTurn {
+        expected: PlayerPosition,
+        actual: PlayerPosition,
+    },
     MustLeadTwoOfClubs,
     MustFollowSuit(Suit),
     HeartsNotBroken,
@@ -399,7 +408,10 @@ mod tests {
         let mut round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Hold);
         let wrong = {
             let hand = round.hand(PlayerPosition::North);
-            hand.iter().copied().find(|&c| c != Card::new(Rank::Two, Suit::Clubs)).unwrap()
+            hand.iter()
+                .copied()
+                .find(|&c| c != Card::new(Rank::Two, Suit::Clubs))
+                .unwrap()
         };
         assert!(matches!(
             round.play_card(PlayerPosition::North, wrong),
@@ -462,4 +474,3 @@ mod tests {
         }
     }
 }
-

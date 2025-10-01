@@ -2,8 +2,8 @@
 #![deny(warnings)]
 
 mod cli;
-mod platform;
 mod controller;
+mod platform;
 
 fn main() -> windows::core::Result<()> {
     match cli::run_cli() {

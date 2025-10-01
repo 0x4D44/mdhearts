@@ -243,7 +243,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn cannot_submit_duplicate_cards() {
         let mut state = PassingState::new(PassingDirection::Left);
@@ -259,11 +258,7 @@ mod tests {
         ];
 
         assert!(matches!(
-            state.submit(
-                PlayerPosition::North,
-                duplicate,
-                &mut hand,
-            ),
+            state.submit(PlayerPosition::North, duplicate, &mut hand,),
             Err(PassingError::CardNotInHand(_))
         ));
     }
@@ -287,6 +282,3 @@ mod tests {
         assert_eq!(PassingDirection::from_str("unknown"), None);
     }
 }
-
-
-

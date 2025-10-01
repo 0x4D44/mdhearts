@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "hearts-app"
 version = "0.1.0"
 edition = "2024"
@@ -11,11 +11,17 @@ hearts-core = { path = "../hearts-core" }
 hearts-ui = { path = "../hearts-ui" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-windows = { version = "0.62.1", features = [
+windows = { version = "0.62.1", default-features = false, features = [
     "Win32_Foundation",
     "Win32_System_Com",
+    "Win32_System_Com_Marshal",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Direct2D",
@@ -29,6 +35,10 @@ windows = { version = "0.62.1", features = [
 [[bin]]
 name = "mdhearts"
 path = "src/main.rs"
+
+[build-dependencies]
+time = { version = "0.3", features = ["formatting", "macros"] }
+embed-resource = "2"
 
 
 

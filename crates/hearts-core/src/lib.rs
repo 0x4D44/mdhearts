@@ -29,4 +29,3 @@ mod tests {
         assert!(!AppInfo::version().is_empty());
     }
 }
-
