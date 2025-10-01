@@ -1,7 +1,9 @@
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
+use hearts_core::model::rank::Rank;
 use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase};
+use hearts_core::model::suit::Suit;
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::core::PCWSTR;
 
@@ -169,8 +171,22 @@ impl GameController {
         if seat == stop_seat {
             return None;
         }
+        let enforce_two = {
+            let round = self.match_state.round();
+            round.is_first_trick() && round.current_trick().leader() == seat
+        };
         let legal = self.legal_moves(seat);
-        if let Some(card) = legal.first().copied() {
+        let card_to_play = if enforce_two {
+            let two = Card::new(Rank::Two, Suit::Clubs);
+            if legal.contains(&two) {
+                Some(two)
+            } else {
+                legal.first().copied()
+            }
+        } else {
+            legal.first().copied()
+        };
+        if let Some(card) = card_to_play {
             Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
             let _ = self.play(seat, card);
             Some((seat, card))
@@ -178,7 +194,6 @@ impl GameController {
             None
         }
     }
-
     pub fn hand(&self, seat: PlayerPosition) -> Vec<Card> {
         self.match_state
             .round()

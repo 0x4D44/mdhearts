@@ -44,16 +44,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY, GWLP_USERDATA, GetClientRect,
     GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, HACCEL,
-    HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow, LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK,
-    MF_POPUP, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage,
-    RegisterClassExW, SM_CXSCREEN, SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED,
-    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    SetForegroundWindow, SetMenu, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
-    SetWindowTextW, ShowWindow, SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage,
-    WINDOW_EX_STYLE, WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED,
-    WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
-    WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW,
-    WaitMessage,
+    HMENU, IDC_ARROW, IDI_APPLICATION, IDNO, IDYES, IsWindow, LoadCursorW, LoadIconW,
+    MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK, MB_YESNOCANCEL, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    MSG, MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SM_CXSCREEN,
+    SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
+    SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
+    SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
+    SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
+    WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+    WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE, WM_TIMER, WNDCLASSEXW,
+    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WaitMessage,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -66,6 +66,7 @@ const VK_ESCAPE: u32 = 0x1B;
 const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
 const ID_GAME_EXIT: u32 = 1003;
+const ID_OPTIONS_CARD_BACK: u32 = 1201;
 const ID_HELP_ABOUT: u32 = 1301;
 const ID_HELP_RULES: u32 = 1302;
 const IDI_APPICON: u16 = 501;
@@ -74,8 +75,95 @@ const ABOUT_HEADER_PT: f32 = 28.0;
 const ABOUT_BODY_PT: f32 = 16.0;
 const REG_SUBKEY_APP: &str = "Software\\0x4D44\\MDHearts";
 const REG_VALUE_WINDOW_PLACEMENT: &str = "WindowPlacement";
+const REG_VALUE_CARD_BACK: &str = "CardBack";
 const MIN_WINDOW_WIDTH: i32 = 720;
 const MIN_WINDOW_HEIGHT: i32 = 540;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CardBackId {
+    Classic,
+    RedWeave,
+    BlueWeave,
+    GreyCross,
+}
+impl CardBackId {
+    const fn as_u32(self) -> u32 {
+        match self {
+            CardBackId::Classic => 0,
+            CardBackId::RedWeave => 1,
+            CardBackId::BlueWeave => 2,
+            CardBackId::GreyCross => 3,
+        }
+    }
+
+    fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(CardBackId::Classic),
+            1 => Some(CardBackId::RedWeave),
+            2 => Some(CardBackId::BlueWeave),
+            3 => Some(CardBackId::GreyCross),
+            _ => None,
+        }
+    }
+}
+
+struct CardBackChoice {
+    id: CardBackId,
+    name: &'static str,
+    description: &'static str,
+    credit: &'static str,
+    png: &'static [u8],
+    preview_color: [f32; 4],
+}
+
+const CARD_BACK_CHOICES: &[CardBackChoice; 4] = &[
+    CardBackChoice {
+        id: CardBackId::Classic,
+        name: "Classic",
+        description: "Original MD Hearts back.",
+        credit: "MD Hearts",
+        png: include_bytes!("../../../../assets/card_back.png"),
+        preview_color: [0.8, 0.1, 0.1, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::RedWeave,
+        name: "Red Weave",
+        description: "OpenGameArt Cards Pack (CC0).",
+        credit: "Kenney.nl",
+        png: include_bytes!("../../../../assets/card_back_red.png"),
+        preview_color: [0.85, 0.12, 0.12, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::BlueWeave,
+        name: "Blue Weave",
+        description: "OpenGameArt Cards Pack (CC0).",
+        credit: "Kenney.nl",
+        png: include_bytes!("../../../../assets/card_back_blue.png"),
+        preview_color: [0.15, 0.25, 0.6, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::GreyCross,
+        name: "Grey Cross",
+        description: "OpenGameArt Cards Pack (CC0).",
+        credit: "Kenney.nl",
+        png: include_bytes!("../../../../assets/card_back_grey.png"),
+        preview_color: [0.4, 0.4, 0.45, 1.0],
+    },
+];
+
+fn card_back_choice(id: CardBackId) -> &'static CardBackChoice {
+    CARD_BACK_CHOICES
+        .iter()
+        .find(|c| c.id == id)
+        .expect("card back choice")
+}
+
+fn card_back_choice_index(id: CardBackId) -> usize {
+    CARD_BACK_CHOICES
+        .iter()
+        .position(|c| c.id == id)
+        .expect("card back choice index")
+}
 
 const fn make_int_resource(id: u16) -> PCWSTR {
     PCWSTR(id as usize as *const u16)
@@ -181,6 +269,7 @@ struct AppState {
     wic: IWICImagingFactory,
     cards_bitmap: Option<ID2D1Bitmap>,
     atlas: AtlasMeta,
+    card_back: CardBackId,
     card_back_bitmap: Option<ID2D1Bitmap>,
     card_back_bitmap_rot90: Option<ID2D1Bitmap>,
     anim: Option<PlayAnim>,
@@ -327,6 +416,7 @@ impl AppState {
             wic,
             cards_bitmap: None,
             atlas,
+            card_back: CardBackId::Classic,
             card_back_bitmap: None,
             card_back_bitmap_rot90: None,
             anim: None,
@@ -336,6 +426,9 @@ impl AppState {
             rotate_sides,
             dpi: DpiScale::uniform(initial_dpi),
         };
+        if let Some(saved) = load_card_back() {
+            this.card_back = saved;
+        }
         this.apply_text_dpi();
         Ok(this)
     }
@@ -368,6 +461,18 @@ impl AppState {
             Err(err) => {
                 debug_out("mdhearts: ", &format!("CreateTextFormat failed: {err:?}"));
             }
+        }
+    }
+
+    fn card_back_choice(&self) -> &'static CardBackChoice {
+        card_back_choice(self.card_back)
+    }
+
+    fn set_card_back(&mut self, id: CardBackId) {
+        if self.card_back != id {
+            self.card_back = id;
+            self.card_back_bitmap = None;
+            self.card_back_bitmap_rot90 = None;
         }
     }
 
@@ -620,10 +725,10 @@ impl AppState {
             return Ok(());
         }
         debug_out("mdhearts: ", "ensure_card_back_bitmap begin");
-        const BACK_PNG: &[u8] = include_bytes!("../../../../assets/card_back.png");
+        let info = self.card_back_choice();
         let stream: IWICStream = unsafe { self.wic.CreateStream()? };
         unsafe {
-            stream.InitializeFromMemory(BACK_PNG)?;
+            stream.InitializeFromMemory(info.png)?;
             let decoder = self.wic.CreateDecoderFromStream(
                 &stream,
                 std::ptr::null(),
@@ -654,11 +759,11 @@ impl AppState {
             "mdhearts: ",
             "ensure_card_back_bitmap_rot90 begin (CPU rotate)",
         );
-        const BACK_PNG: &[u8] = include_bytes!("../../../../assets/card_back.png");
+        let info = self.card_back_choice();
         let stream: IWICStream = unsafe { self.wic.CreateStream()? };
         unsafe {
             // Decode to 32bpp premultiplied BGRA
-            stream.InitializeFromMemory(BACK_PNG)?;
+            stream.InitializeFromMemory(info.png)?;
             let decoder = self.wic.CreateDecoderFromStream(
                 &stream,
                 std::ptr::null(),
@@ -1227,7 +1332,9 @@ impl AppState {
             let hand = self.controller.penalties_this_round();
             let tricks = self.controller.tricks_won_this_round();
             let hud = format!(
-                "Scores  N:{} E:{} S:{} W:{}\nThis Hand N:{} E:{} S:{} W:{}\nTricks N:{} E:{} S:{} W:{}",
+                "Scores  N:{} E:{} S:{} W:{}
+This Hand N:{} E:{} S:{} W:{}
+Tricks N:{} E:{} S:{} W:{}",
                 scores[PlayerPosition::North.index()],
                 scores[PlayerPosition::East.index()],
                 scores[PlayerPosition::South.index()],
@@ -1383,6 +1490,14 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             MF_STRING,
             ID_GAME_RESTART as usize,
             w!("&Restart Round\tF5"),
+        )
+    };
+    let _ = unsafe {
+        AppendMenuW(
+            game,
+            MF_STRING,
+            ID_OPTIONS_CARD_BACK as usize,
+            w!("&Card Back..."),
         )
     };
     let _ = unsafe { AppendMenuW(game, MF_SEPARATOR, 0, None) };
@@ -1685,6 +1800,7 @@ unsafe extern "system" fn window_proc(
         }
         WM_COMMAND => {
             let id = (wparam.0 & 0xFFFF) as u32;
+            let mut show_card_back = false;
             let mut show_about = false;
             let mut show_rules = false;
             if let Some(cell) = state_cell(hwnd) {
@@ -1705,6 +1821,9 @@ unsafe extern "system" fn window_proc(
                         }
                     }
                     ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
+                    ID_OPTIONS_CARD_BACK => {
+                        show_card_back = true;
+                    }
                     ID_HELP_RULES => {
                         show_rules = true;
                     }
@@ -1712,6 +1831,11 @@ unsafe extern "system" fn window_proc(
                         show_about = true;
                     }
                     _ => {}
+                }
+            }
+            if show_card_back {
+                if let Err(err) = show_card_back_dialog(hwnd) {
+                    debug_out("mdhearts: ", &format!("Card back dialog error: {:?}", err));
                 }
             }
             if show_rules {
@@ -1769,7 +1893,11 @@ fn debug_out(prefix: &str, msg: &str) {
     if !debug_enabled() {
         return;
     }
-    let full = format!("{}{}\n", prefix, msg);
+    let full = format!(
+        "{}{}
+",
+        prefix, msg
+    );
     let mut w = string_to_wide(&full);
     w.push(0);
     unsafe {
@@ -1777,8 +1905,77 @@ fn debug_out(prefix: &str, msg: &str) {
     }
 }
 
+fn show_card_back_dialog(owner: HWND) -> Result<()> {
+    let current = match state_cell(owner) {
+        Some(cell) => cell.borrow().card_back,
+        None => return Ok(()),
+    };
+
+    let len = CARD_BACK_CHOICES.len();
+    if len == 0 {
+        return Ok(());
+    }
+
+    let mut index = card_back_choice_index(current);
+    let mut selected: Option<CardBackId> = None;
+
+    loop {
+        let choice = &CARD_BACK_CHOICES[index];
+        let [r, g, b, _] = choice.preview_color;
+        let to_byte = |v: f32| -> u8 { (v.max(0.0).min(1.0) * 255.0).round() as u8 };
+        let color_hint = format!("#{:02X}{:02X}{:02X}", to_byte(r), to_byte(g), to_byte(b));
+        let message = format!(
+            "{0}\n{1}\n{2}\nColor hint: {3}\n\nSelect this card back?\n\nYes = apply\nNo = view next option\nCancel = leave unchanged",
+            choice.name, choice.description, choice.credit, color_hint
+        );
+        let body = string_to_wide_z(&message);
+        let title = string_to_wide_z("Card Back Options");
+        let response = unsafe {
+            MessageBoxW(
+                Some(owner),
+                PCWSTR(body.as_ptr()),
+                PCWSTR(title.as_ptr()),
+                MB_YESNOCANCEL | MB_ICONQUESTION,
+            )
+        };
+        match response.0 {
+            x if x == IDYES.0 => {
+                selected = Some(choice.id);
+                break;
+            }
+            x if x == IDNO.0 => {
+                index = (index + 1) % len;
+            }
+            _ => break,
+        }
+    }
+
+    if let Some(id) = selected {
+        if let Some(cell) = state_cell(owner) {
+            let mut state = cell.borrow_mut();
+            state.set_card_back(id);
+            save_card_back(id);
+            unsafe {
+                let _ = InvalidateRect(Some(owner), None, true);
+            }
+        }
+    }
+
+    Ok(())
+}
 fn show_rules_dialog(owner: HWND) {
-    let text = "Hearts is played to avoid taking penalty cards.\r\n\r\nBasics:\r\n- Pass three cards at the start of each hand (Left, Right, Across, Hold rotation).\r\n- The player holding the Two of Clubs must lead the first trick with that card.\r\n- Players must follow suit when able; otherwise they may discard any card.\r\n- No Hearts or the Queen of Spades may be led until Hearts are broken (a Heart or the Queen of Spades is discarded).\r\n- Each Heart scores 1 point; the Queen of Spades scores 13 points.\r\n- Capturing all penalty cards (26 points) shoots the moon: everyone else gains 26 points or your own score drops by 26, depending on your house rule.\r\n- The hand ends after 13 tricks; when a score reaches 100 the match ends and the lowest total wins.\r\n\r\nTip: Watch the status bar for passing direction and the current trick leader.";
+    let text = "Hearts is played to avoid taking penalty cards.\r
+\r
+Basics:\r
+- Pass three cards at the start of each hand (Left, Right, Across, Hold rotation).\r
+- The player holding the Two of Clubs must lead the first trick with that card.\r
+- Players must follow suit when able; otherwise they may discard any card.\r
+- No Hearts or the Queen of Spades may be led until Hearts are broken (a Heart or the Queen of Spades is discarded).\r
+- Each Heart scores 1 point; the Queen of Spades scores 13 points.\r
+- Capturing all penalty cards (26 points) shoots the moon: everyone else gains 26 points or your own score drops by 26, depending on your house rule.\r
+- The hand ends after 13 tricks; when a score reaches 100 the match ends and the lowest total wins.\r
+\r
+Tip: Watch the status bar for passing direction and the current trick leader.";
     let body = string_to_wide_z(text);
     unsafe {
         MessageBoxW(
@@ -2318,7 +2515,15 @@ impl AboutDialogState {
             );
 
             let body_text = format!(
-                "Build {build}\nA handcrafted take on the classic card game Hearts.\n\nTips\n\u{2022} Left click highlighted cards to play\n\u{2022} Press Enter or click the table to confirm passes\n\u{2022} Debug logs: MDH_DEBUG_LOGS=1\n\nBuilt with Rust, Direct2D, and plenty of card shuffling.",
+                "Build {build}
+A handcrafted take on the classic card game Hearts.
+
+Tips
+\u{2022} Left click highlighted cards to play
+\u{2022} Press Enter or click the table to confirm passes
+\u{2022} Debug logs: MDH_DEBUG_LOGS=1
+
+Built with Rust, Direct2D, and plenty of card shuffling.",
                 build = self.build_date,
             );
             let body = string_to_wide(&body_text);
@@ -2519,6 +2724,66 @@ fn center_window(owner: HWND, hwnd: HWND) {
             ((screen_w - width) / 2, (screen_h - height) / 2)
         };
         let _ = SetWindowPos(hwnd, None, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+    }
+}
+
+fn save_card_back(id: CardBackId) {
+    unsafe {
+        let key_path = string_to_wide_z(REG_SUBKEY_APP);
+        let mut hkey = HKEY::default();
+        if RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key_path.as_ptr()),
+            Some(0),
+            None,
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE | KEY_QUERY_VALUE,
+            None,
+            &mut hkey,
+            None,
+        )
+        .is_err()
+        {
+            return;
+        }
+        let value_name = string_to_wide_z(REG_VALUE_CARD_BACK);
+        let raw = id.as_u32();
+        let data = std::slice::from_raw_parts(
+            (&raw as *const u32) as *const u8,
+            std::mem::size_of::<u32>(),
+        );
+        let _ = RegSetValueExW(
+            hkey,
+            PCWSTR(value_name.as_ptr()),
+            Some(0),
+            REG_BINARY,
+            Some(data),
+        );
+        let _ = RegCloseKey(hkey);
+    }
+}
+
+fn load_card_back() -> Option<CardBackId> {
+    unsafe {
+        let subkey = string_to_wide_z(REG_SUBKEY_APP);
+        let value = string_to_wide_z(REG_VALUE_CARD_BACK);
+        let mut raw: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_BINARY,
+            None,
+            Some((&mut raw as *mut u32).cast()),
+            Some(&mut size),
+        )
+        .is_err()
+            || size < std::mem::size_of::<u32>() as u32
+        {
+            return None;
+        }
+        CardBackId::from_u32(raw)
     }
 }
 
