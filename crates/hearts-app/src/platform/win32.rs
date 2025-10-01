@@ -44,15 +44,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
     DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY, GWLP_USERDATA, GetClientRect,
     GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, HACCEL,
-    HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow, LoadCursorW, LoadIconW, MF_POPUP, MF_SEPARATOR,
-    MF_STRING, MSG, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SM_CXSCREEN,
-    SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
-    SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
-    SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE, WM_TIMER, WNDCLASSEXW,
-    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WaitMessage,
+    HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow, LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK,
+    MF_POPUP, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage,
+    RegisterClassExW, SM_CXSCREEN, SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED,
+    SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    SetForegroundWindow, SetMenu, SetWindowLongPtrW, SetWindowPlacement, SetWindowPos,
+    SetWindowTextW, ShowWindow, SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
+    WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW,
+    WaitMessage,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -66,6 +67,7 @@ const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
 const ID_GAME_EXIT: u32 = 1003;
 const ID_HELP_ABOUT: u32 = 1301;
+const ID_HELP_RULES: u32 = 1302;
 const IDI_APPICON: u16 = 501;
 const MAIN_TEXT_PT: f32 = 18.0;
 const ABOUT_HEADER_PT: f32 = 28.0;
@@ -1388,6 +1390,7 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
     let _ = unsafe { AppendMenuW(hmenu, MF_POPUP, game.0 as usize, w!("&Game")) };
 
     let help = unsafe { CreatePopupMenu().expect("help") };
+    let _ = unsafe { AppendMenuW(help, MF_STRING, ID_HELP_RULES as usize, w!("&Rules...")) };
     let _ = unsafe {
         AppendMenuW(
             help,
@@ -1683,6 +1686,7 @@ unsafe extern "system" fn window_proc(
         WM_COMMAND => {
             let id = (wparam.0 & 0xFFFF) as u32;
             let mut show_about = false;
+            let mut show_rules = false;
             if let Some(cell) = state_cell(hwnd) {
                 let mut state = cell.borrow_mut();
                 match id {
@@ -1701,11 +1705,17 @@ unsafe extern "system" fn window_proc(
                         }
                     }
                     ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
+                    ID_HELP_RULES => {
+                        show_rules = true;
+                    }
                     ID_HELP_ABOUT => {
                         show_about = true;
                     }
                     _ => {}
                 }
+            }
+            if show_rules {
+                show_rules_dialog(hwnd);
             }
             if show_about {
                 show_about_dialog(hwnd);
@@ -1764,6 +1774,19 @@ fn debug_out(prefix: &str, msg: &str) {
     w.push(0);
     unsafe {
         OutputDebugStringW(PCWSTR(w.as_ptr()));
+    }
+}
+
+fn show_rules_dialog(owner: HWND) {
+    let text = "Hearts is played to avoid taking penalty cards.\r\n\r\nBasics:\r\n- Pass three cards at the start of each hand (Left, Right, Across, Hold rotation).\r\n- The player holding the Two of Clubs must lead the first trick with that card.\r\n- Players must follow suit when able; otherwise they may discard any card.\r\n- No Hearts or the Queen of Spades may be led until Hearts are broken (a Heart or the Queen of Spades is discarded).\r\n- Each Heart scores 1 point; the Queen of Spades scores 13 points.\r\n- Capturing all penalty cards (26 points) shoots the moon: everyone else gains 26 points or your own score drops by 26, depending on your house rule.\r\n- The hand ends after 13 tricks; when a score reaches 100 the match ends and the lowest total wins.\r\n\r\nTip: Watch the status bar for passing direction and the current trick leader.";
+    let body = string_to_wide_z(text);
+    unsafe {
+        MessageBoxW(
+            Some(owner),
+            PCWSTR(body.as_ptr()),
+            w!("Hearts Rules"),
+            MB_OK | MB_ICONINFORMATION,
+        );
     }
 }
 
