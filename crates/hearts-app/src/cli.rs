@@ -1,7 +1,6 @@
-﻿use hearts_core::game::match_state::MatchState;
+use hearts_core::game::match_state::MatchState;
 use hearts_core::game::serialization::MatchSnapshot;
 use hearts_core::model::player::PlayerPosition;
-use serde_json;
 use std::fs;
 use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;

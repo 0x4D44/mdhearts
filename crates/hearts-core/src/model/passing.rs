@@ -32,16 +32,6 @@ impl PassingDirection {
         !matches!(self, PassingDirection::Hold)
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "left" => Some(PassingDirection::Left),
-            "right" => Some(PassingDirection::Right),
-            "across" => Some(PassingDirection::Across),
-            "hold" => Some(PassingDirection::Hold),
-            _ => None,
-        }
-    }
-
     pub const fn target(self, seat: PlayerPosition) -> PlayerPosition {
         match self {
             PassingDirection::Left => seat.next(),
@@ -57,6 +47,21 @@ impl PassingDirection {
             PassingDirection::Right => "Right",
             PassingDirection::Across => "Across",
             PassingDirection::Hold => "Hold",
+        }
+    }
+}
+
+impl std::str::FromStr for PassingDirection {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lower = s.to_ascii_lowercase();
+        match lower.as_str() {
+            "left" => Ok(PassingDirection::Left),
+            "right" => Ok(PassingDirection::Right),
+            "across" => Ok(PassingDirection::Across),
+            "hold" | "keep" | "none" => Ok(PassingDirection::Hold),
+            _ => Err(()),
         }
     }
 }
@@ -272,13 +277,13 @@ mod tests {
     #[test]
     fn from_str_parses_case_insensitive_values() {
         assert_eq!(
-            PassingDirection::from_str("LEFT"),
+            "LEFT".parse::<PassingDirection>().ok(),
             Some(PassingDirection::Left)
         );
         assert_eq!(
-            PassingDirection::from_str("across"),
+            "across".parse::<PassingDirection>().ok(),
             Some(PassingDirection::Across)
         );
-        assert_eq!(PassingDirection::from_str("unknown"), None);
+        assert_eq!("unknown".parse::<PassingDirection>().ok(), None);
     }
 }

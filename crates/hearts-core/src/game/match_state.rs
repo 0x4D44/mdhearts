@@ -58,7 +58,9 @@ impl MatchState {
     }
 
     pub fn from_snapshot(snapshot: &crate::game::serialization::MatchSnapshot) -> Self {
-        let direction = PassingDirection::from_str(&snapshot.passing_direction)
+        let direction = snapshot
+            .passing_direction
+            .parse::<PassingDirection>()
             .unwrap_or(PassingDirection::Left);
         let mut state = MatchState::with_seed_round_direction(
             snapshot.seed,

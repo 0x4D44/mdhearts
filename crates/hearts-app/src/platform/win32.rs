@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ffi::{OsStr, c_void};
 use std::os::windows::ffi::OsStrExt;
@@ -126,12 +127,7 @@ pub fn run() -> Result<()> {
         bottom: scaled_height,
     };
     unsafe {
-        let _ = AdjustWindowRectEx(
-            &mut window_rect,
-            style,
-            false.into(),
-            WINDOW_EX_STYLE::default(),
-        );
+        let _ = AdjustWindowRectEx(&mut window_rect, style, false, WINDOW_EX_STYLE::default());
     }
     let width_px = window_rect.right - window_rect.left;
     let height_px = window_rect.bottom - window_rect.top;
@@ -162,7 +158,7 @@ pub fn run() -> Result<()> {
     let mut msg = MSG::default();
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).into() {
-            if TranslateAcceleratorW(hwnd, haccel, &mut msg) != 0 {
+            if TranslateAcceleratorW(hwnd, haccel, std::ptr::addr_of_mut!(msg)) != 0 {
                 continue;
             }
             let _ = TranslateMessage(&msg);
@@ -190,13 +186,48 @@ struct AppState {
     pass: Option<PassAnim>,
     await_pass_ack: Option<Vec<ModelCard>>, // highlight newly received cards until user clicks
     rotate_sides: bool,
-    dpi: u32,
+    dpi: DpiScale,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DpiScale {
+    x: u32,
+    y: u32,
+}
+
+impl DpiScale {
+    fn new(x: u32, y: u32) -> Self {
+        Self {
+            x: x.max(1),
+            y: y.max(1),
+        }
+    }
+
+    fn uniform(value: u32) -> Self {
+        Self::new(value, value)
+    }
+
+    fn inv_scales(&self) -> (f32, f32) {
+        (96.0 / self.x as f32, 96.0 / self.y as f32)
+    }
+
+    fn as_f32_pair(&self) -> (f32, f32) {
+        (self.x as f32, self.y as f32)
+    }
 }
 
 #[derive(Clone, Copy)]
 struct LayoutSize {
     width: f32,
     height: f32,
+}
+
+fn layout_size_for(size: D2D_SIZE_U, dpi: DpiScale) -> LayoutSize {
+    let (scale_x, scale_y) = dpi.inv_scales();
+    LayoutSize {
+        width: size.width as f32 * scale_x,
+        height: size.height as f32 * scale_y,
+    }
 }
 
 struct PlayAnim {
@@ -275,7 +306,7 @@ impl AppState {
         let wic: IWICImagingFactory =
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
         let atlas = AtlasMeta::load_from_assets().unwrap_or_default();
-        let initial_dpi = unsafe { GetDpiForSystem() } as u32;
+        let initial_dpi = unsafe { GetDpiForSystem() };
         // Default ON now that rotation is fast; disable with MDH_ROTATE_SIDES=0 if desired
         let rotate_sides = std::env::var("MDH_ROTATE_SIDES")
             .map(|v| v.eq_ignore_ascii_case("1") || v.eq_ignore_ascii_case("true"))
@@ -301,22 +332,18 @@ impl AppState {
             pass: None,
             await_pass_ack: None,
             rotate_sides,
-            dpi: initial_dpi.max(1),
+            dpi: DpiScale::uniform(initial_dpi),
         };
         this.apply_text_dpi();
         Ok(this)
     }
 
-    fn inv_dpi_scale(&self) -> f32 {
-        96.0 / (self.dpi as f32).max(1.0)
+    fn inv_dpi_scales(&self) -> (f32, f32) {
+        self.dpi.inv_scales()
     }
 
     fn layout_size(&self, size: D2D_SIZE_U) -> LayoutSize {
-        let scale = self.inv_dpi_scale();
-        LayoutSize {
-            width: size.width as f32 * scale,
-            height: size.height as f32 * scale,
-        }
+        layout_size_for(size, self.dpi)
     }
 
     fn apply_text_dpi(&mut self) {
@@ -342,16 +369,16 @@ impl AppState {
         }
     }
 
-    fn set_dpi(&mut self, dpi: u32) {
-        let dpi = dpi.max(1);
+    fn set_dpi(&mut self, dpi: DpiScale) {
         if self.dpi == dpi {
             return;
         }
         self.dpi = dpi;
         self.apply_text_dpi();
         if let Some(rt) = self.render_target.as_ref() {
+            let (dx, dy) = self.dpi.as_f32_pair();
             unsafe {
-                rt.SetDpi(self.dpi as f32, self.dpi as f32);
+                rt.SetDpi(dx, dy);
             }
         }
     }
@@ -376,8 +403,9 @@ impl AppState {
                     &hwnd_props,
                 )?
             };
+            let (dx, dy) = self.dpi.as_f32_pair();
             unsafe {
-                rt.SetDpi(self.dpi as f32, self.dpi as f32);
+                rt.SetDpi(dx, dy);
             }
             self.render_target = Some(rt);
         }
@@ -401,9 +429,12 @@ impl AppState {
             if let Some(rt) = self.render_target.as_ref() {
                 let resize_result = unsafe { rt.Resize(&D2D_SIZE_U { width, height }) };
                 match resize_result {
-                    Ok(_) => unsafe {
-                        rt.SetDpi(self.dpi as f32, self.dpi as f32);
-                    },
+                    Ok(_) => {
+                        let (dx, dy) = self.dpi.as_f32_pair();
+                        unsafe {
+                            rt.SetDpi(dx, dy);
+                        }
+                    }
                     Err(err) => {
                         if err.code().0 == D2DERR_RECREATE_TARGET {
                             drop_rt = true;
@@ -696,8 +727,9 @@ impl AppState {
         let layout = self.layout_size(size_px);
         let width = layout.width;
         let height = layout.height;
+        let (dx, dy) = self.dpi.as_f32_pair();
         unsafe {
-            rt.SetDpi(self.dpi as f32, self.dpi as f32);
+            rt.SetDpi(dx, dy);
         }
 
         debug_out("mdhearts: ", "draw: begin");
@@ -786,6 +818,80 @@ impl AppState {
             rt.FillRectangle(&table, &felt);
             rt.DrawRectangle(&table, &border, 2.0, None);
 
+            // Opponents' backs
+            debug_out("mdhearts: ", "draw: ensure_card_back_bitmap");
+            self.ensure_card_back_bitmap(&rt)?;
+            let back_rot = if self.rotate_sides {
+                debug_out("mdhearts: ", "draw: ensure_card_back_bitmap_rot90");
+                if self.ensure_card_back_bitmap_rot90(&rt).is_err() {
+                    debug_out(
+                        "mdhearts: ",
+                        "rotated back load failed; using unrotated backs",
+                    );
+                }
+                // prefer rotated if present, else fall back
+                self.card_back_bitmap_rot90
+                    .as_ref()
+                    .or(self.card_back_bitmap.as_ref())
+            } else {
+                self.card_back_bitmap.as_ref()
+            };
+            let back = self.card_back_bitmap.as_ref(); // unrotated for North
+            let north_count = self.controller.hand(PlayerPosition::North).len();
+            let east_count = self.controller.hand(PlayerPosition::East).len();
+            let west_count = self.controller.hand(PlayerPosition::West).len();
+            let back_fallback = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.15,
+                    g: 0.12,
+                    b: 0.25,
+                    a: 1.0,
+                },
+                None,
+            )?;
+            for rect in compute_north_hand_rects(layout, north_count) {
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect,
+                    radiusX: 6.0,
+                    radiusY: 6.0,
+                };
+                let dest = snap_rect(rect);
+                if let Some(bmp) = back {
+                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
+                } else {
+                    rt.FillRoundedRectangle(&rounded, &back_fallback);
+                    rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
+                }
+            }
+            for rect in compute_east_hand_rects(layout, east_count) {
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect,
+                    radiusX: 6.0,
+                    radiusY: 6.0,
+                };
+                let dest = snap_rect(rect);
+                if let Some(bmp) = back_rot {
+                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
+                } else {
+                    rt.FillRoundedRectangle(&rounded, &back_fallback);
+                    rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
+                }
+            }
+            for rect in compute_west_hand_rects(layout, west_count) {
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect,
+                    radiusX: 6.0,
+                    radiusY: 6.0,
+                };
+                let dest = snap_rect(rect);
+                if let Some(bmp) = back_rot {
+                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
+                } else {
+                    rt.FillRoundedRectangle(&rounded, &back_fallback);
+                    rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
+                }
+            }
+
             // South hand faces
             debug_out("mdhearts: ", "draw: ensure_cards_bitmap");
             self.ensure_cards_bitmap(&rt)?;
@@ -864,80 +970,6 @@ impl AppState {
                         &text_brush
                     };
                 rt.DrawRoundedRectangle(&rounded, border_brush, 2.0, None);
-            }
-
-            // Opponents' backs
-            debug_out("mdhearts: ", "draw: ensure_card_back_bitmap");
-            self.ensure_card_back_bitmap(&rt)?;
-            let back_rot = if self.rotate_sides {
-                debug_out("mdhearts: ", "draw: ensure_card_back_bitmap_rot90");
-                if let Err(_) = self.ensure_card_back_bitmap_rot90(&rt) {
-                    debug_out(
-                        "mdhearts: ",
-                        "rotated back load failed; using unrotated backs",
-                    );
-                }
-                // prefer rotated if present, else fall back
-                self.card_back_bitmap_rot90
-                    .as_ref()
-                    .or(self.card_back_bitmap.as_ref())
-            } else {
-                self.card_back_bitmap.as_ref()
-            };
-            let back = self.card_back_bitmap.as_ref(); // unrotated for North
-            let north_count = self.controller.hand(PlayerPosition::North).len();
-            let east_count = self.controller.hand(PlayerPosition::East).len();
-            let west_count = self.controller.hand(PlayerPosition::West).len();
-            let back_fallback = rt.CreateSolidColorBrush(
-                &D2D1_COLOR_F {
-                    r: 0.15,
-                    g: 0.12,
-                    b: 0.25,
-                    a: 1.0,
-                },
-                None,
-            )?;
-            for rect in compute_north_hand_rects(layout, north_count) {
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
-                };
-                let dest = snap_rect(rect);
-                if let Some(bmp) = back {
-                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
-                } else {
-                    rt.FillRoundedRectangle(&rounded, &back_fallback);
-                    rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
-                }
-            }
-            for rect in compute_east_hand_rects(layout, east_count) {
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
-                };
-                let dest = snap_rect(rect);
-                if let Some(bmp) = back_rot {
-                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
-                } else {
-                    rt.FillRoundedRectangle(&rounded, &back_fallback);
-                    rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
-                }
-            }
-            for rect in compute_west_hand_rects(layout, west_count) {
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
-                };
-                let dest = snap_rect(rect);
-                if let Some(bmp) = back_rot {
-                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
-                } else {
-                    rt.FillRoundedRectangle(&rounded, &back_fallback);
-                    rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
-                }
             }
 
             // Current trick (center cards face-up). If the trick just completed
@@ -1258,13 +1290,13 @@ impl AppState {
             );
 
             // On-screen hint for current action
-            let hint = if self.pass.is_some() {
-                "Select three cards to pass, then press Enter or click the table.".to_string()
+            let hint: Cow<'static, str> = if self.pass.is_some() {
+                Cow::Borrowed("Select three cards to pass, then press Enter or click the table.")
             } else if let Some(list) = &self.await_pass_ack {
                 if list.is_empty() {
-                    String::new()
+                    Cow::Borrowed("")
                 } else {
-                    "New cards received — click anywhere to add them to your hand.".to_string()
+                    Cow::Borrowed("New cards received - click anywhere to add them to your hand.")
                 }
             } else if let Some(coll) = self.collect.as_ref() {
                 let who = match coll.winner {
@@ -1274,16 +1306,16 @@ impl AppState {
                     PlayerPosition::West => "West",
                 };
                 let tricks = self.controller.tricks_won_this_round()[coll.winner.index()];
-                format!("{} wins (tricks won so far: {})", who, tricks)
+                Cow::Owned(format!("{} wins (tricks won so far: {})", who, tricks))
             } else if self.controller.in_passing_phase() {
-                format!(
+                Cow::Owned(format!(
                     "Passing: select 3 cards ({} selected) and press Enter",
                     self.passing_select.len()
-                )
+                ))
             } else {
                 let turn = self.controller.expected_to_play();
                 if turn == PlayerPosition::South {
-                    "Your turn: click a highlighted card".to_string()
+                    Cow::Borrowed("Your turn: click a highlighted card")
                 } else {
                     let who = match turn {
                         PlayerPosition::North => "North",
@@ -1291,7 +1323,7 @@ impl AppState {
                         PlayerPosition::South => "South",
                         PlayerPosition::West => "West",
                     };
-                    format!("Waiting for {}...", who)
+                    Cow::Owned(format!("Waiting for {}...", who))
                 }
             };
             // Place hint below the South hand dynamically
@@ -1308,7 +1340,7 @@ impl AppState {
                 right: width,
                 bottom: hint_bottom,
             };
-            let hint_wide = string_to_wide(&hint);
+            let hint_wide = string_to_wide(hint.as_ref());
             rt.DrawText(
                 hint_wide.as_slice(),
                 &self.text_format,
@@ -1393,8 +1425,8 @@ unsafe extern "system" fn window_proc(
         WM_NCCREATE => match AppState::new() {
             Ok(mut state) => {
                 debug_out("mdhearts: ", "WM_NCCREATE -> AppState::new OK");
-                let initial_dpi = unsafe { GetDpiForWindow(hwnd) } as u32;
-                state.set_dpi(initial_dpi);
+                let initial_dpi = unsafe { GetDpiForWindow(hwnd) };
+                state.set_dpi(DpiScale::uniform(initial_dpi));
                 let boxed = Box::new(RefCell::new(state));
                 let ptr = Box::into_raw(boxed);
                 unsafe {
@@ -1437,8 +1469,8 @@ unsafe extern "system" fn window_proc(
             }
             if let Some(cell) = state_cell(hwnd) {
                 let mut state = cell.borrow_mut();
-                let new_dpi = (wparam.0 & 0xFFFF) as u32;
-                state.set_dpi(new_dpi.max(1));
+                let new_dpi = dpi_from_wparam(wparam);
+                state.set_dpi(new_dpi);
                 let _ = state.resize(hwnd);
             }
             unsafe {
@@ -1494,9 +1526,9 @@ unsafe extern "system" fn window_proc(
                 let layout = state.layout_size(size);
                 let south_hand = state.controller.hand(PlayerPosition::South);
                 let rects = compute_south_hand_rects(layout, south_hand.len());
-                let scale = state.inv_dpi_scale();
-                let xf = x as f32 * scale;
-                let yf = y as f32 * scale;
+                let (scale_x, scale_y) = state.inv_dpi_scales();
+                let xf = x as f32 * scale_x;
+                let yf = y as f32 * scale_y;
                 let mut consumed = false;
                 // Iterate right-to-left so the visually topmost card wins in overlaps
                 for i in (0..rects.len()).rev() {
@@ -1765,7 +1797,7 @@ struct AboutDialogState {
     atlas: AtlasMeta,
     version: &'static str,
     build_date: &'static str,
-    dpi: u32,
+    dpi: DpiScale,
 }
 
 const ABOUT_CARD_FAN: [ModelCard; 5] = [
@@ -1792,16 +1824,8 @@ const ABOUT_CARD_FAN: [ModelCard; 5] = [
 ];
 
 impl AboutDialogState {
-    fn inv_dpi_scale(&self) -> f32 {
-        96.0 / (self.dpi as f32).max(1.0)
-    }
-
     fn layout_size(&self, size: D2D_SIZE_U) -> LayoutSize {
-        let scale = self.inv_dpi_scale();
-        LayoutSize {
-            width: size.width as f32 * scale,
-            height: size.height as f32 * scale,
-        }
+        layout_size_for(size, self.dpi)
     }
 
     fn apply_text_dpi(&mut self) {
@@ -1854,16 +1878,16 @@ impl AboutDialogState {
         }
     }
 
-    fn set_dpi(&mut self, dpi: u32) {
-        let dpi = dpi.max(1);
+    fn set_dpi(&mut self, dpi: DpiScale) {
         if self.dpi == dpi {
             return;
         }
         self.dpi = dpi;
         self.apply_text_dpi();
         if let Some(rt) = self.render_target.as_ref() {
+            let (dx, dy) = self.dpi.as_f32_pair();
             unsafe {
-                rt.SetDpi(self.dpi as f32, self.dpi as f32);
+                rt.SetDpi(dx, dy);
             }
         }
     }
@@ -1903,17 +1927,17 @@ impl AboutDialogState {
         let ptr = Box::into_raw(boxed);
 
         let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
-        let dpi = unsafe {
+        let dpi_scale = unsafe {
             if !owner.0.is_null() {
-                GetDpiForWindow(owner)
+                DpiScale::uniform(GetDpiForWindow(owner))
             } else {
-                GetDpiForSystem()
+                DpiScale::uniform(GetDpiForSystem())
             }
-        } as i32;
+        };
         let base_width = 580;
         let base_height = 360;
-        let scaled_width = (base_width * dpi + 48) / 96;
-        let scaled_height = (base_height * dpi + 48) / 96;
+        let scaled_width = (base_width * dpi_scale.x as i32 + 48) / 96;
+        let scaled_height = (base_height * dpi_scale.y as i32 + 48) / 96;
         let mut window_rect = RECT {
             left: 0,
             top: 0,
@@ -1921,12 +1945,7 @@ impl AboutDialogState {
             bottom: scaled_height,
         };
         unsafe {
-            let _ = AdjustWindowRectEx(
-                &mut window_rect,
-                style,
-                false.into(),
-                WINDOW_EX_STYLE::default(),
-            );
+            let _ = AdjustWindowRectEx(&mut window_rect, style, false, WINDOW_EX_STYLE::default());
         }
         let width_px = window_rect.right - window_rect.left;
         let height_px = window_rect.bottom - window_rect.top;
@@ -2021,7 +2040,7 @@ impl AboutDialogState {
         let wic: IWICImagingFactory =
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
         let atlas = AtlasMeta::load_from_assets().unwrap_or_default();
-        let initial_dpi = unsafe { GetDpiForSystem() } as u32;
+        let initial_dpi = unsafe { GetDpiForSystem() };
         let mut this = Self {
             factory,
             dwrite,
@@ -2033,7 +2052,7 @@ impl AboutDialogState {
             atlas,
             version: env!("CARGO_PKG_VERSION"),
             build_date: option_env!("MDH_BUILD_DATE").unwrap_or("unknown build"),
-            dpi: initial_dpi.max(1),
+            dpi: DpiScale::uniform(initial_dpi),
         };
         this.apply_text_dpi();
         Ok(this)
@@ -2057,8 +2076,9 @@ impl AboutDialogState {
                 self.factory
                     .CreateHwndRenderTarget(&D2D1_RENDER_TARGET_PROPERTIES::default(), &props)?
             };
+            let (dx, dy) = self.dpi.as_f32_pair();
             unsafe {
-                rt.SetDpi(self.dpi as f32, self.dpi as f32);
+                rt.SetDpi(dx, dy);
             }
             self.render_target = Some(rt);
         }
@@ -2113,9 +2133,12 @@ impl AboutDialogState {
             if let Some(rt) = self.render_target.as_ref() {
                 let resize_result = unsafe { rt.Resize(&D2D_SIZE_U { width, height }) };
                 match resize_result {
-                    Ok(_) => unsafe {
-                        rt.SetDpi(self.dpi as f32, self.dpi as f32);
-                    },
+                    Ok(_) => {
+                        let (dx, dy) = self.dpi.as_f32_pair();
+                        unsafe {
+                            rt.SetDpi(dx, dy);
+                        }
+                    }
                     Err(err) => {
                         if err.code().0 == D2DERR_RECREATE_TARGET {
                             drop_rt = true;
@@ -2146,8 +2169,9 @@ impl AboutDialogState {
         let layout = self.layout_size(size_px);
         let width = layout.width;
         let height = layout.height;
+        let (dx, dy) = self.dpi.as_f32_pair();
         unsafe {
-            rt.SetDpi(self.dpi as f32, self.dpi as f32);
+            rt.SetDpi(dx, dy);
         }
         let card_area = D2D_RECT_F {
             left: 24.0,
@@ -2352,8 +2376,8 @@ unsafe extern "system" fn about_window_proc(
             let cs = &*(lparam.0 as *const CREATESTRUCTW);
             let ptr = cs.lpCreateParams as *mut RefCell<AboutDialogState>;
             if !ptr.is_null() {
-                let dpi = GetDpiForWindow(hwnd) as u32;
-                (*ptr).borrow_mut().set_dpi(dpi);
+                let dpi = GetDpiForWindow(hwnd);
+                (*ptr).borrow_mut().set_dpi(DpiScale::uniform(dpi));
             }
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
             LRESULT(1)
@@ -2389,8 +2413,8 @@ unsafe extern "system" fn about_window_proc(
             }
             if let Some(cell) = about_state_cell(hwnd) {
                 let mut state = cell.borrow_mut();
-                let new_dpi = (wparam.0 & 0xFFFF) as u32;
-                state.set_dpi(new_dpi.max(1));
+                let new_dpi = dpi_from_wparam(wparam);
+                state.set_dpi(new_dpi);
                 let _ = state.resize(hwnd);
             }
             unsafe {
@@ -2477,8 +2501,10 @@ fn center_window(owner: HWND, hwnd: HWND) {
 
 fn save_window_placement(hwnd: HWND) {
     unsafe {
-        let mut placement = WINDOWPLACEMENT::default();
-        placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+        let mut placement = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
         if GetWindowPlacement(hwnd, &mut placement).is_err() {
             return;
         }
@@ -2525,8 +2551,10 @@ fn restore_window_placement(hwnd: HWND) {
     unsafe {
         let subkey = string_to_wide_z(REG_SUBKEY_APP);
         let value = string_to_wide_z(REG_VALUE_WINDOW_PLACEMENT);
-        let mut placement = WINDOWPLACEMENT::default();
-        placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+        let mut placement = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
         let mut data_size = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
         if RegGetValueW(
             HKEY_CURRENT_USER,
@@ -2633,6 +2661,37 @@ fn client_size(hwnd: HWND) -> D2D_SIZE_U {
         0
     };
     D2D_SIZE_U { width, height }
+}
+
+fn dpi_from_wparam(wparam: WPARAM) -> DpiScale {
+    let raw = wparam.0 as u32;
+    let x = raw & 0xFFFF;
+    let y = (raw >> 16) & 0xFFFF;
+    if y == 0 {
+        DpiScale::uniform(x)
+    } else {
+        DpiScale::new(x, y)
+    }
+}
+
+fn rank_from_name(name: &str) -> Option<hearts_core::model::rank::Rank> {
+    let normalized = name.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "ace" | "a" => Some(hearts_core::model::rank::Rank::Ace),
+        "king" | "k" => Some(hearts_core::model::rank::Rank::King),
+        "queen" | "q" => Some(hearts_core::model::rank::Rank::Queen),
+        "jack" | "j" => Some(hearts_core::model::rank::Rank::Jack),
+        "ten" | "10" | "t" => Some(hearts_core::model::rank::Rank::Ten),
+        "nine" | "9" => Some(hearts_core::model::rank::Rank::Nine),
+        "eight" | "8" => Some(hearts_core::model::rank::Rank::Eight),
+        "seven" | "7" => Some(hearts_core::model::rank::Rank::Seven),
+        "six" | "6" => Some(hearts_core::model::rank::Rank::Six),
+        "five" | "5" => Some(hearts_core::model::rank::Rank::Five),
+        "four" | "4" => Some(hearts_core::model::rank::Rank::Four),
+        "three" | "3" => Some(hearts_core::model::rank::Rank::Three),
+        "two" | "2" | "deuce" => Some(hearts_core::model::rank::Rank::Two),
+        _ => None,
+    }
 }
 
 fn compute_south_hand_rects(size: LayoutSize, count: usize) -> Vec<D2D_RECT_F> {
@@ -2951,6 +3010,8 @@ struct AtlasMeta {
     card_w: u32,
     card_h: u32,
     order: Vec<String>,
+    #[serde(default)]
+    rank_order: Option<Vec<String>>,
 }
 
 impl AtlasMeta {
@@ -2971,6 +3032,15 @@ impl AtlasMeta {
             .map(|i| i as u32)
     }
     fn rank_col_index(&self, rank: hearts_core::model::rank::Rank) -> Option<u32> {
+        if let Some(order) = &self.rank_order {
+            for (idx, name) in order.iter().enumerate() {
+                if let Some(mapped) = rank_from_name(name) {
+                    if mapped == rank {
+                        return Some(idx as u32);
+                    }
+                }
+            }
+        }
         hearts_core::model::rank::Rank::ORDERED
             .iter()
             .position(|r| *r == rank)

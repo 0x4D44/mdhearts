@@ -24,8 +24,10 @@ impl MatchSnapshot {
     }
 
     pub fn restore(self) -> MatchState {
-        let direction =
-            PassingDirection::from_str(&self.passing_direction).unwrap_or(PassingDirection::Left);
+        let direction = self
+            .passing_direction
+            .parse::<PassingDirection>()
+            .unwrap_or(PassingDirection::Left);
         let mut state = MatchState::with_seed_round_direction(
             self.seed,
             self.round_number,

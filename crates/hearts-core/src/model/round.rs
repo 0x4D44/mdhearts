@@ -234,10 +234,8 @@ impl RoundState {
 
         // Follow suit enforcement
         if let Some(suit) = lead_suit {
-            if card.suit != suit {
-                if self.hands[seat.index()].iter().any(|c| c.suit == suit) {
-                    return Err(PlayError::MustFollowSuit(suit));
-                }
+            if card.suit != suit && self.hands[seat.index()].iter().any(|c| c.suit == suit) {
+                return Err(PlayError::MustFollowSuit(suit));
             }
         } else {
             // Leader constraints: cannot lead hearts before broken unless only hearts
@@ -400,6 +398,42 @@ mod tests {
 
         assert_eq!(round.current_trick().leader(), expected);
         assert_eq!(round.starting_player(), expected);
+    }
+
+    #[test]
+    fn passes_update_two_of_clubs_leader() {
+        let deck = Deck::standard();
+        let mut round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Left);
+
+        let selections: Vec<[Card; 3]> = PlayerPosition::LOOP
+            .iter()
+            .copied()
+            .map(|seat| {
+                let hand = round.hand(seat);
+                [hand.cards()[0], hand.cards()[1], hand.cards()[2]]
+            })
+            .collect();
+
+        for (seat, cards) in PlayerPosition::LOOP.iter().copied().zip(selections.iter()) {
+            round.submit_pass(seat, *cards).unwrap();
+        }
+
+        round.resolve_passes().unwrap();
+
+        let two_of_clubs = Card::new(Rank::Two, Suit::Clubs);
+        let holder = PlayerPosition::LOOP
+            .iter()
+            .copied()
+            .find(|seat| round.hand(*seat).contains(two_of_clubs))
+            .expect("two of clubs must exist");
+
+        assert!(matches!(round.phase(), RoundPhase::Playing));
+        assert_eq!(round.starting_player(), holder);
+        assert_eq!(round.current_trick().leader(), holder);
+        assert!(matches!(
+            round.play_card(holder, two_of_clubs),
+            Ok(PlayOutcome::Played)
+        ));
     }
 
     #[test]

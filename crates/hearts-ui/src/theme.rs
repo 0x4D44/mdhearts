@@ -19,8 +19,10 @@ impl ThemeDescriptor {
             card_style_key: card_style_key.into(),
         }
     }
+}
 
-    pub fn default() -> Self {
+impl Default for ThemeDescriptor {
+    fn default() -> Self {
         Self::new("Classic Felt", "theme/classic_felt", "cards/default")
     }
 }

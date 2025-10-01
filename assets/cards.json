@@ -1,12 +1,27 @@
 {
-  "cols": 13,
-  "rows": 4,
-  "card_w": 224,
-  "card_h": 312,
-  "order": [
-    "spades",
-    "hearts",
-    "diamonds",
-    "clubs"
-  ]
+    "cols":  13,
+    "rows":  4,
+    "card_w":  224,
+    "card_h":  312,
+    "order":  [
+                  "spades",
+                  "hearts",
+                  "diamonds",
+                  "clubs"
+              ],
+    "rank_order":  [
+                       "ace",
+                       "two",
+                       "three",
+                       "four",
+                       "five",
+                       "six",
+                       "seven",
+                       "eight",
+                       "nine",
+                       "ten",
+                       "jack",
+                       "queen",
+                       "king"
+                   ]
 }
