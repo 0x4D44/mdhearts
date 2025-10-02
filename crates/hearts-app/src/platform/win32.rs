@@ -1,20 +1,29 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::ffi::{OsStr, c_void};
+use std::mem::ManuallyDrop;
 use std::os::windows::ffi::OsStrExt;
 use std::rc::Rc;
+use windows_numerics::Matrix3x2;
 
 use crate::controller::GameController;
 use hearts_core::model::card::Card as ModelCard;
 use hearts_core::model::player::PlayerPosition;
 
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
-use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D_SIZE_U, D2D1_COLOR_F};
+use windows::Win32::Graphics::Direct2D::Common::D2D1_ALPHA_MODE_PREMULTIPLIED;
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D_SIZE_U, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+};
 // (No transform imports required; rotation for east/west hands will be handled later.)
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE_MULTI_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_INTERPOLATION_MODE,
+    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE_MULTI_THREADED,
+    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
     D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1CreateFactory,
-    ID2D1Bitmap, ID2D1Factory, ID2D1HwndRenderTarget,
+    ID2D1Bitmap, ID2D1Factory, ID2D1Geometry, ID2D1HwndRenderTarget,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -23,9 +32,10 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
     DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
 };
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, InvalidateRect, PAINTSTRUCT};
 use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICBitmapFrameDecode,
+    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmapFrameDecode,
     IWICFormatConverter, IWICImagingFactory, IWICStream, WICBitmapDitherTypeNone,
     WICBitmapPaletteTypeCustom, WICDecodeMetadataCacheOnLoad,
 };
@@ -56,9 +66,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE,
     WM_TIMER, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WaitMessage,
 };
-use windows::core::{PCWSTR, Result, w};
+use windows::core::{Interface, PCWSTR, Result, w};
 
 const D2DERR_RECREATE_TARGET: i32 = 0x8899_000C_u32 as i32;
+const E_INVALID_DATA_HR: i32 = 0x8007_000D_u32 as i32;
 
 const VK_F2: u32 = 0x71;
 const VK_RETURN: u32 = 0x0D;
@@ -119,6 +130,70 @@ struct CardBackChoice {
     preview_color: [f32; 4],
 }
 
+struct CardBackPixels {
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+fn invalid_card_back_error() -> windows::core::Error {
+    windows::core::Error::from(windows::core::HRESULT(E_INVALID_DATA_HR))
+}
+
+fn decode_card_back_pixels(
+    wic: &IWICImagingFactory,
+    choice: &CardBackChoice,
+) -> Result<CardBackPixels> {
+    let stream: IWICStream = unsafe { wic.CreateStream()? };
+    unsafe {
+        stream.InitializeFromMemory(choice.png)?;
+        let decoder =
+            wic.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnLoad)?;
+        let frame: IWICBitmapFrameDecode = decoder.GetFrame(0)?;
+        let converter: IWICFormatConverter = wic.CreateFormatConverter()?;
+        converter.Initialize(
+            &frame,
+            &GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            None,
+            0.0,
+            WICBitmapPaletteTypeCustom,
+        )?;
+        let mut width: u32 = 0;
+        let mut height: u32 = 0;
+        converter.GetSize(&mut width, &mut height)?;
+        if width == 0 || height == 0 {
+            return Err(invalid_card_back_error());
+        }
+        let row_bytes = usize::try_from(width)
+            .map_err(|_| invalid_card_back_error())?
+            .checked_mul(4)
+            .ok_or_else(|| invalid_card_back_error())?;
+        let height_usize = usize::try_from(height).map_err(|_| invalid_card_back_error())?;
+        let buf_len = row_bytes
+            .checked_mul(height_usize)
+            .ok_or_else(|| invalid_card_back_error())?;
+        let mut data = vec![0u8; buf_len];
+        converter.CopyPixels(
+            std::ptr::null(),
+            u32::try_from(row_bytes).map_err(|_| invalid_card_back_error())?,
+            &mut data,
+        )?;
+        debug_out(
+            "mdhearts: ",
+            &format!(
+                "decode_card_back_pixels '{}' -> {}x{} ({} bytes)",
+                choice.name, width, height, buf_len
+            ),
+        );
+        Ok(CardBackPixels {
+            data,
+            width,
+            height,
+        })
+    }
+}
+
 const CARD_BACK_CHOICES: &[CardBackChoice; 4] = &[
     CardBackChoice {
         id: CardBackId::Classic,
@@ -131,24 +206,24 @@ const CARD_BACK_CHOICES: &[CardBackChoice; 4] = &[
     CardBackChoice {
         id: CardBackId::RedWeave,
         name: "Red Weave",
-        description: "OpenGameArt Cards Pack (CC0).",
-        credit: "Kenney.nl",
+        description: "OpenGameArt Cards Pack",
+        credit: "",
         png: include_bytes!("../../../../assets/card_back_red.png"),
         preview_color: [0.85, 0.12, 0.12, 1.0],
     },
     CardBackChoice {
         id: CardBackId::BlueWeave,
         name: "Blue Weave",
-        description: "OpenGameArt Cards Pack (CC0).",
-        credit: "Kenney.nl",
+        description: "OpenGameArt Cards Pack",
+        credit: "",
         png: include_bytes!("../../../../assets/card_back_blue.png"),
         preview_color: [0.15, 0.25, 0.6, 1.0],
     },
     CardBackChoice {
         id: CardBackId::GreyCross,
         name: "Grey Cross",
-        description: "OpenGameArt Cards Pack (CC0).",
-        credit: "Kenney.nl",
+        description: "OpenGameArt Cards Pack",
+        credit: "",
         png: include_bytes!("../../../../assets/card_back_grey.png"),
         preview_color: [0.4, 0.4, 0.45, 1.0],
     },
@@ -275,6 +350,7 @@ struct AppState {
     card_back: CardBackId,
     card_back_bitmap: Option<ID2D1Bitmap>,
     card_back_bitmap_rot90: Option<ID2D1Bitmap>,
+    card_back_pixels: Option<CardBackPixels>,
     anim: Option<PlayAnim>,
     collect: Option<CollectAnim>,
     pass: Option<PassAnim>,
@@ -422,6 +498,7 @@ impl AppState {
             card_back: CardBackId::Classic,
             card_back_bitmap: None,
             card_back_bitmap_rot90: None,
+            card_back_pixels: None,
             anim: None,
             collect: None,
             pass: None,
@@ -476,6 +553,7 @@ impl AppState {
             self.card_back = id;
             self.card_back_bitmap = None;
             self.card_back_bitmap_rot90 = None;
+            self.card_back_pixels = None;
         }
     }
 
@@ -691,6 +769,14 @@ impl AppState {
         }
     }
 
+    fn ensure_card_back_pixels(&mut self) -> Result<&CardBackPixels> {
+        if self.card_back_pixels.is_none() {
+            let pixels = decode_card_back_pixels(&self.wic, self.card_back_choice())?;
+            self.card_back_pixels = Some(pixels);
+        }
+        Ok(self.card_back_pixels.as_ref().expect("card back pixels"))
+    }
+
     fn ensure_cards_bitmap(&mut self, rt: &ID2D1HwndRenderTarget) -> Result<()> {
         if self.cards_bitmap.is_some() {
             return Ok(());
@@ -728,28 +814,39 @@ impl AppState {
             return Ok(());
         }
         debug_out("mdhearts: ", "ensure_card_back_bitmap begin");
-        let info = self.card_back_choice();
-        let stream: IWICStream = unsafe { self.wic.CreateStream()? };
-        unsafe {
-            stream.InitializeFromMemory(info.png)?;
-            let decoder = self.wic.CreateDecoderFromStream(
-                &stream,
-                std::ptr::null(),
-                WICDecodeMetadataCacheOnLoad,
-            )?;
-            let frame: IWICBitmapFrameDecode = decoder.GetFrame(0)?;
-            let converter: IWICFormatConverter = self.wic.CreateFormatConverter()?;
-            converter.Initialize(
-                &frame,
-                &GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapDitherTypeNone,
-                None,
-                0.0,
-                WICBitmapPaletteTypeCustom,
-            )?;
-            let bmp = rt.CreateBitmapFromWicBitmap(&converter, None)?;
-            self.card_back_bitmap = Some(bmp);
-        }
+        let back_name = self.card_back_choice().name;
+        let pixels = self.ensure_card_back_pixels()?;
+        debug_out(
+            "mdhearts: ",
+            &format!(
+                "ensure_card_back_bitmap '{}' {}x{}",
+                back_name, pixels.width, pixels.height
+            ),
+        );
+        let props = D2D1_BITMAP_PROPERTIES {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+        };
+        let pitch = pixels
+            .width
+            .checked_mul(4)
+            .ok_or_else(|| invalid_card_back_error())?;
+        let bmp = unsafe {
+            rt.CreateBitmap(
+                D2D_SIZE_U {
+                    width: pixels.width,
+                    height: pixels.height,
+                },
+                Some(pixels.data.as_ptr().cast()),
+                pitch,
+                &props,
+            )?
+        };
+        self.card_back_bitmap = Some(bmp);
         debug_out("mdhearts: ", "ensure_card_back_bitmap ok");
         Ok(())
     }
@@ -762,62 +859,44 @@ impl AppState {
             "mdhearts: ",
             "ensure_card_back_bitmap_rot90 begin (CPU rotate)",
         );
-        let info = self.card_back_choice();
-        let stream: IWICStream = unsafe { self.wic.CreateStream()? };
-        unsafe {
-            // Decode to 32bpp premultiplied BGRA
-            stream.InitializeFromMemory(info.png)?;
-            let decoder = self.wic.CreateDecoderFromStream(
-                &stream,
-                std::ptr::null(),
-                WICDecodeMetadataCacheOnLoad,
-            )?;
-            let frame: IWICBitmapFrameDecode = decoder.GetFrame(0)?;
-            let converter: IWICFormatConverter = self.wic.CreateFormatConverter()?;
-            converter.Initialize(
-                &frame,
-                &GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapDitherTypeNone,
-                None,
-                0.0,
-                WICBitmapPaletteTypeCustom,
-            )?;
-            let mut w: u32 = 0;
-            let mut h: u32 = 0;
-            converter.GetSize(&mut w, &mut h)?;
-            if w == 0 || h == 0 {
-                return Ok(());
-            }
-            let src_stride = (w as usize) * 4;
-            let mut src = vec![0u8; src_stride * (h as usize)];
-            converter.CopyPixels(std::ptr::null(), src_stride as u32, &mut src)?;
-
-            // Rotate 90 degrees clockwise into dst (h x w)
-            let rw = h as usize;
-            let rh = w as usize; // rotated width/height
-            let dst_stride = rw * 4;
-            let mut dst = vec![0u8; dst_stride * rh];
-            for y in 0..(h as usize) {
-                for x in 0..(w as usize) {
-                    let src_idx = y * src_stride + x * 4;
-                    let nx = y; // new x
-                    let ny = (w as usize) - 1 - x; // new y
-                    let dst_idx = ny * dst_stride + nx * 4;
-                    dst[dst_idx..dst_idx + 4].copy_from_slice(&src[src_idx..src_idx + 4]);
-                }
-            }
-
-            // Wrap rotated memory as an IWICBitmap, then hand to D2D
-            let rot_wic: IWICBitmap = self.wic.CreateBitmapFromMemory(
-                rw as u32,
-                rh as u32,
-                &GUID_WICPixelFormat32bppPBGRA,
-                dst_stride as u32,
-                &dst,
-            )?;
-            let bmp = rt.CreateBitmapFromWicBitmap(&rot_wic, None)?;
-            self.card_back_bitmap_rot90 = Some(bmp);
-        }
+        let back_name = self.card_back_choice().name;
+        let pixels = self.ensure_card_back_pixels()?;
+        debug_out(
+            "mdhearts: ",
+            &format!(
+                "ensure_card_back_bitmap_rot90 '{}' {}x{}",
+                back_name, pixels.width, pixels.height
+            ),
+        );
+        let rotated = rotate_pixels_clockwise(&pixels.data, pixels.width, pixels.height)?;
+        debug_out(
+            "mdhearts: ",
+            &format!("rotated card back -> {}x{}", pixels.height, pixels.width),
+        );
+        let props = D2D1_BITMAP_PROPERTIES {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+        };
+        let pitch = pixels
+            .height
+            .checked_mul(4)
+            .ok_or_else(|| invalid_card_back_error())?;
+        let bmp = unsafe {
+            rt.CreateBitmap(
+                D2D_SIZE_U {
+                    width: pixels.height,
+                    height: pixels.width,
+                },
+                Some(rotated.as_ptr().cast()),
+                pitch,
+                &props,
+            )?
+        };
+        self.card_back_bitmap_rot90 = Some(bmp);
         debug_out(
             "mdhearts: ",
             "ensure_card_back_bitmap_rot90 ok (CPU rotate)",
@@ -830,6 +909,7 @@ impl AppState {
         let Some(rt) = self.render_target.as_ref().cloned() else {
             return Ok(());
         };
+        let factory = self.factory.clone();
         let size_px = client_size(hwnd);
         if size_px.width == 0 || size_px.height == 0 {
             return Ok(());
@@ -960,42 +1040,69 @@ impl AppState {
                 None,
             )?;
             for rect in compute_north_hand_rects(layout, north_count) {
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
-                };
                 let dest = snap_rect(rect);
+                let radius = card_corner_radius(&dest);
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: dest,
+                    radiusX: radius,
+                    radiusY: radius,
+                };
                 if let Some(bmp) = back {
-                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
+                    draw_bitmap_with_round_corners(
+                        &factory,
+                        &rt,
+                        &rounded,
+                        bmp,
+                        None,
+                        1.0,
+                        D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    )?;
                 } else {
                     rt.FillRoundedRectangle(&rounded, &back_fallback);
                     rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
                 }
             }
             for rect in compute_east_hand_rects(layout, east_count) {
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
-                };
                 let dest = snap_rect(rect);
+                let radius = card_corner_radius(&dest);
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: dest,
+                    radiusX: radius,
+                    radiusY: radius,
+                };
                 if let Some(bmp) = back_rot {
-                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
+                    draw_bitmap_with_round_corners(
+                        &factory,
+                        &rt,
+                        &rounded,
+                        bmp,
+                        None,
+                        1.0,
+                        D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    )?;
                 } else {
                     rt.FillRoundedRectangle(&rounded, &back_fallback);
                     rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
                 }
             }
             for rect in compute_west_hand_rects(layout, west_count) {
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
-                };
                 let dest = snap_rect(rect);
+                let radius = card_corner_radius(&dest);
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: dest,
+                    radiusX: radius,
+                    radiusY: radius,
+                };
                 if let Some(bmp) = back_rot {
-                    rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None);
+                    draw_bitmap_with_round_corners(
+                        &factory,
+                        &rt,
+                        &rounded,
+                        bmp,
+                        None,
+                        1.0,
+                        D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    )?;
                 } else {
                     rt.FillRoundedRectangle(&rounded, &back_fallback);
                     rt.DrawRoundedRectangle(&rounded, &border, 1.5, None);
@@ -1027,33 +1134,44 @@ impl AppState {
                     draw_rect.bottom -= dy;
                 }
 
+                let dest = snap_rect(draw_rect);
+
                 // Subtle shadow for popped cards (will still layer under later cards)
                 if (selected && self.controller.in_passing_phase()) || recv_highlight {
-                    let mut sh = draw_rect;
+                    let mut sh = dest;
                     sh.left += 2.0;
                     sh.right += 2.0;
                     sh.top += 4.0;
                     sh.bottom += 4.0;
+                    let shadow_radius = card_corner_radius(&sh);
                     let sh_r = D2D1_ROUNDED_RECT {
                         rect: sh,
-                        radiusX: 6.0,
-                        radiusY: 6.0,
+                        radiusX: shadow_radius,
+                        radiusY: shadow_radius,
                     };
                     rt.FillRoundedRectangle(&sh_r, &shadow);
                 }
 
+                let radius = card_corner_radius(&dest);
                 let rounded = D2D1_ROUNDED_RECT {
-                    rect: draw_rect,
-                    radiusX: 6.0,
-                    radiusY: 6.0,
+                    rect: dest,
+                    radiusX: radius,
+                    radiusY: radius,
                 };
                 let mut drew_face = false;
                 if let Some(ref bmp) = atlas_bmp_opt {
                     if let Some(card) = south_hand.get(i).copied() {
                         if let Some(src) = self.atlas.src_rect_for(card) {
-                            let dest = snap_rect(draw_rect);
                             let src = inset_rect(src, 0.5, 0.5);
-                            rt.DrawBitmap(bmp, Some(&dest), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src));
+                            draw_bitmap_with_round_corners(
+                                &factory,
+                                &rt,
+                                &rounded,
+                                bmp,
+                                Some(&src),
+                                1.0,
+                                D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                            )?;
                             drew_face = true;
                         }
                     }
@@ -1100,14 +1218,23 @@ impl AppState {
                         }
                     }
                     if let Some(src) = self.atlas.src_rect_for(card) {
-                        let rect = snap_rect(compute_trick_rect_for(layout, pos));
+                        let dest = snap_rect(compute_trick_rect_for(layout, pos));
+                        let radius = card_corner_radius(&dest);
                         let rounded = D2D1_ROUNDED_RECT {
-                            rect,
-                            radiusX: 6.0,
-                            radiusY: 6.0,
+                            rect: dest,
+                            radiusX: radius,
+                            radiusY: radius,
                         };
                         let src = inset_rect(src, 0.5, 0.5);
-                        rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src));
+                        draw_bitmap_with_round_corners(
+                            &factory,
+                            &rt,
+                            &rounded,
+                            bmp,
+                            Some(&src),
+                            1.0,
+                            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                        )?;
                         let hl = if Some(pos) == leading_so_far {
                             &text_brush
                         } else {
@@ -1122,15 +1249,24 @@ impl AppState {
             if let (Some(bmp), Some(anim)) = (atlas_bmp_opt.as_ref(), &self.anim) {
                 let t = (std::time::Instant::now() - anim.start).as_millis() as u64;
                 let u = (t as f32 / anim.dur_ms as f32).clamp(0.0, 1.0);
-                let rect = lerp_rect(anim.from, anim.to, ease_out(u));
+                let dest = snap_rect(lerp_rect(anim.from, anim.to, ease_out(u)));
                 if let Some(src) = self.atlas.src_rect_for(anim.card) {
+                    let radius = card_corner_radius(&dest);
                     let rounded = D2D1_ROUNDED_RECT {
-                        rect,
-                        radiusX: 6.0,
-                        radiusY: 6.0,
+                        rect: dest,
+                        radiusX: radius,
+                        radiusY: radius,
                     };
                     let src = inset_rect(src, 0.5, 0.5);
-                    rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Some(&src));
+                    draw_bitmap_with_round_corners(
+                        &factory,
+                        &rt,
+                        &rounded,
+                        bmp,
+                        Some(&src),
+                        1.0,
+                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    )?;
                     rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
                 }
                 if t >= anim.dur_ms {
@@ -1154,17 +1290,28 @@ impl AppState {
                 for (seat, card) in &coll.cards {
                     if let Some(src) = self.atlas.src_rect_for(*card) {
                         let from_rect = compute_trick_rect_for(layout, *seat);
-                        let rect = if elapsed < coll.delay_ms {
+                        let dest = if elapsed < coll.delay_ms {
                             from_rect
                         } else {
                             lerp_rect(from_rect, to_rect, ease_out(u))
                         };
+                        let dest = snap_rect(dest);
+                        let radius = card_corner_radius(&dest);
                         let rounded = D2D1_ROUNDED_RECT {
-                            rect,
-                            radiusX: 6.0,
-                            radiusY: 6.0,
+                            rect: dest,
+                            radiusX: radius,
+                            radiusY: radius,
                         };
-                        rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                        let src = inset_rect(src, 0.5, 0.5);
+                        draw_bitmap_with_round_corners(
+                            &factory,
+                            &rt,
+                            &rounded,
+                            bmp,
+                            Some(&src),
+                            1.0,
+                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                        )?;
                         rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
                     }
                 }
@@ -1213,13 +1360,23 @@ impl AppState {
                                         rect.right += s.jx;
                                         rect.top += s.jy;
                                         rect.bottom += s.jy;
+                                        let dest = snap_rect(rect);
+                                        let radius = card_corner_radius(&dest);
                                         let rounded = D2D1_ROUNDED_RECT {
-                                            rect,
-                                            radiusX: 6.0,
-                                            radiusY: 6.0,
+                                            rect: dest,
+                                            radiusX: radius,
+                                            radiusY: radius,
                                         };
                                         let src = inset_rect(src, 0.5, 0.5);
-                                        rt.DrawBitmap(bmp, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                                        draw_bitmap_with_round_corners(
+                                            &factory,
+                                            &rt,
+                                            &rounded,
+                                            bmp,
+                                            Some(&src),
+                                            1.0,
+                                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                        )?;
                                         rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
                                     }
                                 }
@@ -1267,14 +1424,24 @@ impl AppState {
                             rect.right += s.jx;
                             rect.top += s.jy;
                             rect.bottom += s.jy;
+                            let dest = snap_rect(rect);
+                            let radius = card_corner_radius(&dest);
                             let rounded = D2D1_ROUNDED_RECT {
-                                rect,
-                                radiusX: 6.0,
-                                radiusY: 6.0,
+                                rect: dest,
+                                radiusX: radius,
+                                radiusY: radius,
                             };
                             if u < reveal_at || s.card.is_none() {
                                 if let Some(b) = back_bmp {
-                                    rt.DrawBitmap(b, Some(&rect), 1.0, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+                                    draw_bitmap_with_round_corners(
+                                        &factory,
+                                        &rt,
+                                        &rounded,
+                                        b,
+                                        None,
+                                        1.0,
+                                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                    )?;
                                 } else {
                                     rt.FillRoundedRectangle(&rounded, &border);
                                 }
@@ -1283,12 +1450,28 @@ impl AppState {
                                 let t = ((u - reveal_at) / (1.0 - reveal_at)).clamp(0.0, 1.0);
                                 let back_alpha = 1.0 - t;
                                 if let Some(b) = back_bmp {
-                                    rt.DrawBitmap(b, Some(&rect), back_alpha, windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+                                    draw_bitmap_with_round_corners(
+                                        &factory,
+                                        &rt,
+                                        &rounded,
+                                        b,
+                                        None,
+                                        back_alpha,
+                                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                    )?;
                                 }
                                 if let (Some(bmp), Some(card)) = (atlas_bmp_opt.as_ref(), s.card) {
                                     if let Some(src) = self.atlas.src_rect_for(card) {
                                         let src = inset_rect(src, 0.5, 0.5);
-                                        rt.DrawBitmap(bmp, Some(&rect), t.max(0.2), windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, Some(&src));
+                                        draw_bitmap_with_round_corners(
+                                            &factory,
+                                            &rt,
+                                            &rounded,
+                                            bmp,
+                                            Some(&src),
+                                            t.max(0.2),
+                                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                        )?;
                                     }
                                 }
                             }
@@ -1313,6 +1496,7 @@ impl AppState {
                 }
             }
 
+            // Status text (full-width centered header)
             // Status text (full-width centered header)
             let status_rect = D2D_RECT_F {
                 left: 0.0,
@@ -2535,16 +2719,23 @@ Built with Rust, Direct2D, and plenty of card shuffling.",
                     right: base_left + offsets[i] + card_width,
                     bottom: base_top + lifts[i] + card_height,
                 };
+                let dest = snap_rect(dest);
+                let radius = card_corner_radius(&dest);
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: dest,
+                    radiusX: radius,
+                    radiusY: radius,
+                };
                 let src = inset_rect(src, 0.5, 0.5);
-                unsafe {
-                    rt.DrawBitmap(
-                        bmp,
-                        Some(&dest),
-                        1.0,
-                        windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                        Some(&src),
-                    );
-                }
+                draw_bitmap_with_round_corners(
+                    &self.factory,
+                    rt,
+                    &rounded,
+                    bmp,
+                    Some(&src),
+                    1.0,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                )?;
             }
         }
         Ok(())
@@ -2569,6 +2760,12 @@ unsafe extern "system" fn about_window_proc(
             LRESULT(1)
         },
         WM_CLOSE => {
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    state.result = None;
+                    state.store_result();
+                }
+            }
             unsafe {
                 let _ = DestroyWindow(hwnd);
             }
@@ -3184,6 +3381,38 @@ fn compute_collect_target_rect_for(
 }
 
 // Ensure we preserve portrait aspect (width < height) by swapping w/h around the same center.
+fn rotate_pixels_clockwise(src: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    if width == 0 || height == 0 {
+        return Err(invalid_card_back_error());
+    }
+    let w = usize::try_from(width).map_err(|_| invalid_card_back_error())?;
+    let h = usize::try_from(height).map_err(|_| invalid_card_back_error())?;
+    let src_stride = w.checked_mul(4).ok_or_else(|| invalid_card_back_error())?;
+    let expected = src_stride
+        .checked_mul(h)
+        .ok_or_else(|| invalid_card_back_error())?;
+    if src.len() < expected {
+        return Err(invalid_card_back_error());
+    }
+    let dst_stride = h.checked_mul(4).ok_or_else(|| invalid_card_back_error())?;
+    let mut dst = vec![
+        0u8;
+        dst_stride
+            .checked_mul(w)
+            .ok_or_else(|| invalid_card_back_error())?
+    ];
+    for y in 0..h {
+        for x in 0..w {
+            let src_idx = y * src_stride + x * 4;
+            let nx = y;
+            let ny = w - 1 - x;
+            let dst_idx = ny * dst_stride + nx * 4;
+            dst[dst_idx..dst_idx + 4].copy_from_slice(&src[src_idx..src_idx + 4]);
+        }
+    }
+    Ok(dst)
+}
+
 fn ensure_portrait_centered(r: D2D_RECT_F) -> D2D_RECT_F {
     let cx = 0.5 * (r.left + r.right);
     let cy = 0.5 * (r.top + r.bottom);
@@ -3479,29 +3708,32 @@ impl CardBackDialogState {
         if self.bitmaps.get(idx).and_then(|b| b.as_ref()).is_some() {
             return Ok(());
         }
-        let info = &CARD_BACK_CHOICES[idx];
-        let stream: IWICStream = unsafe { self.wic.CreateStream()? };
-        unsafe {
-            stream.InitializeFromMemory(info.png)?;
-            let decoder = self.wic.CreateDecoderFromStream(
-                &stream,
-                std::ptr::null(),
-                WICDecodeMetadataCacheOnLoad,
-            )?;
-            let frame: IWICBitmapFrameDecode = decoder.GetFrame(0)?;
-            let converter: IWICFormatConverter = self.wic.CreateFormatConverter()?;
-            converter.Initialize(
-                &frame,
-                &GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapDitherTypeNone,
-                None,
-                0.0,
-                WICBitmapPaletteTypeCustom,
-            )?;
-            let bmp = rt.CreateBitmapFromWicBitmap(&converter, None)?;
-            if let Some(slot) = self.bitmaps.get_mut(idx) {
-                *slot = Some(bmp);
-            }
+        let pixels = decode_card_back_pixels(&self.wic, &CARD_BACK_CHOICES[idx])?;
+        let props = D2D1_BITMAP_PROPERTIES {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+        };
+        let pitch = pixels
+            .width
+            .checked_mul(4)
+            .ok_or_else(|| invalid_card_back_error())?;
+        let bmp = unsafe {
+            rt.CreateBitmap(
+                D2D_SIZE_U {
+                    width: pixels.width,
+                    height: pixels.height,
+                },
+                Some(pixels.data.as_ptr().cast()),
+                pitch,
+                &props,
+            )?
+        };
+        if let Some(slot) = self.bitmaps.get_mut(idx) {
+            *slot = Some(bmp);
         }
         Ok(())
     }
@@ -3699,7 +3931,11 @@ impl CardBackDialogState {
                     DWRITE_MEASURING_MODE::default(),
                 );
             }
-            let details = format!("{}\n{}", choice.description, choice.credit);
+            let details = if choice.credit.is_empty() {
+                choice.description.to_string()
+            } else {
+                format!("{}\n{}", choice.description, choice.credit)
+            };
             let details_wide = string_to_wide(&details);
             unsafe {
                 rt.DrawText(
@@ -3753,15 +3989,22 @@ impl CardBackDialogState {
                 right: preview_rect.left + (avail_w + dest_w) * 0.5,
                 bottom: preview_rect.top + (avail_h + dest_h) * 0.5,
             };
-            unsafe {
-                rt.DrawBitmap(
-                    bmp,
-                    Some(&dest),
-                    1.0,
-                    windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                    None,
-                );
-            }
+            let dest = snap_rect(dest);
+            let radius = card_corner_radius(&dest);
+            let rounded = D2D1_ROUNDED_RECT {
+                rect: dest,
+                radiusX: radius,
+                radiusY: radius,
+            };
+            draw_bitmap_with_round_corners(
+                &self.factory,
+                &rt,
+                &rounded,
+                bmp,
+                None,
+                1.0,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+            )?;
         }
 
         let instructions = "Use Up/Down arrows to browse, Enter to apply, Esc to cancel.";
@@ -3817,7 +4060,7 @@ impl CardBackDialogState {
         self.result = Some(CARD_BACK_CHOICES[self.selected].id);
     }
 
-    fn store_result(&self) {
+    fn store_result(&mut self) {
         *self.result_sink.borrow_mut() = self.result;
     }
 }
@@ -3840,6 +4083,12 @@ unsafe extern "system" fn card_back_window_proc(
             LRESULT(1)
         },
         WM_CLOSE => {
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    state.result = None;
+                    state.store_result();
+                }
+            }
             unsafe {
                 let _ = DestroyWindow(hwnd);
             }
@@ -3849,8 +4098,7 @@ unsafe extern "system" fn card_back_window_proc(
         WM_NCDESTROY => {
             if let Some(ptr) = card_back_state_ptr(hwnd) {
                 unsafe {
-                    let boxed: Box<RefCell<CardBackDialogState>> = Box::from_raw(ptr);
-                    boxed.borrow().store_result();
+                    let _ = Box::from_raw(ptr);
                     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 }
             }
@@ -3906,12 +4154,14 @@ unsafe extern "system" fn card_back_window_proc(
                 match key {
                     VK_ESCAPE => {
                         state.result = None;
+                        state.store_result();
                         unsafe {
                             let _ = DestroyWindow(hwnd);
                         }
                     }
                     VK_RETURN => {
                         state.accept();
+                        state.store_result();
                         unsafe {
                             let _ = DestroyWindow(hwnd);
                         }
@@ -3957,6 +4207,7 @@ unsafe extern "system" fn card_back_window_proc(
                         }
                         if value == WM_LBUTTONDBLCLK {
                             state.accept();
+                            state.store_result();
                             unsafe {
                                 let _ = DestroyWindow(hwnd);
                             }
@@ -3984,6 +4235,49 @@ fn card_back_state_ptr(hwnd: HWND) -> Option<*mut RefCell<CardBackDialogState>> 
 fn card_back_state_cell(hwnd: HWND) -> Option<&'static RefCell<CardBackDialogState>> {
     card_back_state_ptr(hwnd).map(|p| unsafe { &*p })
 }
+fn card_corner_radius(rect: &D2D_RECT_F) -> f32 {
+    let width = (rect.right - rect.left).abs();
+    let height = (rect.bottom - rect.top).abs();
+    if width <= 0.0 || height <= 0.0 {
+        return 0.0;
+    }
+    let min_edge = width.min(height);
+    (min_edge * 0.08).clamp(4.0, min_edge * 0.3)
+}
+
+fn draw_bitmap_with_round_corners(
+    factory: &ID2D1Factory,
+    rt: &ID2D1HwndRenderTarget,
+    rounded: &D2D1_ROUNDED_RECT,
+    bmp: &ID2D1Bitmap,
+    src: Option<&D2D_RECT_F>,
+    opacity: f32,
+    mode: D2D1_BITMAP_INTERPOLATION_MODE,
+) -> Result<()> {
+    let geometry = unsafe { factory.CreateRoundedRectangleGeometry(rounded)? };
+    let layer = unsafe { rt.CreateLayer(None)? };
+    let geometry_any: ID2D1Geometry = geometry.cast()?;
+    let mut params = D2D1_LAYER_PARAMETERS {
+        contentBounds: rounded.rect,
+        geometricMask: ManuallyDrop::new(Some(geometry_any)),
+        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+        maskTransform: Matrix3x2::identity(),
+        opacity: 1.0,
+        opacityBrush: ManuallyDrop::new(None),
+        layerOptions: D2D1_LAYER_OPTIONS_NONE,
+    };
+    unsafe {
+        let dest_ptr = Some(&rounded.rect as *const D2D_RECT_F);
+        let src_ptr = src.map(|s| s as *const D2D_RECT_F);
+        rt.PushLayer(&params, Some(&layer));
+        rt.DrawBitmap(bmp, dest_ptr, opacity, mode, src_ptr);
+        rt.PopLayer();
+        ManuallyDrop::drop(&mut params.geometricMask);
+        ManuallyDrop::drop(&mut params.opacityBrush);
+    }
+    Ok(())
+}
+
 impl AtlasMeta {
     fn load_from_assets() -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let text = std::fs::read_to_string("assets/cards.json")?;

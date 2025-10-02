@@ -8,3 +8,4 @@ Proposed Fixes
 - [x] Deduplicate the DPI layout math by introducing a shared helper (e.g., `layout_size_for`) used by both `AppState` and `AboutDialogState`.
 - [x] Fix mouse hit-testing during the passing phase by converting cursor coordinates into DIPs using the same scale as the layout rectangles.
 - [x] Optional polish: avoid rebuilding static hint strings each frame (use a borrowed string or `Cow` where possible).
+\nUpcoming Implementation Plan\n----------------------------\n1. Decode and cache card-back pixels once, and build Direct2D bitmaps from the cached buffers (both main app and card-back dialog).\n2. Introduce a rounded-draw helper that clips bitmaps to rounded rectangles and reuse it across the playfield/overlays/dialogs.\n3. Apply the helper to all card renders, keeping shadows/animations intact.\n4. Regression test (passes/collect animations, card-back switching, DPI) and tidy imports/logging.\n
