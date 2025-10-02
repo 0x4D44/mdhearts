@@ -49,22 +49,26 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY, REG_OPTION_NON_VOLATILE,
     RRF_RT_REG_BINARY, RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
 };
+use windows::Win32::UI::Controls::SetScrollInfo;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
     ACCEL, AdjustWindowRectEx, AppendMenuW, CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW,
     CW_USEDEFAULT, CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW,
     DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY,
-    GWLP_USERDATA, GetClientRect, GetMessageW, GetSystemMetrics, GetWindowLongPtrW,
+    GWLP_USERDATA, GetClientRect, GetMessageW, GetScrollInfo, GetSystemMetrics, GetWindowLongPtrW,
     GetWindowPlacement, GetWindowRect, HACCEL, HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow,
     LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG,
-    MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SM_CXSCREEN,
+    MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SB_BOTTOM,
+    SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
+    SB_VERT, SCROLLBAR_COMMAND, SCROLLINFO, SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXSCREEN,
     SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
     SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
     SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
     SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
     WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
-    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE,
-    WM_TIMER, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WaitMessage,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
+    WM_SIZE, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    WS_OVERLAPPEDWINDOW, WS_VSCROLL, WaitMessage,
 };
 use windows::core::{Interface, PCWSTR, Result, w};
 
@@ -99,6 +103,12 @@ enum CardBackId {
     RedWeave,
     BlueWeave,
     GreyCross,
+    Ai01,
+    Ai02,
+    Retro01,
+    Retro02,
+    Retro03,
+    Retro04,
 }
 impl CardBackId {
     const fn as_u32(self) -> u32 {
@@ -107,6 +117,12 @@ impl CardBackId {
             CardBackId::RedWeave => 1,
             CardBackId::BlueWeave => 2,
             CardBackId::GreyCross => 3,
+            CardBackId::Ai01 => 4,
+            CardBackId::Ai02 => 5,
+            CardBackId::Retro01 => 6,
+            CardBackId::Retro02 => 7,
+            CardBackId::Retro03 => 8,
+            CardBackId::Retro04 => 9,
         }
     }
 
@@ -116,6 +132,12 @@ impl CardBackId {
             1 => Some(CardBackId::RedWeave),
             2 => Some(CardBackId::BlueWeave),
             3 => Some(CardBackId::GreyCross),
+            4 => Some(CardBackId::Ai01),
+            5 => Some(CardBackId::Ai02),
+            6 => Some(CardBackId::Retro01),
+            7 => Some(CardBackId::Retro02),
+            8 => Some(CardBackId::Retro03),
+            9 => Some(CardBackId::Retro04),
             _ => None,
         }
     }
@@ -134,6 +156,21 @@ struct CardBackPixels {
     data: Vec<u8>,
     width: u32,
     height: u32,
+}
+
+struct CardBackListMetrics {
+    margin: f32,
+    list_width: f32,
+    item_height: f32,
+    view_top: f32,
+    view_bottom: f32,
+    view_height: f32,
+}
+
+impl CardBackListMetrics {
+    fn content_end(&self) -> f32 {
+        self.margin + CARD_BACK_CHOICES.len() as f32 * self.item_height
+    }
 }
 
 fn invalid_card_back_error() -> windows::core::Error {
@@ -194,7 +231,7 @@ fn decode_card_back_pixels(
     }
 }
 
-const CARD_BACK_CHOICES: &[CardBackChoice; 4] = &[
+const CARD_BACK_CHOICES: &[CardBackChoice; 10] = &[
     CardBackChoice {
         id: CardBackId::Classic,
         name: "Classic",
@@ -202,6 +239,54 @@ const CARD_BACK_CHOICES: &[CardBackChoice; 4] = &[
         credit: "MD Hearts",
         png: include_bytes!("../../../../assets/card_back.png"),
         preview_color: [0.8, 0.1, 0.1, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::Ai01,
+        name: "AI Back 01",
+        description: "AI-generated abstract back 01.",
+        credit: "",
+        png: include_bytes!("../../../../assets/card_back_AI_01.png"),
+        preview_color: [0.55, 0.28, 0.72, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::Ai02,
+        name: "AI Back 02",
+        description: "AI-generated abstract back 02.",
+        credit: "",
+        png: include_bytes!("../../../../assets/card_back_AI_02.png"),
+        preview_color: [0.2, 0.55, 0.6, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::Retro01,
+        name: "Retro Back 01",
+        description: "Retro-inspired variant 01.",
+        credit: "",
+        png: include_bytes!("../../../../assets/card_back_retro_01.png"),
+        preview_color: [0.9, 0.5, 0.25, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::Retro02,
+        name: "Retro Back 02",
+        description: "Retro-inspired variant 02.",
+        credit: "",
+        png: include_bytes!("../../../../assets/card_back_retro_02.png"),
+        preview_color: [0.72, 0.34, 0.6, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::Retro03,
+        name: "Retro Back 03",
+        description: "Retro-inspired variant 03.",
+        credit: "",
+        png: include_bytes!("../../../../assets/card_back_retro_03.png"),
+        preview_color: [0.28, 0.45, 0.78, 1.0],
+    },
+    CardBackChoice {
+        id: CardBackId::Retro04,
+        name: "Retro Back 04",
+        description: "Retro-inspired variant 04.",
+        credit: "",
+        png: include_bytes!("../../../../assets/card_back_retro_04.png"),
+        preview_color: [0.88, 0.26, 0.34, 1.0],
     },
     CardBackChoice {
         id: CardBackId::RedWeave,
@@ -2342,7 +2427,6 @@ impl AboutDialogState {
             center_window(owner, hwnd);
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
-
         unsafe {
             let mut msg = MSG::default();
             while IsWindow(Some(hwnd)).as_bool() {
@@ -2760,12 +2844,6 @@ unsafe extern "system" fn about_window_proc(
             LRESULT(1)
         },
         WM_CLOSE => {
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    state.result = None;
-                    state.store_result();
-                }
-            }
             unsafe {
                 let _ = DestroyWindow(hwnd);
             }
@@ -2795,10 +2873,11 @@ unsafe extern "system" fn about_window_proc(
                 );
             }
             if let Some(cell) = about_state_cell(hwnd) {
-                let mut state = cell.borrow_mut();
-                let new_dpi = dpi_from_wparam(wparam);
-                state.set_dpi(new_dpi);
-                let _ = state.resize(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let new_dpi = dpi_from_wparam(wparam);
+                    state.set_dpi(new_dpi);
+                    let _ = state.resize(hwnd);
+                }
             }
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, true);
@@ -2807,7 +2886,9 @@ unsafe extern "system" fn about_window_proc(
         }
         WM_SIZE => {
             if let Some(cell) = about_state_cell(hwnd) {
-                let _ = cell.borrow_mut().resize(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let _ = state.resize(hwnd);
+                }
             }
             LRESULT(0)
         }
@@ -2817,7 +2898,9 @@ unsafe extern "system" fn about_window_proc(
                 let _ = BeginPaint(hwnd, &mut ps);
             }
             if let Some(cell) = about_state_cell(hwnd) {
-                let _ = cell.borrow_mut().draw(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let _ = state.draw(hwnd);
+                }
             }
             unsafe {
                 let _ = EndPaint(hwnd, &ps);
@@ -2843,7 +2926,6 @@ unsafe extern "system" fn about_window_proc(
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
-
 fn about_state_ptr(hwnd: HWND) -> Option<*mut RefCell<AboutDialogState>> {
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     if ptr == 0 {
@@ -3497,6 +3579,8 @@ struct CardBackDialogState {
     wic: IWICImagingFactory,
     bitmaps: Vec<Option<ID2D1Bitmap>>,
     selected: usize,
+    scroll_offset: f32,
+    scroll_max: f32,
     dpi: DpiScale,
     result: Option<CardBackId>,
     result_sink: Rc<RefCell<Option<CardBackId>>>,
@@ -3557,7 +3641,7 @@ impl CardBackDialog {
             right: scaled_width,
             bottom: scaled_height,
         };
-        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
+        let style = (WS_OVERLAPPEDWINDOW | WS_VSCROLL) & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
         unsafe {
             let _ = AdjustWindowRectEx(&mut window_rect, style, false, WINDOW_EX_STYLE::default());
         }
@@ -3664,6 +3748,8 @@ impl CardBackDialogState {
             wic,
             bitmaps: CARD_BACK_CHOICES.iter().map(|_| None).collect(),
             selected: card_back_choice_index(initial),
+            scroll_offset: 0.0,
+            scroll_max: 0.0,
             dpi: DpiScale::uniform(initial_dpi),
             result: None,
             result_sink,
@@ -3679,6 +3765,148 @@ impl CardBackDialogState {
             return;
         }
         self.dpi = dpi;
+    }
+
+    fn list_metrics(&self, layout: LayoutSize) -> CardBackListMetrics {
+        let margin = layout.width * 0.05;
+        let list_width = (layout.width * 0.36).clamp(220.0, layout.width * 0.45);
+        let base_item = (layout.height - margin * 2.0) / 4.0;
+        let item_height = base_item.clamp(96.0, 160.0);
+        let view_top = margin;
+        let view_bottom = layout.height - margin;
+        let view_height = (view_bottom - view_top).max(1.0);
+        CardBackListMetrics {
+            margin,
+            list_width,
+            item_height,
+            view_top,
+            view_bottom,
+            view_height,
+        }
+    }
+
+    fn recompute_scroll_max(&mut self, metrics: &CardBackListMetrics) {
+        let max = (metrics.content_end() - metrics.view_bottom).max(0.0);
+        self.scroll_max = max;
+        if self.scroll_max <= 0.0 {
+            self.scroll_offset = 0.0;
+        } else {
+            self.scroll_offset = self.scroll_offset.clamp(0.0, self.scroll_max);
+        }
+    }
+
+    fn set_scroll_offset(&mut self, offset: f32) -> bool {
+        let clamped = offset.clamp(0.0, self.scroll_max.max(0.0));
+        if (clamped - self.scroll_offset).abs() > f32::EPSILON {
+            self.scroll_offset = clamped;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn update_scrollbar(&mut self, hwnd: HWND, metrics: &CardBackListMetrics) {
+        let content_end = metrics.content_end();
+        let mut info = SCROLLINFO {
+            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+            fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+            ..Default::default()
+        };
+        info.nMin = 0;
+        info.nMax = (content_end - metrics.view_top).ceil().max(0.0) as i32;
+        info.nPage = metrics.view_height.max(1.0).ceil() as u32;
+        let max_pos = info.nMax.saturating_sub(info.nPage as i32).max(0);
+        let pos = self.scroll_offset.round() as i32;
+        info.nPos = pos.clamp(0, max_pos);
+        unsafe {
+            SetScrollInfo(hwnd, SB_VERT, &info, false);
+        }
+        self.scroll_offset = info.nPos as f32;
+    }
+
+    fn prepare_metrics_for_draw(&mut self, hwnd: HWND, layout: LayoutSize) -> CardBackListMetrics {
+        let metrics = self.list_metrics(layout);
+        self.recompute_scroll_max(&metrics);
+        self.update_scrollbar(hwnd, &metrics);
+        metrics
+    }
+
+    fn ensure_selection_visible(&mut self, metrics: &CardBackListMetrics) -> bool {
+        if CARD_BACK_CHOICES.is_empty() {
+            return false;
+        }
+        let rect = self.position_for_choice(
+            self.selected,
+            metrics.margin,
+            metrics.list_width,
+            metrics.item_height,
+        );
+        let mut offset = self.scroll_offset;
+        let top = rect.top - offset;
+        let bottom = rect.bottom - offset;
+        if top < metrics.view_top {
+            offset -= metrics.view_top - top;
+        } else if bottom > metrics.view_bottom {
+            offset += bottom - metrics.view_bottom;
+        }
+        self.set_scroll_offset(offset)
+    }
+
+    fn ensure_selection_visible_now(&mut self, hwnd: HWND) {
+        let layout = self.layout_size(client_size(hwnd));
+        let metrics = self.list_metrics(layout);
+        self.recompute_scroll_max(&metrics);
+        self.ensure_selection_visible(&metrics);
+        self.update_scrollbar(hwnd, &metrics);
+    }
+
+    fn scroll_by(&mut self, amount: f32) -> bool {
+        self.set_scroll_offset(self.scroll_offset + amount)
+    }
+
+    fn handle_vscroll(&mut self, hwnd: HWND, wparam: WPARAM, layout: LayoutSize) -> bool {
+        let metrics = self.list_metrics(layout);
+        self.recompute_scroll_max(&metrics);
+        let command = SCROLLBAR_COMMAND(((wparam.0 & 0xFFFF) as i16) as i32);
+        let line = (metrics.item_height * 0.6).max(16.0);
+        let page = metrics.view_height.max(metrics.item_height).max(32.0);
+        let mut changed = false;
+        match command {
+            c if c == SB_LINEUP => changed = self.scroll_by(-line),
+            c if c == SB_LINEDOWN => changed = self.scroll_by(line),
+            c if c == SB_PAGEUP => changed = self.scroll_by(-page),
+            c if c == SB_PAGEDOWN => changed = self.scroll_by(page),
+            c if c == SB_TOP => changed = self.scroll_by(-self.scroll_offset),
+            c if c == SB_BOTTOM => changed = self.scroll_by(self.scroll_max - self.scroll_offset),
+            c if c == SB_THUMBTRACK || c == SB_THUMBPOSITION => {
+                let mut info = SCROLLINFO {
+                    cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                    fMask: SIF_ALL,
+                    ..Default::default()
+                };
+                unsafe {
+                    if GetScrollInfo(hwnd, SB_VERT, &mut info).is_ok() {
+                        changed = self.set_scroll_offset(info.nTrackPos as f32);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.update_scrollbar(hwnd, &metrics);
+        changed
+    }
+
+    fn handle_mouse_wheel(&mut self, hwnd: HWND, delta: i32, layout: LayoutSize) -> bool {
+        if delta == 0 {
+            return false;
+        }
+        let metrics = self.list_metrics(layout);
+        self.recompute_scroll_max(&metrics);
+        let line = (metrics.item_height * 0.6).max(16.0);
+        let amount = -(delta as f32 / 120.0) * line;
+        let changed = self.scroll_by(amount);
+        self.update_scrollbar(hwnd, &metrics);
+        changed
     }
 
     fn ensure_render_target(&mut self, hwnd: HWND) -> Result<()> {
@@ -3782,23 +4010,27 @@ impl CardBackDialogState {
         let Some(rt) = self.render_target.as_ref().cloned() else {
             return Ok(());
         };
-        let size_px = client_size(hwnd);
-        if size_px.width == 0 || size_px.height == 0 {
+        let size = client_size(hwnd);
+        if size.width == 0 || size.height == 0 {
             return Ok(());
         }
-        let layout = self.layout_size(size_px);
+
+        unsafe {
+            rt.BeginDraw();
+        }
+
+        let layout = self.layout_size(size);
+        let metrics = self.prepare_metrics_for_draw(hwnd, layout);
         let width = layout.width;
         let height = layout.height;
-        let (dx, dy) = self.dpi.as_f32_pair();
-        unsafe {
-            rt.SetDpi(dx, dy);
-        }
-        let margin = width * 0.05;
-        let list_width = (width * 0.36).clamp(180.0, width * 0.45);
+        let margin = metrics.margin;
+        let list_width = metrics.list_width;
+        let item_height = metrics.item_height;
+
         let preview_left = margin + list_width + margin;
         let preview_rect = D2D_RECT_F {
             left: preview_left,
-            top: margin + 32.0,
+            top: margin,
             right: width - margin,
             bottom: height - margin - 54.0,
         };
@@ -3808,18 +4040,6 @@ impl CardBackDialogState {
             right: width - margin,
             bottom: height - margin,
         };
-        let item_height =
-            ((height - margin * 2.0) / CARD_BACK_CHOICES.len() as f32).clamp(72.0, 140.0);
-
-        unsafe {
-            rt.BeginDraw();
-            rt.Clear(Some(&D2D1_COLOR_F {
-                r: 0.04,
-                g: 0.11,
-                b: 0.16,
-                a: 1.0,
-            }));
-        }
 
         let list_bg = unsafe {
             rt.CreateSolidColorBrush(
@@ -3879,17 +4099,29 @@ impl CardBackDialogState {
 
         let list_rect = D2D_RECT_F {
             left: margin,
-            top: margin,
+            top: metrics.view_top,
             right: margin + list_width,
-            bottom: height - margin,
+            bottom: metrics.view_bottom,
         };
+
         unsafe {
+            rt.Clear(Some(&D2D1_COLOR_F {
+                r: 0.04,
+                g: 0.11,
+                b: 0.16,
+                a: 1.0,
+            }));
             rt.FillRectangle(&list_rect, &list_bg);
             rt.DrawRectangle(&list_rect, &list_border, 1.5, None);
+            rt.PushAxisAlignedClip(&list_rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         }
 
         for (idx, choice) in CARD_BACK_CHOICES.iter().enumerate() {
-            let rect = self.position_for_choice(idx, margin, list_width, item_height);
+            let base_rect = self.position_for_choice(idx, margin, list_width, item_height);
+            let rect = translate_rect_y(base_rect, -self.scroll_offset);
+            if rect.bottom <= list_rect.top || rect.top >= list_rect.bottom {
+                continue;
+            }
             let [r, g, b, _] = choice.preview_color;
             let highlight = unsafe {
                 rt.CreateSolidColorBrush(
@@ -3950,6 +4182,7 @@ impl CardBackDialogState {
         }
 
         unsafe {
+            rt.PopAxisAlignedClip();
             rt.FillRectangle(&preview_rect, &preview_bg);
             rt.DrawRectangle(&preview_rect, &list_border, 1.5, None);
         }
@@ -4007,7 +4240,7 @@ impl CardBackDialogState {
             )?;
         }
 
-        let instructions = "Use Up/Down arrows to browse, Enter to apply, Esc to cancel.";
+        let instructions = "Use Up/Down arrows or the mouse wheel/scrollbar to browse. Enter to apply, Esc to cancel.";
         let instructions_wide = string_to_wide(instructions);
         unsafe {
             rt.DrawText(
@@ -4020,8 +4253,8 @@ impl CardBackDialogState {
             );
         }
 
-        let end_result = unsafe { rt.EndDraw(None, None) };
-        match end_result {
+        let result = unsafe { rt.EndDraw(None, None) };
+        match result {
             Ok(_) => Ok(()),
             Err(err) => {
                 if err.code().0 == D2DERR_RECREATE_TARGET {
@@ -4118,10 +4351,11 @@ unsafe extern "system" fn card_back_window_proc(
                 );
             }
             if let Some(cell) = card_back_state_cell(hwnd) {
-                let mut state = cell.borrow_mut();
-                let new_dpi = dpi_from_wparam(wparam);
-                state.set_dpi(new_dpi);
-                let _ = state.resize(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let new_dpi = dpi_from_wparam(wparam);
+                    state.set_dpi(new_dpi);
+                    let _ = state.resize(hwnd);
+                }
             }
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, true);
@@ -4130,7 +4364,9 @@ unsafe extern "system" fn card_back_window_proc(
         }
         WM_SIZE => {
             if let Some(cell) = card_back_state_cell(hwnd) {
-                let _ = cell.borrow_mut().resize(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let _ = state.resize(hwnd);
+                }
             }
             LRESULT(0)
         }
@@ -4140,7 +4376,9 @@ unsafe extern "system" fn card_back_window_proc(
                 let _ = BeginPaint(hwnd, &mut ps);
             }
             if let Some(cell) = card_back_state_cell(hwnd) {
-                let _ = cell.borrow_mut().draw(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let _ = state.draw(hwnd);
+                }
             }
             unsafe {
                 let _ = EndPaint(hwnd, &ps);
@@ -4150,35 +4388,38 @@ unsafe extern "system" fn card_back_window_proc(
         WM_KEYDOWN => {
             let key = wparam.0 as u32;
             if let Some(cell) = card_back_state_cell(hwnd) {
-                let mut state = cell.borrow_mut();
-                match key {
-                    VK_ESCAPE => {
-                        state.result = None;
-                        state.store_result();
-                        unsafe {
-                            let _ = DestroyWindow(hwnd);
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    match key {
+                        VK_ESCAPE => {
+                            state.result = None;
+                            state.store_result();
+                            unsafe {
+                                let _ = DestroyWindow(hwnd);
+                            }
                         }
-                    }
-                    VK_RETURN => {
-                        state.accept();
-                        state.store_result();
-                        unsafe {
-                            let _ = DestroyWindow(hwnd);
+                        VK_RETURN => {
+                            state.accept();
+                            state.store_result();
+                            unsafe {
+                                let _ = DestroyWindow(hwnd);
+                            }
                         }
-                    }
-                    VK_UP => {
-                        state.move_selection(-1);
-                        unsafe {
-                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        VK_UP => {
+                            state.move_selection(-1);
+                            state.ensure_selection_visible_now(hwnd);
+                            unsafe {
+                                let _ = InvalidateRect(Some(hwnd), None, true);
+                            }
                         }
-                    }
-                    VK_DOWN => {
-                        state.move_selection(1);
-                        unsafe {
-                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        VK_DOWN => {
+                            state.move_selection(1);
+                            state.ensure_selection_visible_now(hwnd);
+                            unsafe {
+                                let _ = InvalidateRect(Some(hwnd), None, true);
+                            }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             LRESULT(0)
@@ -4187,32 +4428,63 @@ unsafe extern "system" fn card_back_window_proc(
             let raw_x = (lparam.0 & 0xFFFF) as i16 as f32;
             let raw_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
             if let Some(cell) = card_back_state_cell(hwnd) {
-                let mut state = cell.borrow_mut();
-                let (sx, sy) = state.dpi.inv_scales();
-                let x = raw_x * sx;
-                let y = raw_y * sy;
-                let layout = state.layout_size(client_size(hwnd));
-                let width = layout.width;
-                let height = layout.height;
-                let margin = width * 0.05;
-                let list_width = (width * 0.36).clamp(180.0, width * 0.45);
-                let item_height =
-                    ((height - margin * 2.0) / CARD_BACK_CHOICES.len() as f32).clamp(72.0, 140.0);
-                for idx in 0..CARD_BACK_CHOICES.len() {
-                    let rect = state.position_for_choice(idx, margin, list_width, item_height);
-                    if x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom {
-                        state.selected = idx;
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let (sx, sy) = state.dpi.inv_scales();
+                    let layout = state.layout_size(client_size(hwnd));
+                    let metrics = state.list_metrics(layout);
+                    let x = raw_x * sx;
+                    let y = raw_y * sy + state.scroll_offset;
+                    for idx in 0..CARD_BACK_CHOICES.len() {
+                        let rect = state.position_for_choice(
+                            idx,
+                            metrics.margin,
+                            metrics.list_width,
+                            metrics.item_height,
+                        );
+                        if x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom {
+                            state.selected = idx;
+                            state.ensure_selection_visible_now(hwnd);
+                            unsafe {
+                                let _ = InvalidateRect(Some(hwnd), None, true);
+                            }
+                            if value == WM_LBUTTONDBLCLK {
+                                state.accept();
+                                state.store_result();
+                                unsafe {
+                                    let _ = DestroyWindow(hwnd);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_VSCROLL => {
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let layout = state.layout_size(client_size(hwnd));
+                    if state.handle_vscroll(hwnd, wparam, layout) {
                         unsafe {
                             let _ = InvalidateRect(Some(hwnd), None, true);
                         }
-                        if value == WM_LBUTTONDBLCLK {
-                            state.accept();
-                            state.store_result();
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam.0 >> 16) & 0xFFFF) as i16 as i32;
+            if delta != 0 {
+                if let Some(cell) = card_back_state_cell(hwnd) {
+                    if let Ok(mut state) = cell.try_borrow_mut() {
+                        let layout = state.layout_size(client_size(hwnd));
+                        if state.handle_mouse_wheel(hwnd, delta, layout) {
                             unsafe {
-                                let _ = DestroyWindow(hwnd);
+                                let _ = InvalidateRect(Some(hwnd), None, true);
                             }
                         }
-                        break;
                     }
                 }
             }
@@ -4235,6 +4507,13 @@ fn card_back_state_ptr(hwnd: HWND) -> Option<*mut RefCell<CardBackDialogState>> 
 fn card_back_state_cell(hwnd: HWND) -> Option<&'static RefCell<CardBackDialogState>> {
     card_back_state_ptr(hwnd).map(|p| unsafe { &*p })
 }
+
+fn translate_rect_y(mut rect: D2D_RECT_F, offset: f32) -> D2D_RECT_F {
+    rect.top += offset;
+    rect.bottom += offset;
+    rect
+}
+
 fn card_corner_radius(rect: &D2D_RECT_F) -> f32 {
     let width = (rect.right - rect.left).abs();
     let height = (rect.bottom - rect.top).abs();
