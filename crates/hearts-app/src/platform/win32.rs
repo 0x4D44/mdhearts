@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ffi::{OsStr, c_void};
 use std::os::windows::ffi::OsStrExt;
+use std::rc::Rc;
 
 use crate::controller::GameController;
 use hearts_core::model::card::Card as ModelCard;
@@ -40,20 +41,20 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
-    ACCEL, AdjustWindowRectEx, AppendMenuW, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-    CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-    DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY, GWLP_USERDATA, GetClientRect,
-    GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, HACCEL,
-    HMENU, IDC_ARROW, IDI_APPLICATION, IDNO, IDYES, IsWindow, LoadCursorW, LoadIconW,
-    MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK, MB_YESNOCANCEL, MF_POPUP, MF_SEPARATOR, MF_STRING,
-    MSG, MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SM_CXSCREEN,
+    ACCEL, AdjustWindowRectEx, AppendMenuW, CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW,
+    CW_USEDEFAULT, CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW,
+    DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY,
+    GWLP_USERDATA, GetClientRect, GetMessageW, GetSystemMetrics, GetWindowLongPtrW,
+    GetWindowPlacement, GetWindowRect, HACCEL, HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow,
+    LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG,
+    MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SM_CXSCREEN,
     SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
     SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
     SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
     SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
     WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE, WM_TIMER, WNDCLASSEXW,
-    WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WaitMessage,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE,
+    WM_TIMER, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WaitMessage,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -62,6 +63,8 @@ const D2DERR_RECREATE_TARGET: i32 = 0x8899_000C_u32 as i32;
 const VK_F2: u32 = 0x71;
 const VK_RETURN: u32 = 0x0D;
 const VK_ESCAPE: u32 = 0x1B;
+const VK_UP: u32 = 0x26;
+const VK_DOWN: u32 = 0x28;
 
 const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
@@ -1800,42 +1803,55 @@ unsafe extern "system" fn window_proc(
         }
         WM_COMMAND => {
             let id = (wparam.0 & 0xFFFF) as u32;
-            let mut show_card_back = false;
+            let mut card_back_request: Option<CardBackId> = None;
             let mut show_about = false;
             let mut show_rules = false;
             if let Some(cell) = state_cell(hwnd) {
-                let mut state = cell.borrow_mut();
-                match id {
-                    ID_GAME_NEW => {
-                        state.controller =
-                            GameController::new_with_seed(None, PlayerPosition::North);
-                        state.passing_select.clear();
-                        unsafe {
-                            let _ = InvalidateRect(Some(hwnd), None, true);
+                {
+                    let mut state = cell.borrow_mut();
+                    match id {
+                        ID_GAME_NEW => {
+                            state.controller =
+                                GameController::new_with_seed(None, PlayerPosition::North);
+                            state.passing_select.clear();
+                            unsafe {
+                                let _ = InvalidateRect(Some(hwnd), None, true);
+                            }
                         }
-                    }
-                    ID_GAME_RESTART => {
-                        state.controller.restart_round();
-                        unsafe {
-                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        ID_GAME_RESTART => {
+                            state.controller.restart_round();
+                            unsafe {
+                                let _ = InvalidateRect(Some(hwnd), None, true);
+                            }
                         }
+                        ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
+                        ID_OPTIONS_CARD_BACK => {
+                            card_back_request = Some(state.card_back);
+                        }
+                        ID_HELP_RULES => {
+                            show_rules = true;
+                        }
+                        ID_HELP_ABOUT => {
+                            show_about = true;
+                        }
+                        _ => {}
                     }
-                    ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
-                    ID_OPTIONS_CARD_BACK => {
-                        show_card_back = true;
-                    }
-                    ID_HELP_RULES => {
-                        show_rules = true;
-                    }
-                    ID_HELP_ABOUT => {
-                        show_about = true;
-                    }
-                    _ => {}
                 }
-            }
-            if show_card_back {
-                if let Err(err) = show_card_back_dialog(hwnd) {
-                    debug_out("mdhearts: ", &format!("Card back dialog error: {:?}", err));
+                if let Some(current) = card_back_request {
+                    match CardBackDialog::run(hwnd, current) {
+                        Ok(Some(choice)) => {
+                            let mut state = cell.borrow_mut();
+                            state.set_card_back(choice);
+                            save_card_back(choice);
+                            unsafe {
+                                let _ = InvalidateRect(Some(hwnd), None, true);
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            debug_out("mdhearts: ", &format!("Card back dialog error: {:?}", err));
+                        }
+                    }
                 }
             }
             if show_rules {
@@ -1905,64 +1921,6 @@ fn debug_out(prefix: &str, msg: &str) {
     }
 }
 
-fn show_card_back_dialog(owner: HWND) -> Result<()> {
-    let current = match state_cell(owner) {
-        Some(cell) => cell.borrow().card_back,
-        None => return Ok(()),
-    };
-
-    let len = CARD_BACK_CHOICES.len();
-    if len == 0 {
-        return Ok(());
-    }
-
-    let mut index = card_back_choice_index(current);
-    let mut selected: Option<CardBackId> = None;
-
-    loop {
-        let choice = &CARD_BACK_CHOICES[index];
-        let [r, g, b, _] = choice.preview_color;
-        let to_byte = |v: f32| -> u8 { (v.max(0.0).min(1.0) * 255.0).round() as u8 };
-        let color_hint = format!("#{:02X}{:02X}{:02X}", to_byte(r), to_byte(g), to_byte(b));
-        let message = format!(
-            "{0}\n{1}\n{2}\nColor hint: {3}\n\nSelect this card back?\n\nYes = apply\nNo = view next option\nCancel = leave unchanged",
-            choice.name, choice.description, choice.credit, color_hint
-        );
-        let body = string_to_wide_z(&message);
-        let title = string_to_wide_z("Card Back Options");
-        let response = unsafe {
-            MessageBoxW(
-                Some(owner),
-                PCWSTR(body.as_ptr()),
-                PCWSTR(title.as_ptr()),
-                MB_YESNOCANCEL | MB_ICONQUESTION,
-            )
-        };
-        match response.0 {
-            x if x == IDYES.0 => {
-                selected = Some(choice.id);
-                break;
-            }
-            x if x == IDNO.0 => {
-                index = (index + 1) % len;
-            }
-            _ => break,
-        }
-    }
-
-    if let Some(id) = selected {
-        if let Some(cell) = state_cell(owner) {
-            let mut state = cell.borrow_mut();
-            state.set_card_back(id);
-            save_card_back(id);
-            unsafe {
-                let _ = InvalidateRect(Some(owner), None, true);
-            }
-        }
-    }
-
-    Ok(())
-}
 fn show_rules_dialog(owner: HWND) {
     let text = "Hearts is played to avoid taking penalty cards.\r
 \r
@@ -3302,6 +3260,730 @@ struct AtlasMeta {
     rank_order: Option<Vec<String>>,
 }
 
+struct CardBackDialogState {
+    factory: ID2D1Factory,
+    list_format: IDWriteTextFormat,
+    detail_format: IDWriteTextFormat,
+    render_target: Option<ID2D1HwndRenderTarget>,
+    wic: IWICImagingFactory,
+    bitmaps: Vec<Option<ID2D1Bitmap>>,
+    selected: usize,
+    dpi: DpiScale,
+    result: Option<CardBackId>,
+    result_sink: Rc<RefCell<Option<CardBackId>>>,
+}
+
+struct CardBackDialog;
+
+impl CardBackDialog {
+    fn run(owner: HWND, current: CardBackId) -> Result<Option<CardBackId>> {
+        static CLASS: std::sync::Once = std::sync::Once::new();
+        let class_name = w!("MDHEARTS_CARD_BACK");
+        CLASS.call_once(|| {
+            let hmodule = unsafe { GetModuleHandleW(None).unwrap_or_default() };
+            let hinstance = HINSTANCE(hmodule.0);
+            let icon = unsafe {
+                LoadIconW(Some(hinstance), make_int_resource(IDI_APPICON))
+                    .unwrap_or_else(|_| LoadIconW(None, IDI_APPLICATION).unwrap_or_default())
+            };
+            let cursor = unsafe { LoadCursorW(None, IDC_ARROW).unwrap_or_default() };
+            let wc = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
+                lpfnWndProc: Some(card_back_window_proc),
+                cbClsExtra: 0,
+                cbWndExtra: std::mem::size_of::<*const RefCell<CardBackDialogState>>() as i32,
+                hInstance: hinstance,
+                hIcon: icon,
+                hCursor: cursor,
+                hbrBackground: HBRUSH::default(),
+                lpszMenuName: PCWSTR::null(),
+                lpszClassName: class_name,
+                hIconSm: icon,
+            };
+            unsafe {
+                let _ = RegisterClassExW(&wc);
+            }
+        });
+
+        let result_sink = Rc::new(RefCell::new(None));
+        let state = RefCell::new(CardBackDialogState::new(current, result_sink.clone())?);
+        let boxed = Box::new(state);
+        let ptr = Box::into_raw(boxed);
+
+        let dpi_scale = unsafe {
+            if !owner.0.is_null() {
+                DpiScale::uniform(GetDpiForWindow(owner))
+            } else {
+                DpiScale::uniform(GetDpiForSystem())
+            }
+        };
+        let base_width = 640;
+        let base_height = 420;
+        let scaled_width = (base_width * dpi_scale.x as i32 + 48) / 96;
+        let scaled_height = (base_height * dpi_scale.y as i32 + 48) / 96;
+        let mut window_rect = RECT {
+            left: 0,
+            top: 0,
+            right: scaled_width,
+            bottom: scaled_height,
+        };
+        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
+        unsafe {
+            let _ = AdjustWindowRectEx(&mut window_rect, style, false, WINDOW_EX_STYLE::default());
+        }
+        let width_px = window_rect.right - window_rect.left;
+        let height_px = window_rect.bottom - window_rect.top;
+        let hwnd_res = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class_name,
+                w!("Choose Card Back"),
+                style,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                width_px,
+                height_px,
+                Some(owner),
+                None,
+                None,
+                Some(ptr.cast::<c_void>()),
+            )
+        };
+
+        let hwnd = match hwnd_res {
+            Ok(h) => h,
+            Err(err) => {
+                unsafe {
+                    let _ = Box::from_raw(ptr);
+                }
+                return Err(err);
+            }
+        };
+
+        unsafe {
+            center_window(owner, hwnd);
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+
+        unsafe {
+            let mut msg = MSG::default();
+            while IsWindow(Some(hwnd)).as_bool() {
+                if PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    if msg.message == WM_QUIT {
+                        PostQuitMessage(msg.wParam.0 as i32);
+                        break;
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                } else {
+                    let _ = WaitMessage();
+                }
+            }
+        }
+
+        Ok(result_sink.borrow().clone())
+    }
+}
+
+impl CardBackDialogState {
+    fn new(initial: CardBackId, result_sink: Rc<RefCell<Option<CardBackId>>>) -> Result<Self> {
+        let factory: ID2D1Factory = unsafe {
+            D2D1CreateFactory::<ID2D1Factory>(
+                D2D1_FACTORY_TYPE_MULTI_THREADED,
+                Some(&D2D1_FACTORY_OPTIONS::default()),
+            )?
+        };
+        let dwrite: IDWriteFactory =
+            unsafe { DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED)? };
+        let list_format = unsafe {
+            let format = dwrite.CreateTextFormat(
+                w!("Segoe UI Semibold"),
+                None,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                19.0,
+                w!("en-us"),
+            )?;
+            format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)?;
+            format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            format
+        };
+        let detail_format = unsafe {
+            let format = dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                15.0,
+                w!("en-us"),
+            )?;
+            format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)?;
+            format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            format
+        };
+        let wic: IWICImagingFactory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
+        let initial_dpi = unsafe { GetDpiForSystem() };
+        Ok(Self {
+            factory,
+            list_format,
+            detail_format,
+            render_target: None,
+            wic,
+            bitmaps: CARD_BACK_CHOICES.iter().map(|_| None).collect(),
+            selected: card_back_choice_index(initial),
+            dpi: DpiScale::uniform(initial_dpi),
+            result: None,
+            result_sink,
+        })
+    }
+
+    fn layout_size(&self, size: D2D_SIZE_U) -> LayoutSize {
+        layout_size_for(size, self.dpi)
+    }
+
+    fn set_dpi(&mut self, dpi: DpiScale) {
+        if self.dpi == dpi {
+            return;
+        }
+        self.dpi = dpi;
+    }
+
+    fn ensure_render_target(&mut self, hwnd: HWND) -> Result<()> {
+        if self.render_target.is_some() {
+            return Ok(());
+        }
+        let size = client_size(hwnd);
+        let props = D2D1_RENDER_TARGET_PROPERTIES::default();
+        let hwnd_props = D2D1_HWND_RENDER_TARGET_PROPERTIES {
+            hwnd,
+            pixelSize: D2D_SIZE_U {
+                width: size.width.max(1),
+                height: size.height.max(1),
+            },
+            presentOptions: D2D1_PRESENT_OPTIONS_NONE,
+        };
+        let rt = unsafe { self.factory.CreateHwndRenderTarget(&props, &hwnd_props)? };
+        let (dx, dy) = self.dpi.as_f32_pair();
+        unsafe {
+            rt.SetDpi(dx, dy);
+        }
+        self.render_target = Some(rt);
+        Ok(())
+    }
+
+    fn ensure_bitmap(&mut self, rt: &ID2D1HwndRenderTarget, idx: usize) -> Result<()> {
+        if self.bitmaps.get(idx).and_then(|b| b.as_ref()).is_some() {
+            return Ok(());
+        }
+        let info = &CARD_BACK_CHOICES[idx];
+        let stream: IWICStream = unsafe { self.wic.CreateStream()? };
+        unsafe {
+            stream.InitializeFromMemory(info.png)?;
+            let decoder = self.wic.CreateDecoderFromStream(
+                &stream,
+                std::ptr::null(),
+                WICDecodeMetadataCacheOnLoad,
+            )?;
+            let frame: IWICBitmapFrameDecode = decoder.GetFrame(0)?;
+            let converter: IWICFormatConverter = self.wic.CreateFormatConverter()?;
+            converter.Initialize(
+                &frame,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
+            let bmp = rt.CreateBitmapFromWicBitmap(&converter, None)?;
+            if let Some(slot) = self.bitmaps.get_mut(idx) {
+                *slot = Some(bmp);
+            }
+        }
+        Ok(())
+    }
+
+    fn resize(&mut self, hwnd: HWND) -> Result<()> {
+        if self.render_target.is_some() {
+            let rect = client_rect(hwnd);
+            let width = if rect.right > rect.left {
+                (rect.right - rect.left) as u32
+            } else {
+                0
+            };
+            let height = if rect.bottom > rect.top {
+                (rect.bottom - rect.top) as u32
+            } else {
+                0
+            };
+            let mut drop_rt = false;
+            if let Some(rt) = self.render_target.as_ref() {
+                let resize_result = unsafe { rt.Resize(&D2D_SIZE_U { width, height }) };
+                match resize_result {
+                    Ok(_) => {
+                        let (dx, dy) = self.dpi.as_f32_pair();
+                        unsafe {
+                            rt.SetDpi(dx, dy);
+                        }
+                    }
+                    Err(err) => {
+                        if err.code().0 == D2DERR_RECREATE_TARGET {
+                            drop_rt = true;
+                        } else {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+            if drop_rt {
+                self.render_target = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn draw(&mut self, hwnd: HWND) -> Result<()> {
+        self.ensure_render_target(hwnd)?;
+        let Some(rt) = self.render_target.as_ref().cloned() else {
+            return Ok(());
+        };
+        let size_px = client_size(hwnd);
+        if size_px.width == 0 || size_px.height == 0 {
+            return Ok(());
+        }
+        let layout = self.layout_size(size_px);
+        let width = layout.width;
+        let height = layout.height;
+        let (dx, dy) = self.dpi.as_f32_pair();
+        unsafe {
+            rt.SetDpi(dx, dy);
+        }
+        let margin = width * 0.05;
+        let list_width = (width * 0.36).clamp(180.0, width * 0.45);
+        let preview_left = margin + list_width + margin;
+        let preview_rect = D2D_RECT_F {
+            left: preview_left,
+            top: margin + 32.0,
+            right: width - margin,
+            bottom: height - margin - 54.0,
+        };
+        let instructions_rect = D2D_RECT_F {
+            left: preview_left,
+            top: preview_rect.bottom + 12.0,
+            right: width - margin,
+            bottom: height - margin,
+        };
+        let item_height =
+            ((height - margin * 2.0) / CARD_BACK_CHOICES.len() as f32).clamp(72.0, 140.0);
+
+        unsafe {
+            rt.BeginDraw();
+            rt.Clear(Some(&D2D1_COLOR_F {
+                r: 0.04,
+                g: 0.11,
+                b: 0.16,
+                a: 1.0,
+            }));
+        }
+
+        let list_bg = unsafe {
+            rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.09,
+                    g: 0.18,
+                    b: 0.24,
+                    a: 1.0,
+                },
+                None,
+            )
+        }?;
+        let list_border = unsafe {
+            rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.18,
+                    g: 0.32,
+                    b: 0.41,
+                    a: 1.0,
+                },
+                None,
+            )
+        }?;
+        let text_brush = unsafe {
+            rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.93,
+                    g: 0.95,
+                    b: 0.97,
+                    a: 1.0,
+                },
+                None,
+            )
+        }?;
+        let instruction_brush = unsafe {
+            rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.75,
+                    g: 0.83,
+                    b: 0.90,
+                    a: 1.0,
+                },
+                None,
+            )
+        }?;
+        let preview_bg = unsafe {
+            rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.10,
+                    g: 0.19,
+                    b: 0.26,
+                    a: 1.0,
+                },
+                None,
+            )
+        }?;
+
+        let list_rect = D2D_RECT_F {
+            left: margin,
+            top: margin,
+            right: margin + list_width,
+            bottom: height - margin,
+        };
+        unsafe {
+            rt.FillRectangle(&list_rect, &list_bg);
+            rt.DrawRectangle(&list_rect, &list_border, 1.5, None);
+        }
+
+        for (idx, choice) in CARD_BACK_CHOICES.iter().enumerate() {
+            let rect = self.position_for_choice(idx, margin, list_width, item_height);
+            let [r, g, b, _] = choice.preview_color;
+            let highlight = unsafe {
+                rt.CreateSolidColorBrush(
+                    &D2D1_COLOR_F {
+                        r: r * 0.6 + 0.1,
+                        g: g * 0.6 + 0.1,
+                        b: b * 0.6 + 0.1,
+                        a: 0.85,
+                    },
+                    None,
+                )
+            }?;
+            unsafe {
+                if self.selected == idx {
+                    rt.FillRectangle(&rect, &highlight);
+                }
+                rt.DrawRectangle(&rect, &list_border, 1.0, None);
+            }
+            let name_rect = D2D_RECT_F {
+                left: rect.left + 12.0,
+                top: rect.top + 8.0,
+                right: rect.right - 12.0,
+                bottom: rect.top + 30.0,
+            };
+            let desc_rect = D2D_RECT_F {
+                left: rect.left + 12.0,
+                top: rect.top + 32.0,
+                right: rect.right - 12.0,
+                bottom: rect.bottom - 10.0,
+            };
+            let name = string_to_wide(choice.name);
+            unsafe {
+                rt.DrawText(
+                    name.as_slice(),
+                    &self.list_format,
+                    &name_rect,
+                    &text_brush,
+                    Default::default(),
+                    DWRITE_MEASURING_MODE::default(),
+                );
+            }
+            let details = format!("{}\n{}", choice.description, choice.credit);
+            let details_wide = string_to_wide(&details);
+            unsafe {
+                rt.DrawText(
+                    details_wide.as_slice(),
+                    &self.detail_format,
+                    &desc_rect,
+                    &text_brush,
+                    Default::default(),
+                    DWRITE_MEASURING_MODE::default(),
+                );
+            }
+        }
+
+        unsafe {
+            rt.FillRectangle(&preview_rect, &preview_bg);
+            rt.DrawRectangle(&preview_rect, &list_border, 1.5, None);
+        }
+
+        let label_rect = D2D_RECT_F {
+            left: preview_rect.left,
+            top: margin,
+            right: preview_rect.right,
+            bottom: margin + 26.0,
+        };
+        let label = format!("Preview: {}", CARD_BACK_CHOICES[self.selected].name);
+        let label_wide = string_to_wide(&label);
+        unsafe {
+            rt.DrawText(
+                label_wide.as_slice(),
+                &self.list_format,
+                &label_rect,
+                &text_brush,
+                Default::default(),
+                DWRITE_MEASURING_MODE::default(),
+            );
+        }
+
+        self.ensure_bitmap(&rt, self.selected)?;
+        if let Some(bmp) = self.bitmaps[self.selected].as_ref() {
+            let size = unsafe { bmp.GetSize() };
+            let bmp_w = size.width.max(1.0);
+            let bmp_h = size.height.max(1.0);
+            let avail_w = (preview_rect.right - preview_rect.left).max(1.0);
+            let avail_h = (preview_rect.bottom - preview_rect.top).max(1.0);
+            let scale = (avail_w / bmp_w).min(avail_h / bmp_h);
+            let dest_w = bmp_w * scale;
+            let dest_h = bmp_h * scale;
+            let dest = D2D_RECT_F {
+                left: preview_rect.left + (avail_w - dest_w) * 0.5,
+                top: preview_rect.top + (avail_h - dest_h) * 0.5,
+                right: preview_rect.left + (avail_w + dest_w) * 0.5,
+                bottom: preview_rect.top + (avail_h + dest_h) * 0.5,
+            };
+            unsafe {
+                rt.DrawBitmap(
+                    bmp,
+                    Some(&dest),
+                    1.0,
+                    windows::Win32::Graphics::Direct2D::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
+            }
+        }
+
+        let instructions = "Use Up/Down arrows to browse, Enter to apply, Esc to cancel.";
+        let instructions_wide = string_to_wide(instructions);
+        unsafe {
+            rt.DrawText(
+                instructions_wide.as_slice(),
+                &self.detail_format,
+                &instructions_rect,
+                &instruction_brush,
+                Default::default(),
+                DWRITE_MEASURING_MODE::default(),
+            );
+        }
+
+        let end_result = unsafe { rt.EndDraw(None, None) };
+        match end_result {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                if err.code().0 == D2DERR_RECREATE_TARGET {
+                    self.render_target = None;
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            }
+        }
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        let len = CARD_BACK_CHOICES.len() as isize;
+        let next = (self.selected as isize + delta).rem_euclid(len) as usize;
+        self.selected = next;
+    }
+
+    fn position_for_choice(
+        &self,
+        idx: usize,
+        margin: f32,
+        list_width: f32,
+        item_height: f32,
+    ) -> D2D_RECT_F {
+        let top = margin + idx as f32 * item_height;
+        D2D_RECT_F {
+            left: margin + 6.0,
+            top: top + 6.0,
+            right: margin + list_width - 6.0,
+            bottom: top + item_height - 6.0,
+        }
+    }
+
+    fn accept(&mut self) {
+        self.result = Some(CARD_BACK_CHOICES[self.selected].id);
+    }
+
+    fn store_result(&self) {
+        *self.result_sink.borrow_mut() = self.result;
+    }
+}
+
+unsafe extern "system" fn card_back_window_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_NCCREATE => unsafe {
+            let cs = &*(lparam.0 as *const CREATESTRUCTW);
+            let ptr = cs.lpCreateParams as *mut RefCell<CardBackDialogState>;
+            if !ptr.is_null() {
+                let dpi = GetDpiForWindow(hwnd);
+                (*ptr).borrow_mut().set_dpi(DpiScale::uniform(dpi));
+            }
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
+            LRESULT(1)
+        },
+        WM_CLOSE => {
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_DESTROY => LRESULT(0),
+        WM_NCDESTROY => {
+            if let Some(ptr) = card_back_state_ptr(hwnd) {
+                unsafe {
+                    let boxed: Box<RefCell<CardBackDialogState>> = Box::from_raw(ptr);
+                    boxed.borrow().store_result();
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_DPICHANGED => {
+            let suggested = unsafe { *(lparam.0 as *const RECT) };
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    suggested.left,
+                    suggested.top,
+                    suggested.right - suggested.left,
+                    suggested.bottom - suggested.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                let mut state = cell.borrow_mut();
+                let new_dpi = dpi_from_wparam(wparam);
+                state.set_dpi(new_dpi);
+                let _ = state.resize(hwnd);
+            }
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, true);
+            }
+            LRESULT(0)
+        }
+        WM_SIZE => {
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                let _ = cell.borrow_mut().resize(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            unsafe {
+                let _ = BeginPaint(hwnd, &mut ps);
+            }
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                let _ = cell.borrow_mut().draw(hwnd);
+            }
+            unsafe {
+                let _ = EndPaint(hwnd, &ps);
+            }
+            LRESULT(0)
+        }
+        WM_KEYDOWN => {
+            let key = wparam.0 as u32;
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                let mut state = cell.borrow_mut();
+                match key {
+                    VK_ESCAPE => {
+                        state.result = None;
+                        unsafe {
+                            let _ = DestroyWindow(hwnd);
+                        }
+                    }
+                    VK_RETURN => {
+                        state.accept();
+                        unsafe {
+                            let _ = DestroyWindow(hwnd);
+                        }
+                    }
+                    VK_UP => {
+                        state.move_selection(-1);
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        }
+                    }
+                    VK_DOWN => {
+                        state.move_selection(1);
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            LRESULT(0)
+        }
+        value if value == WM_LBUTTONDOWN || value == WM_LBUTTONDBLCLK => {
+            let raw_x = (lparam.0 & 0xFFFF) as i16 as f32;
+            let raw_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            if let Some(cell) = card_back_state_cell(hwnd) {
+                let mut state = cell.borrow_mut();
+                let (sx, sy) = state.dpi.inv_scales();
+                let x = raw_x * sx;
+                let y = raw_y * sy;
+                let layout = state.layout_size(client_size(hwnd));
+                let width = layout.width;
+                let height = layout.height;
+                let margin = width * 0.05;
+                let list_width = (width * 0.36).clamp(180.0, width * 0.45);
+                let item_height =
+                    ((height - margin * 2.0) / CARD_BACK_CHOICES.len() as f32).clamp(72.0, 140.0);
+                for idx in 0..CARD_BACK_CHOICES.len() {
+                    let rect = state.position_for_choice(idx, margin, list_width, item_height);
+                    if x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom {
+                        state.selected = idx;
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        }
+                        if value == WM_LBUTTONDBLCLK {
+                            state.accept();
+                            unsafe {
+                                let _ = DestroyWindow(hwnd);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn card_back_state_ptr(hwnd: HWND) -> Option<*mut RefCell<CardBackDialogState>> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    if ptr == 0 {
+        None
+    } else {
+        Some(ptr as *mut RefCell<CardBackDialogState>)
+    }
+}
+
+fn card_back_state_cell(hwnd: HWND) -> Option<&'static RefCell<CardBackDialogState>> {
+    card_back_state_ptr(hwnd).map(|p| unsafe { &*p })
+}
 impl AtlasMeta {
     fn load_from_assets() -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let text = std::fs::read_to_string("assets/cards.json")?;
