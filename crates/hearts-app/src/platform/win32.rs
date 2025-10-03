@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::{OsStr, c_void};
 use std::mem::ManuallyDrop;
 use std::os::windows::ffi::OsStrExt;
 use std::rc::Rc;
-use windows_numerics::Matrix3x2;
+use windows_numerics::{Matrix3x2, Vector2};
 
 use crate::controller::GameController;
 use hearts_core::model::card::Card as ModelCard;
@@ -20,17 +20,20 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_INTERPOLATION_MODE,
     D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_OPTIONS, D2D1_FACTORY_TYPE_MULTI_THREADED,
-    D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
-    D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES, D2D1_ROUNDED_RECT, D2D1CreateFactory,
-    ID2D1Bitmap, ID2D1Factory, ID2D1Geometry, ID2D1HwndRenderTarget,
+    D2D1_BITMAP_PROPERTIES, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_FACTORY_OPTIONS,
+    D2D1_FACTORY_TYPE_MULTI_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES, D2D1_LAYER_OPTIONS_NONE,
+    D2D1_LAYER_PARAMETERS, D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_ROUNDED_RECT, D2D1CreateFactory, ID2D1Bitmap, ID2D1Factory, ID2D1Geometry,
+    ID2D1HwndRenderTarget,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_MEASURING_MODE,
-    DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
-    DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat, IDWriteTextLayout,
+    DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+    DWRITE_MEASURING_MODE, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+    DWRITE_TEXT_ALIGNMENT, DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING,
+    DWRITE_TEXT_ALIGNMENT_TRAILING, DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
+    DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+    IDWriteTextLayout,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, InvalidateRect, PAINTSTRUCT};
@@ -640,6 +643,33 @@ impl AppState {
             self.card_back_bitmap_rot90 = None;
             self.card_back_pixels = None;
         }
+    }
+
+    fn create_hud_layout(
+        &self,
+        text: &str,
+        max_width: f32,
+        align: DWRITE_TEXT_ALIGNMENT,
+    ) -> Result<(IDWriteTextLayout, DWRITE_TEXT_METRICS)> {
+        let wide = string_to_wide(text);
+        let layout: IDWriteTextLayout = unsafe {
+            self.dwrite.CreateTextLayout(
+                wide.as_slice(),
+                &self.text_format,
+                max_width.max(10.0),
+                200.0,
+            )?
+        };
+        unsafe {
+            layout.SetTextAlignment(align)?;
+            layout.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            layout.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
+        }
+        let mut metrics = DWRITE_TEXT_METRICS::default();
+        unsafe {
+            layout.GetMetrics(&mut metrics)?;
+        }
+        Ok((layout, metrics))
     }
 
     fn set_dpi(&mut self, dpi: DpiScale) {
@@ -1603,39 +1633,129 @@ impl AppState {
             let scores = self.controller.standings();
             let hand = self.controller.penalties_this_round();
             let tricks = self.controller.tricks_won_this_round();
-            let hud = format!(
-                "Scores  N:{} E:{} S:{} W:{}
-This Hand N:{} E:{} S:{} W:{}
-Tricks N:{} E:{} S:{} W:{}",
-                scores[PlayerPosition::North.index()],
-                scores[PlayerPosition::East.index()],
-                scores[PlayerPosition::South.index()],
-                scores[PlayerPosition::West.index()],
-                hand[PlayerPosition::North.index()],
-                hand[PlayerPosition::East.index()],
-                hand[PlayerPosition::South.index()],
-                hand[PlayerPosition::West.index()],
-                tricks[PlayerPosition::North.index()],
-                tricks[PlayerPosition::East.index()],
-                tricks[PlayerPosition::South.index()],
-                tricks[PlayerPosition::West.index()],
-            );
-            let hud_wide = string_to_wide(&hud);
-            // Measure HUD text to size the background box correctly
-            let layout: IDWriteTextLayout = self.dwrite.CreateTextLayout(
-                hud_wide.as_slice(),
-                &self.text_format,
-                width,
-                height,
-            )?;
-            let mut met = DWRITE_TEXT_METRICS::default();
-            let _ = layout.GetMetrics(&mut met);
+            let rows_specs = [
+                (
+                    "Scores",
+                    [
+                        scores[PlayerPosition::North.index()] as i32,
+                        scores[PlayerPosition::East.index()] as i32,
+                        scores[PlayerPosition::South.index()] as i32,
+                        scores[PlayerPosition::West.index()] as i32,
+                    ],
+                ),
+                (
+                    "This Hand",
+                    [
+                        hand[PlayerPosition::North.index()] as i32,
+                        hand[PlayerPosition::East.index()] as i32,
+                        hand[PlayerPosition::South.index()] as i32,
+                        hand[PlayerPosition::West.index()] as i32,
+                    ],
+                ),
+                (
+                    "Tricks",
+                    [
+                        tricks[PlayerPosition::North.index()] as i32,
+                        tricks[PlayerPosition::East.index()] as i32,
+                        tricks[PlayerPosition::South.index()] as i32,
+                        tricks[PlayerPosition::West.index()] as i32,
+                    ],
+                ),
+            ];
+            const SOUTH_INDEX: usize = 2;
+            let seat_labels = ["N", "E", "S", "W"];
+            let column_gap = 14.0_f32;
+            let value_gap = 6.0_f32;
+            let pad_x = 12.0_f32;
+            let pad_y = 6.0_f32;
+
+            let mut seat_label_layouts_vec: Vec<(IDWriteTextLayout, DWRITE_TEXT_METRICS)> =
+                Vec::new();
+            let mut seat_label_widths = [0.0f32; 4];
+            let mut seat_label_height = 0.0f32;
+            for (idx, seat) in seat_labels.iter().enumerate() {
+                let label_text = format!("{}:", seat);
+                let (layout, metrics) =
+                    self.create_hud_layout(&label_text, 64.0, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+                if idx == SOUTH_INDEX {
+                    let range = DWRITE_TEXT_RANGE {
+                        startPosition: 0,
+                        length: label_text.encode_utf16().count() as u32,
+                    };
+                    layout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range)?;
+                }
+                seat_label_widths[idx] = metrics.width;
+                seat_label_height = seat_label_height.max(metrics.height);
+                seat_label_layouts_vec.push((layout, metrics));
+            }
+            let seat_label_layouts: [(IDWriteTextLayout, DWRITE_TEXT_METRICS); 4] =
+                seat_label_layouts_vec
+                    .try_into()
+                    .expect("seat label layouts");
+
+            struct HudRow {
+                label: (IDWriteTextLayout, DWRITE_TEXT_METRICS),
+                values: Vec<(IDWriteTextLayout, DWRITE_TEXT_METRICS)>,
+                height: f32,
+            }
+
+            let mut rows: Vec<HudRow> = Vec::new();
+            let mut label_width = 0.0f32;
+            let mut value_widths = [0.0f32; 4];
+
+            for (label_text, values) in rows_specs.iter() {
+                let (layout, metrics) =
+                    self.create_hud_layout(label_text, 160.0, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+                let mut row_height = metrics.height.max(seat_label_height);
+                label_width = label_width.max(metrics.width);
+                let mut value_layouts = Vec::with_capacity(4);
+                for (idx, value) in values.iter().enumerate() {
+                    let text = value.to_string();
+                    let (value_layout, value_metrics) =
+                        self.create_hud_layout(&text, 80.0, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+                    if idx == SOUTH_INDEX {
+                        let range = DWRITE_TEXT_RANGE {
+                            startPosition: 0,
+                            length: text.encode_utf16().count() as u32,
+                        };
+                        value_layout.SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, range)?;
+                    }
+                    value_widths[idx] = value_widths[idx].max(value_metrics.width);
+                    row_height = row_height.max(value_metrics.height);
+                    value_layouts.push((value_layout, value_metrics));
+                }
+                rows.push(HudRow {
+                    label: (layout, metrics),
+                    values: value_layouts,
+                    height: row_height,
+                });
+            }
+
+            let mut column_offsets = [0.0f32; 4];
+            let mut accum = label_width;
+            for idx in 0..4 {
+                accum += column_gap;
+                column_offsets[idx] = accum;
+                accum += seat_label_widths[idx] + value_gap + value_widths[idx];
+            }
+            let content_width = accum;
+
+            let row_spacing = 4.0_f32;
+            let mut row_offsets = Vec::with_capacity(rows.len());
+            let mut cursor = 0.0f32;
+            for row in &rows {
+                row_offsets.push(cursor);
+                cursor += row.height + row_spacing;
+            }
+            if !rows.is_empty() {
+                cursor -= row_spacing;
+            }
+            let content_height = cursor.max(0.0);
+
+            let hud_w = (pad_x * 2.0 + content_width).max(160.0);
+            let hud_h = (pad_y * 2.0 + content_height).max(60.0);
             let min_edge = width.min(height);
             let margin = min_edge * 0.02; // equal top/right margins
-            let pad_x = 8.0_f32;
-            let pad_y = 4.0_f32;
-            let hud_w = met.width.max(120.0) + pad_x * 2.0;
-            let hud_h = met.height.max(20.0) + pad_y * 2.0;
             let right = width - margin;
             let top = margin;
             let rect = D2D_RECT_F {
@@ -1653,22 +1773,59 @@ Tricks N:{} E:{} S:{} W:{}",
                 },
                 None,
             )?;
+            let south_brush = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.95,
+                    g: 0.82,
+                    b: 0.32,
+                    a: 1.0,
+                },
+                None,
+            )?;
             rt.FillRectangle(&rect, &hud_bg);
-            // Draw text inside with padding
-            let text_rect = D2D_RECT_F {
-                left: rect.left + pad_x,
-                top: rect.top + pad_y,
-                right: rect.right - pad_x,
-                bottom: rect.bottom - pad_y,
-            };
-            rt.DrawText(
-                hud_wide.as_slice(),
-                &self.text_format,
-                &text_rect,
-                &text_brush,
-                Default::default(),
-                DWRITE_MEASURING_MODE::default(),
-            );
+
+            let label_x = rect.left + pad_x;
+            for (row_idx, row) in rows.iter().enumerate() {
+                let y = rect.top + pad_y + row_offsets[row_idx];
+                let (label_layout, _) = &row.label;
+                label_layout.SetMaxWidth(label_width + 2.0)?;
+                rt.DrawTextLayout(
+                    Vector2::new(label_x, y),
+                    label_layout,
+                    &text_brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                );
+                for seat_idx in 0..4 {
+                    let seat_x = label_x + column_offsets[seat_idx];
+                    let (seat_layout, _) = &seat_label_layouts[seat_idx];
+                    seat_layout.SetMaxWidth(seat_label_widths[seat_idx] + 2.0)?;
+                    let seat_brush = if seat_idx == SOUTH_INDEX {
+                        &south_brush
+                    } else {
+                        &text_brush
+                    };
+                    rt.DrawTextLayout(
+                        Vector2::new(seat_x, y),
+                        seat_layout,
+                        seat_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    );
+                    let (value_layout, _) = &row.values[seat_idx];
+                    value_layout.SetMaxWidth(value_widths[seat_idx] + 2.0)?;
+                    let value_brush = if seat_idx == SOUTH_INDEX {
+                        &south_brush
+                    } else {
+                        &text_brush
+                    };
+                    let value_x = seat_x + seat_label_widths[seat_idx] + value_gap;
+                    rt.DrawTextLayout(
+                        Vector2::new(value_x, y),
+                        value_layout,
+                        value_brush,
+                        D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    );
+                }
+            }
 
             // On-screen hint for current action
             let hint: Cow<'static, str> = if self.pass.is_some() {

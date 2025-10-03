@@ -147,9 +147,10 @@ impl RoundState {
     pub fn penalty_totals(&self) -> [u8; 4] {
         let mut totals = [0u8; 4];
         let mut accumulate = |trick: &Trick| {
-            for play in trick.plays() {
-                let idx = play.position.index();
-                totals[idx] = totals[idx].saturating_add(play.card.penalty_value());
+            if let Some(winner) = trick.winner() {
+                let penalty = trick.penalty_total();
+                let idx = winner.index();
+                totals[idx] = totals[idx].saturating_add(penalty);
             }
         };
 
@@ -378,9 +379,9 @@ mod tests {
         round.complete_trick(PlayerPosition::North);
 
         let totals = round.penalty_totals();
-        assert_eq!(totals[PlayerPosition::North.index()], 13);
-        assert_eq!(totals[PlayerPosition::East.index()], 1);
-        assert_eq!(totals[PlayerPosition::South.index()], 1);
+        assert_eq!(totals[PlayerPosition::North.index()], 15);
+        assert_eq!(totals[PlayerPosition::East.index()], 0);
+        assert_eq!(totals[PlayerPosition::South.index()], 0);
         assert_eq!(totals[PlayerPosition::West.index()], 0);
     }
 
