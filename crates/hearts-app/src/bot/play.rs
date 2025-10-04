@@ -156,6 +156,7 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
     score
 }
 
+#[allow(clippy::too_many_arguments)]
 fn base_score(
     ctx: &BotContext<'_>,
     card: Card,
@@ -183,7 +184,7 @@ fn base_score(
     }
 
     if let Some(lead) = lead_suit {
-        if card.suit != lead && ctx.round.current_trick().plays().len() > 0 {
+        if card.suit != lead && !ctx.round.current_trick().plays().is_empty() {
             score += 200;
         }
     }

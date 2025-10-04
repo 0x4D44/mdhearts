@@ -208,11 +208,11 @@ fn decode_card_back_pixels(
         let row_bytes = usize::try_from(width)
             .map_err(|_| invalid_card_back_error())?
             .checked_mul(4)
-            .ok_or_else(|| invalid_card_back_error())?;
+            .ok_or_else(invalid_card_back_error)?;
         let height_usize = usize::try_from(height).map_err(|_| invalid_card_back_error())?;
         let buf_len = row_bytes
             .checked_mul(height_usize)
-            .ok_or_else(|| invalid_card_back_error())?;
+            .ok_or_else(invalid_card_back_error)?;
         let mut data = vec![0u8; buf_len];
         converter.CopyPixels(
             std::ptr::null(),
@@ -949,7 +949,7 @@ impl AppState {
         let pitch = pixels
             .width
             .checked_mul(4)
-            .ok_or_else(|| invalid_card_back_error())?;
+            .ok_or_else(invalid_card_back_error)?;
         let bmp = unsafe {
             rt.CreateBitmap(
                 D2D_SIZE_U {
@@ -999,7 +999,7 @@ impl AppState {
         let pitch = pixels
             .height
             .checked_mul(4)
-            .ok_or_else(|| invalid_card_back_error())?;
+            .ok_or_else(invalid_card_back_error)?;
         let bmp = unsafe {
             rt.CreateBitmap(
                 D2D_SIZE_U {
@@ -3626,19 +3626,19 @@ fn rotate_pixels_clockwise(src: &[u8], width: u32, height: u32) -> Result<Vec<u8
     }
     let w = usize::try_from(width).map_err(|_| invalid_card_back_error())?;
     let h = usize::try_from(height).map_err(|_| invalid_card_back_error())?;
-    let src_stride = w.checked_mul(4).ok_or_else(|| invalid_card_back_error())?;
+    let src_stride = w.checked_mul(4).ok_or_else(invalid_card_back_error)?;
     let expected = src_stride
         .checked_mul(h)
-        .ok_or_else(|| invalid_card_back_error())?;
+        .ok_or_else(invalid_card_back_error)?;
     if src.len() < expected {
         return Err(invalid_card_back_error());
     }
-    let dst_stride = h.checked_mul(4).ok_or_else(|| invalid_card_back_error())?;
+    let dst_stride = h.checked_mul(4).ok_or_else(invalid_card_back_error)?;
     let mut dst = vec![
         0u8;
         dst_stride
             .checked_mul(w)
-            .ok_or_else(|| invalid_card_back_error())?
+            .ok_or_else(invalid_card_back_error)?
     ];
     for y in 0..h {
         for x in 0..w {
@@ -3852,7 +3852,7 @@ impl CardBackDialog {
             }
         }
 
-        Ok(result_sink.borrow().clone())
+        Ok(*result_sink.borrow())
     }
 }
 
@@ -3989,9 +3989,6 @@ impl CardBackDialogState {
     }
 
     fn ensure_selection_visible(&mut self, metrics: &CardBackListMetrics) -> bool {
-        if CARD_BACK_CHOICES.is_empty() {
-            return false;
-        }
         let rect = self.position_for_choice(
             self.selected,
             metrics.margin,
@@ -4105,7 +4102,7 @@ impl CardBackDialogState {
         let pitch = pixels
             .width
             .checked_mul(4)
-            .ok_or_else(|| invalid_card_back_error())?;
+            .ok_or_else(invalid_card_back_error)?;
         let bmp = unsafe {
             rt.CreateBitmap(
                 D2D_SIZE_U {
