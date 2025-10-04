@@ -29,3 +29,8 @@ Additional references:
 - Added comprehensive bot/unit tests and scripted round regression coverage.
 - Documented configuration flags for debugging and AI tuning.
 
+
+## Packaging
+- Build the release binary: `cargo build --release`
+- Run the installer script (requires Inno Setup): `iscc installers\Hearts.iss`
+- Output setup executable is written to `installers/MDHearts-1.0.0-Setup.exe`.
