@@ -26,6 +26,43 @@ pub enum RoundPhase {
 }
 
 impl RoundState {
+    pub fn from_hands(
+        hands: [Hand; 4],
+        starting_player: PlayerPosition,
+        passing_direction: PassingDirection,
+        phase: RoundPhase,
+    ) -> Self {
+        Self::from_hands_with_state(
+            hands,
+            starting_player,
+            passing_direction,
+            phase,
+            Trick::new(starting_player),
+            Vec::new(),
+            false,
+        )
+    }
+
+    pub fn from_hands_with_state(
+        hands: [Hand; 4],
+        starting_player: PlayerPosition,
+        passing_direction: PassingDirection,
+        phase: RoundPhase,
+        current_trick: Trick,
+        trick_history: Vec<Trick>,
+        hearts_broken: bool,
+    ) -> Self {
+        Self {
+            hands,
+            current_trick,
+            trick_history,
+            starting_player,
+            passing_direction,
+            phase,
+            hearts_broken,
+        }
+    }
+
     pub fn deal(
         deck: &Deck,
         starting_player: PlayerPosition,

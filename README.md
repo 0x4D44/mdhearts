@@ -15,3 +15,8 @@ Modern Rust revival of the classic Microsoft Hearts experience.
 Additional references:
 - Win32 UI roadmap: `docs/WIN32_UI_PLAN.md`
 - Snapshot CLI usage: `docs/CLI_TOOLS.md`
+
+
+## Configuration
+- `MDH_BOT_DIFFICULTY` (`easy`, `normal`, `hard`): controls AI play style. `normal` enables the new heuristic planner; `easy` retains the legacy logic.
+- `MDH_DEBUG_LOGS=1`: emits detailed AI decision output to DebugView for diagnostics.

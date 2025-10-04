@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(test), windows_subsystem = "windows")]
 #![deny(warnings)]
 
 use std::backtrace::Backtrace;
@@ -11,6 +11,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::{PCWSTR, w};
 
+mod bot;
 mod cli;
 mod controller;
 mod platform;
