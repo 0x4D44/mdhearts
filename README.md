@@ -1,4 +1,4 @@
-﻿# mdhearts
+# mdhearts
 
 Modern Rust revival of the classic Microsoft Hearts experience.
 
@@ -20,3 +20,12 @@ Additional references:
 ## Configuration
 - `MDH_BOT_DIFFICULTY` (`easy`, `normal`, `hard`): controls AI play style. `normal` enables the new heuristic planner; `easy` retains the legacy logic.
 - `MDH_DEBUG_LOGS=1`: emits detailed AI decision output to DebugView for diagnostics.
+
+
+## Release Notes
+### 1.0.0
+- New heuristic bot system with configurable difficulty levels.
+- Improved Win32 UI polish (HUD placement, card animations, sharper rendering).
+- Added comprehensive bot/unit tests and scripted round regression coverage.
+- Documented configuration flags for debugging and AI tuning.
+
