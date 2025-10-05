@@ -23,7 +23,7 @@ Additional references:
 
 
 ## Release Notes
-### 1.0.0
+### 1.0.1
 - New heuristic bot system with configurable difficulty levels.
 - Improved Win32 UI polish (HUD placement, card animations, sharper rendering).
 - Added comprehensive bot/unit tests and scripted round regression coverage.
@@ -33,4 +33,5 @@ Additional references:
 ## Packaging
 - Build the release binary: `cargo build --release`
 - Run the installer script (requires Inno Setup): `iscc installers\Hearts.iss`
-- Output setup executable is written to `installers/MDHearts-1.0.0-Setup.exe`.
+- Output setup executable is written to `installers/MDHearts-1.0.1-Setup.exe`.
+

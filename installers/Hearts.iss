@@ -2,7 +2,7 @@
 ; Build with: iscc installers\Hearts.iss
 
 #define MyAppName "MD Hearts"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "0x4D44 Software"
 #define MyAppExeName "mdhearts.exe"
 #define MyAppIco "..\crates\hearts-app\res\app.ico"
@@ -41,3 +41,4 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; Flags: checkedon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
