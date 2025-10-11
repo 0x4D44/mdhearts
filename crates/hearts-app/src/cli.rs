@@ -1,6 +1,7 @@
 use hearts_core::game::match_state::MatchState;
 use hearts_core::game::serialization::MatchSnapshot;
 use hearts_core::model::player::PlayerPosition;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;
@@ -13,6 +14,27 @@ pub enum CliOutcome {
     NotHandled,
 }
 
+/// AI type selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AiType {
+    Easy,
+    Normal,
+    Hard,
+    Embedded,
+}
+
+impl AiType {
+    pub fn from_str(s: &str) -> Result<Self, CliError> {
+        match s.to_ascii_lowercase().as_str() {
+            "easy" | "legacy" => Ok(AiType::Easy),
+            "normal" | "default" => Ok(AiType::Normal),
+            "hard" | "future" => Ok(AiType::Hard),
+            "embedded" | "ml" => Ok(AiType::Embedded),
+            other => Err(CliError::InvalidAiType(other.to_string())),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum CliError {
     UnknownCommand(String),
@@ -20,6 +42,8 @@ pub enum CliError {
     Io(std::io::Error),
     Json(serde_json::Error),
     InvalidSeat(String),
+    InvalidAiType(String),
+    InvalidNumber(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -30,6 +54,13 @@ impl std::fmt::Display for CliError {
             CliError::Io(err) => write!(f, "I/O error: {err}"),
             CliError::Json(err) => write!(f, "JSON error: {err}"),
             CliError::InvalidSeat(value) => write!(f, "Invalid seat: {value}"),
+            CliError::InvalidAiType(value) => {
+                write!(
+                    f,
+                    "Invalid AI type: {value}. Valid types: easy, normal, hard, embedded"
+                )
+            }
+            CliError::InvalidNumber(value) => write!(f, "Invalid number: {value}"),
         }
     }
 }
@@ -77,8 +108,145 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             import_snapshot(path)?;
             Ok(CliOutcome::Handled)
         }
+        "eval" | "--eval" => {
+            let games_arg = args.next().ok_or(CliError::MissingArgument(
+                "eval <games> [--ai <type>] [--weights <path>] [--collect-data <path>] [--self-play] [--collect-rl <path>] [--reward-mode <mode>] [--ai-test <type>] [--ai-per-seat <types>] [--weights-per-seat <paths>]",
+            ))?;
+            let num_games = games_arg
+                .parse::<usize>()
+                .map_err(|_| CliError::InvalidNumber(games_arg))?;
+
+            // Parse optional flags
+            let mut ai_type = AiType::Normal;
+            let mut weights_path: Option<PathBuf> = None;
+            let mut collect_data_path: Option<PathBuf> = None;
+            let mut self_play = false;
+            let mut collect_rl_path: Option<PathBuf> = None;
+            let mut reward_mode_str = "shaped".to_string();
+            let mut ai_test: Option<AiType> = None;
+            let mut ai_per_seat: Option<String> = None;
+            let mut weights_per_seat: Option<String> = None;
+
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--ai" => {
+                        let ai_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--ai <type>"))?;
+                        ai_type = AiType::from_str(&ai_str)?;
+                    }
+                    "--weights" => {
+                        let path_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--weights <path>"))?;
+                        weights_path = Some(PathBuf::from(path_str));
+                    }
+                    "--collect-data" => {
+                        let path_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--collect-data <path>"))?;
+                        collect_data_path = Some(PathBuf::from(path_str));
+                    }
+                    "--self-play" => {
+                        self_play = true;
+                    }
+                    "--collect-rl" => {
+                        let path_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--collect-rl <path>"))?;
+                        collect_rl_path = Some(PathBuf::from(path_str));
+                    }
+                    "--reward-mode" => {
+                        reward_mode_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--reward-mode <mode>"))?;
+                    }
+                    "--ai-test" => {
+                        let ai_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--ai-test <type>"))?;
+                        ai_test = Some(AiType::from_str(&ai_str)?);
+                    }
+                    "--ai-per-seat" => {
+                        let types_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--ai-per-seat <type1>,<type2>,<type3>,<type4>"))?;
+                        ai_per_seat = Some(types_str);
+                    }
+                    "--weights-per-seat" => {
+                        let paths_str = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--weights-per-seat <path1>,<path2>,<path3>,<path4>"))?;
+                        weights_per_seat = Some(paths_str);
+                    }
+                    _ => {
+                        return Err(CliError::UnknownCommand(format!("Unknown flag: {}", flag)));
+                    }
+                }
+            }
+
+            // Determine evaluation mode
+            if ai_test.is_some() || ai_per_seat.is_some() {
+                // Mixed evaluation mode
+                run_mixed_eval_cli(num_games, ai_type, weights_path, ai_test, ai_per_seat, weights_per_seat)?;
+            } else if self_play {
+                use crate::rl::StepRewardMode;
+                let reward_mode =
+                    StepRewardMode::from_str(&reward_mode_str).map_err(CliError::UnknownCommand)?;
+                run_self_play_eval(num_games, weights_path, collect_rl_path, reward_mode)?;
+            } else {
+                run_eval(num_games, ai_type, weights_path, collect_data_path)?;
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "play" | "--play" => {
+            // Check for --ai flag
+            let ai_type = if let Some(next_arg) = args.next() {
+                if next_arg == "--ai" {
+                    let ai_str = args
+                        .next()
+                        .ok_or(CliError::MissingArgument("--ai <type>"))?;
+                    AiType::from_str(&ai_str)?
+                } else {
+                    AiType::Normal // Default
+                }
+            } else {
+                AiType::Normal // Default
+            };
+
+            println!("Starting game with AI type: {:?}", ai_type);
+            // For now, just launch normal GUI mode
+            // (The AI type will be used when the controller is updated)
+            Ok(CliOutcome::NotHandled)
+        }
+        "--schema-info" => {
+            use crate::rl::observation::{SCHEMA_HASH, SCHEMA_VERSION};
+            println!(
+                "{{\"schema_version\":\"{}\",\"schema_hash\":\"{}\"}}",
+                SCHEMA_VERSION, SCHEMA_HASH
+            );
+            Ok(CliOutcome::Handled)
+        }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --help";
+            let help = concat!(
+                "Available commands:\n",
+                "  eval <games> [--ai <type>] [--weights <path>] [--collect-data <path>]\n",
+                "    Run headless evaluation mode\n",
+                "  play [--ai <type>]\n",
+                "    Start GUI game\n",
+                "  --export-snapshot <path> [seed] [seat]\n",
+                "    Export game snapshot to JSON\n",
+                "  --import-snapshot <path>\n",
+                "    Import game snapshot from JSON\n",
+                "  --schema-info\n",
+                "    Print observation schema version and hash\n",
+                "  --help\n",
+                "    Show this help message\n",
+                "\nOptions:\n",
+                "  --ai <type>           AI type: easy, normal, hard, embedded\n",
+                "  --weights <path>      Custom weights JSON (for embedded AI)\n",
+                "  --collect-data <path> Save training data to JSONL file"
+            );
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)
@@ -164,4 +332,757 @@ fn show_box(title: &str, message: &str, flags: MESSAGEBOX_STYLE) {
 
 fn encode_wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ai_type_parsing() {
+        assert_eq!(AiType::from_str("easy").unwrap(), AiType::Easy);
+        assert_eq!(AiType::from_str("legacy").unwrap(), AiType::Easy);
+        assert_eq!(AiType::from_str("normal").unwrap(), AiType::Normal);
+        assert_eq!(AiType::from_str("default").unwrap(), AiType::Normal);
+        assert_eq!(AiType::from_str("hard").unwrap(), AiType::Hard);
+        assert_eq!(AiType::from_str("future").unwrap(), AiType::Hard);
+        assert_eq!(AiType::from_str("embedded").unwrap(), AiType::Embedded);
+        assert_eq!(AiType::from_str("ml").unwrap(), AiType::Embedded);
+
+        // Case insensitive
+        assert_eq!(AiType::from_str("EASY").unwrap(), AiType::Easy);
+        assert_eq!(AiType::from_str("Embedded").unwrap(), AiType::Embedded);
+
+        // Invalid
+        assert!(matches!(
+            AiType::from_str("invalid"),
+            Err(CliError::InvalidAiType(_))
+        ));
+    }
+
+    #[test]
+    #[ignore] // Slow test: runs full game
+    fn eval_runs_without_panic() {
+        // This test verifies that eval mode can run a small number of games
+        // without panicking (basic smoke test)
+        let result = run_eval(1, AiType::Normal, None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[ignore] // Slow test: runs full game with ML inference
+    fn eval_embedded_ai_runs() {
+        // Verify that embedded AI can complete games
+        let result = run_eval(1, AiType::Embedded, None, None);
+        assert!(result.is_ok());
+    }
+}
+
+/// Run mixed AI evaluation mode (--ai-test or --ai-per-seat)
+fn run_mixed_eval_cli(
+    num_games: usize,
+    baseline_ai: AiType,
+    baseline_weights: Option<PathBuf>,
+    ai_test: Option<AiType>,
+    ai_per_seat: Option<String>,
+    weights_per_seat: Option<String>,
+) -> Result<(), CliError> {
+    use crate::eval::mixed::{run_mixed_eval, EvalError};
+    use crate::eval::types::{MixedEvalConfig, OutputMode, PolicyConfig, RotationMode};
+
+    // Build policy configs based on mode
+    let (policy_configs, output_mode) = if let Some(test_ai) = ai_test {
+        // --ai-test mode: 3 baseline + 1 test (comparison mode)
+        println!(
+            "Running {} games in comparison mode: 3x {:?} vs 1x {:?}",
+            num_games, baseline_ai, test_ai
+        );
+
+        let baseline_config = PolicyConfig {
+            ai_type: baseline_ai,
+            weights_path: baseline_weights.clone(),
+            label: Some(format!("{:?} (baseline)", baseline_ai)),
+        };
+
+        let test_config = PolicyConfig {
+            ai_type: test_ai,
+            weights_path: if test_ai == AiType::Embedded {
+                baseline_weights.clone() // Use same weights path if provided
+            } else {
+                None
+            },
+            label: Some(format!("{:?} (test)", test_ai)),
+        };
+
+        (
+            [
+                baseline_config.clone(),
+                baseline_config.clone(),
+                baseline_config,
+                test_config,
+            ],
+            OutputMode::Comparison {
+                test_policy_index: 3,
+            },
+        )
+    } else if let Some(types_str) = ai_per_seat {
+        // --ai-per-seat mode: custom mix
+        println!("Running {} games in mixed mode: {}", num_games, types_str);
+
+        // Parse AI types
+        let type_parts: Vec<&str> = types_str.split(',').collect();
+        if type_parts.len() != 4 {
+            return Err(CliError::InvalidAiType(format!(
+                "Expected 4 AI types, got {}",
+                type_parts.len()
+            )));
+        }
+
+        let ai_types: Result<Vec<AiType>, CliError> =
+            type_parts.iter().map(|s| AiType::from_str(s.trim())).collect();
+        let ai_types = ai_types?;
+
+        // Parse weights if provided
+        let weights: Vec<Option<PathBuf>> = if let Some(weights_str) = weights_per_seat {
+            let weight_parts: Vec<&str> = weights_str.split(',').collect();
+            if weight_parts.len() != 4 {
+                return Err(CliError::InvalidAiType(format!(
+                    "Expected 4 weight paths, got {}",
+                    weight_parts.len()
+                )));
+            }
+
+            weight_parts
+                .iter()
+                .map(|s| {
+                    let trimmed = s.trim();
+                    if trimmed == "_" {
+                        None
+                    } else {
+                        Some(PathBuf::from(trimmed))
+                    }
+                })
+                .collect()
+        } else {
+            vec![None, None, None, None]
+        };
+
+        // Validate embedded AIs have weights
+        for (i, (ai_type, weight)) in ai_types.iter().zip(weights.iter()).enumerate() {
+            if *ai_type == AiType::Embedded && weight.is_none() {
+                return Err(CliError::InvalidAiType(format!(
+                    "Policy {} is embedded but no weights specified. Use '_' for non-embedded AIs.",
+                    i
+                )));
+            }
+        }
+
+        // Build configs
+        let configs: Vec<PolicyConfig> = ai_types
+            .iter()
+            .zip(weights.iter())
+            .enumerate()
+            .map(|(i, (ai_type, weight))| PolicyConfig {
+                ai_type: *ai_type,
+                weights_path: weight.clone(),
+                label: Some(format!("Policy{} ({:?})", i, ai_type)),
+            })
+            .collect();
+
+        (
+            [
+                configs[0].clone(),
+                configs[1].clone(),
+                configs[2].clone(),
+                configs[3].clone(),
+            ],
+            OutputMode::Standard,
+        )
+    } else {
+        return Err(CliError::InvalidAiType(
+            "Either --ai-test or --ai-per-seat must be specified".to_string(),
+        ));
+    };
+
+    // Create config
+    let config = MixedEvalConfig {
+        num_games,
+        policy_configs,
+        output_mode,
+        rotation_mode: RotationMode::Systematic,
+    };
+
+    // Run evaluation
+    let results = run_mixed_eval(config).map_err(|e| match e {
+        EvalError::InvalidConfig(msg) => CliError::InvalidAiType(msg),
+        EvalError::MissingWeights(msg) => CliError::InvalidAiType(msg),
+        EvalError::PolicyCreation(msg) => CliError::InvalidAiType(msg),
+        EvalError::GameExecution(msg) => {
+            CliError::Io(std::io::Error::new(std::io::ErrorKind::Other, msg))
+        }
+    })?;
+
+    // Print results
+    println!("\n=== Mixed Evaluation Results ===");
+    println!("Games played: {}", results.games_played);
+    println!("Rotation mode: {:?}", results.rotation_mode);
+    println!("Elapsed time: {:.2}s", results.elapsed_seconds);
+    println!();
+
+    for policy_result in &results.policy_results {
+        println!("Policy {}: {}", policy_result.policy_index, policy_result.ai_label);
+        println!("  Avg points: {:.2}", policy_result.avg_points);
+        println!("  Total points: {}", policy_result.total_points);
+        println!("  Wins: {}", policy_result.win_count);
+        println!("  Moons: {}", policy_result.moon_count);
+        println!();
+    }
+
+    if let Some(comparison) = &results.comparison {
+        println!("=== Comparison Results ===");
+        println!(
+            "Test policy: Policy {}",
+            comparison.test_policy_index
+        );
+        println!("Test avg: {:.2} points", comparison.test_avg);
+        println!("Baseline avg: {:.2} points", comparison.baseline_avg);
+        println!(
+            "Difference: {:.2} points (negative = better)",
+            comparison.difference
+        );
+        println!(
+            "Improvement: {:.1}%",
+            comparison.percent_improvement
+        );
+
+        if let Some(p_value) = comparison.statistical_significance {
+            println!("Statistical test: {}", comparison.statistical_test);
+            println!("P-value: {:.4}", p_value);
+            if p_value < 0.05 {
+                println!("Result: SIGNIFICANT (p < 0.05)");
+            } else {
+                println!("Result: Not significant (p >= 0.05)");
+            }
+        } else {
+            println!("Statistical significance: Not enough games for test");
+        }
+    }
+
+    Ok(())
+}
+
+/// Run headless evaluation mode
+fn run_eval(
+    num_games: usize,
+    ai_type: AiType,
+    weights_path: Option<PathBuf>,
+    collect_data_path: Option<PathBuf>,
+) -> Result<(), CliError> {
+    use crate::bot::UnseenTracker;
+    use crate::policy::{EmbeddedPolicy, HeuristicPolicy, Policy, PolicyContext};
+    use crate::rl::{Experience, ExperienceCollector};
+    use hearts_core::model::round::RoundPhase;
+    use serde_json::json;
+
+    if let Some(ref path) = weights_path {
+        println!(
+            "Running {} games with AI type: {:?}, custom weights: {}",
+            num_games,
+            ai_type,
+            path.display()
+        );
+    } else {
+        println!("Running {} games with AI type: {:?}", num_games, ai_type);
+    }
+
+    // Create experience collector if requested
+    let mut collector = if let Some(ref path) = collect_data_path {
+        println!("Collecting training data to: {}", path.display());
+        Some(
+            ExperienceCollector::new(path)
+                .map_err(|e| CliError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?,
+        )
+    } else {
+        None
+    };
+
+    // Create policy based on AI type
+    let mut policy: Box<dyn Policy> = match ai_type {
+        AiType::Easy => Box::new(HeuristicPolicy::easy()),
+        AiType::Normal => Box::new(HeuristicPolicy::normal()),
+        AiType::Hard => Box::new(HeuristicPolicy::hard()),
+        AiType::Embedded => {
+            if let Some(path) = weights_path {
+                Box::new(EmbeddedPolicy::from_file(path).map_err(|e| {
+                    CliError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?)
+            } else {
+                Box::new(EmbeddedPolicy::new())
+            }
+        }
+    };
+
+    let mut total_points = [0u32; 4];
+    let mut moon_counts = [0usize; 4];
+    let start_time = std::time::Instant::now();
+
+    // ObservationBuilder for experience collection
+    let obs_builder = if collector.is_some() {
+        Some(crate::rl::observation::ObservationBuilder::new())
+    } else {
+        None
+    };
+
+    for game_idx in 0..num_games {
+        let seed = game_idx as u64;
+        let mut match_state = MatchState::with_seed(PlayerPosition::South, seed);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(match_state.round());
+
+        let mut step_id = 0;
+        let mut pending_experiences: Vec<(usize, u8, Vec<f32>)> = Vec::new(); // (step_id, action, obs)
+
+        // Play one complete round
+        loop {
+            // Handle passing phase
+            if matches!(match_state.round().phase(), RoundPhase::Passing(_)) {
+                for seat in PlayerPosition::LOOP {
+                    let hand = match_state.round().hand(seat);
+                    let scores = match_state.scores();
+                    let passing_dir = match_state.passing_direction();
+
+                    let ctx = PolicyContext {
+                        hand,
+                        round: match_state.round(),
+                        scores,
+                        seat,
+                        tracker: &tracker,
+                        passing_direction: passing_dir,
+                    };
+
+                    let pass_cards = policy.choose_pass(&ctx);
+                    let _ = match_state.round_mut().submit_pass(seat, pass_cards);
+                }
+                // Resolve passes to transition to playing phase
+                let _ = match_state.round_mut().resolve_passes();
+                continue;
+            }
+
+            // Handle playing phase
+            if matches!(match_state.round().phase(), RoundPhase::Playing) {
+                // Determine which player should play next
+                let current_player = {
+                    let trick = match_state.round().current_trick();
+                    trick
+                        .plays()
+                        .last()
+                        .map(|p| p.position.next())
+                        .unwrap_or(trick.leader())
+                };
+                let hand = match_state.round().hand(current_player);
+                let scores = match_state.scores();
+                let passing_dir = match_state.passing_direction();
+
+                let ctx = PolicyContext {
+                    hand,
+                    round: match_state.round(),
+                    scores,
+                    seat: current_player,
+                    tracker: &tracker,
+                    passing_direction: passing_dir,
+                };
+
+                // Build observation if collecting data
+                if let Some(ref builder) = obs_builder {
+                    let obs = builder.build(&ctx);
+                    let obs_vec = obs.as_array().to_vec();
+
+                    // Get action
+                    let card = policy.choose_play(&ctx);
+
+                    // Store for later (reward assignment at end of round)
+                    pending_experiences.push((step_id, card.to_id(), obs_vec));
+                    step_id += 1;
+
+                    tracker.note_card_played(current_player, card);
+
+                    match match_state.round_mut().play_card(current_player, card) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Error playing card: {:?}", e);
+                            break;
+                        }
+                    }
+                } else {
+                    // No data collection - just play
+                    let card = policy.choose_play(&ctx);
+                    tracker.note_card_played(current_player, card);
+
+                    match match_state.round_mut().play_card(current_player, card) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Error playing card: {:?}", e);
+                            break;
+                        }
+                    }
+                }
+
+                // Check if round is complete (13 tricks)
+                if match_state.round().tricks_completed() >= 13 {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Assign rewards and record experiences
+        if let Some(ref mut coll) = collector {
+            let round_points = match_state.round().penalty_totals();
+
+            // Compute rewards (negative points)
+            let rewards: [f32; 4] = [
+                -(round_points[0] as f32),
+                -(round_points[1] as f32),
+                -(round_points[2] as f32),
+                -(round_points[3] as f32),
+            ];
+
+            // Record all experiences with their rewards
+            for (sid, action, obs_vec) in pending_experiences.iter() {
+                // For simplicity, assign full reward to all steps
+                // (More sophisticated credit assignment could be added later)
+                let exp = Experience {
+                    observation: obs_vec.clone(),
+                    action: *action,
+                    reward: rewards[PlayerPosition::South.index()],
+                    done: *sid == step_id - 1,
+                    game_id: game_idx,
+                    step_id: *sid,
+                    seat: PlayerPosition::South.index() as u8,
+                };
+
+                if let Err(e) = coll.record(exp) {
+                    eprintln!("Warning: Failed to record experience: {}", e);
+                }
+            }
+
+            pending_experiences.clear();
+        }
+
+        // Tally scores
+        let round_points = match_state.round().penalty_totals();
+        for (idx, &points) in round_points.iter().enumerate() {
+            total_points[idx] += points as u32;
+        }
+
+        // Detect moon shooting
+        if let Some(shooter_idx) = round_points.iter().position(|&p| p == 26) {
+            let others_total: u8 = round_points
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != shooter_idx)
+                .map(|(_, &p)| p)
+                .sum();
+
+            if others_total == 0 {
+                moon_counts[shooter_idx] += 1;
+            }
+        }
+
+        // Output progress every 10% or on last game
+        if (game_idx + 1) % (num_games / 10).max(1) == 0 || game_idx == num_games - 1 {
+            let progress = json!({
+                "completed": game_idx + 1,
+                "total": num_games,
+                "avg_points": [
+                    total_points[0] as f64 / (game_idx + 1) as f64,
+                    total_points[1] as f64 / (game_idx + 1) as f64,
+                    total_points[2] as f64 / (game_idx + 1) as f64,
+                    total_points[3] as f64 / (game_idx + 1) as f64,
+                ],
+                "moon_counts": moon_counts,
+            });
+            println!("{}", serde_json::to_string(&progress).unwrap());
+        }
+    }
+
+    let elapsed = start_time.elapsed();
+
+    // Final summary
+    let summary = json!({
+        "games": num_games,
+        "ai_type": format!("{:?}", ai_type),
+        "elapsed_seconds": elapsed.as_secs_f64(),
+        "total_points": total_points,
+        "avg_points": [
+            total_points[0] as f64 / num_games as f64,
+            total_points[1] as f64 / num_games as f64,
+            total_points[2] as f64 / num_games as f64,
+            total_points[3] as f64 / num_games as f64,
+        ],
+        "moon_counts": moon_counts,
+    });
+
+    println!("\nFinal Summary:");
+    println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+
+    // Flush and report experience collection
+    if let Some(ref mut coll) = collector {
+        coll.flush()
+            .map_err(|e| CliError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        println!(
+            "\nCollected {} experiences to {}",
+            coll.count(),
+            collect_data_path.as_ref().unwrap().display()
+        );
+    }
+
+    Ok(())
+}
+
+/// Run self-play evaluation mode with RL experience collection
+fn run_self_play_eval(
+    num_games: usize,
+    weights_path: Option<PathBuf>,
+    collect_rl_path: Option<PathBuf>,
+    reward_mode: crate::rl::StepRewardMode,
+) -> Result<(), CliError> {
+    use crate::bot::UnseenTracker;
+    use crate::policy::{EmbeddedPolicy, Policy, PolicyContext};
+    use crate::rl::{ObservationBuilder, RLExperience, RLExperienceCollector, RewardComputer};
+    use hearts_core::model::round::RoundPhase;
+
+    println!("Running {} games in self-play mode", num_games);
+    if let Some(ref path) = weights_path {
+        println!("Using custom weights: {}", path.display());
+    }
+    if let Some(ref path) = collect_rl_path {
+        println!("Collecting RL experiences to: {}", path.display());
+    }
+    println!("Reward mode: {:?}", reward_mode);
+
+    // Load policy for all 4 players (same policy)
+    let mut policy: Box<dyn Policy> =
+        if let Some(path) = weights_path {
+            Box::new(EmbeddedPolicy::from_file(path).map_err(|e| {
+                CliError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?)
+        } else {
+            Box::new(EmbeddedPolicy::new())
+        };
+
+    // Create experience collector if requested
+    let mut collector = if let Some(ref path) = collect_rl_path {
+        Some(
+            RLExperienceCollector::new(path)
+                .map_err(|e| CliError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?,
+        )
+    } else {
+        None
+    };
+
+    let obs_builder = ObservationBuilder::new();
+    let reward_computer = RewardComputer::new(reward_mode);
+
+    let mut total_points = [0u32; 4];
+    let start_time = std::time::Instant::now();
+
+    for game_idx in 0..num_games {
+        let seed = game_idx as u64;
+        let mut match_state = MatchState::with_seed(PlayerPosition::South, seed);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(match_state.round());
+
+        // Track experiences for all 4 seats
+        type PendingExp = (usize, usize, u8, Vec<f32>, f32, f32, usize, usize);
+        let mut pending_experiences: Vec<PendingExp> = Vec::new();
+        let mut step_ids = [0usize; 4];
+
+        // Play one complete round
+        loop {
+            // Handle passing phase
+            if matches!(match_state.round().phase(), RoundPhase::Passing(_)) {
+                for seat in PlayerPosition::LOOP {
+                    let hand = match_state.round().hand(seat);
+                    let scores = match_state.scores();
+                    let passing_dir = match_state.passing_direction();
+
+                    let ctx = PolicyContext {
+                        hand,
+                        round: match_state.round(),
+                        scores,
+                        seat,
+                        tracker: &tracker,
+                        passing_direction: passing_dir,
+                    };
+
+                    let pass_cards = policy.choose_pass(&ctx);
+                    let _ = match_state.round_mut().submit_pass(seat, pass_cards);
+                }
+                let _ = match_state.round_mut().resolve_passes();
+                continue;
+            }
+
+            // Handle playing phase
+            if matches!(match_state.round().phase(), RoundPhase::Playing) {
+                let current_player = {
+                    let trick = match_state.round().current_trick();
+                    trick
+                        .plays()
+                        .last()
+                        .map(|p| p.position.next())
+                        .unwrap_or(trick.leader())
+                };
+
+                let hand = match_state.round().hand(current_player);
+                let scores = match_state.scores();
+                let passing_dir = match_state.passing_direction();
+
+                let ctx = PolicyContext {
+                    hand,
+                    round: match_state.round(),
+                    scores,
+                    seat: current_player,
+                    tracker: &tracker,
+                    passing_direction: passing_dir,
+                };
+
+                // Build observation
+                let obs = obs_builder.build(&ctx);
+                let obs_vec = obs.as_array().to_vec();
+
+                // Get action with value and log_prob
+                let (card, value, log_prob) = policy.forward_with_critic(&ctx);
+
+                // Track state before action
+                let prev_hand_size = hand.len();
+                let prev_tricks = match_state.round().tricks_completed();
+
+                // Store experience data for later reward assignment
+                let seat_idx = current_player.index();
+                let step_id = step_ids[seat_idx];
+                pending_experiences.push((
+                    seat_idx,
+                    step_id,
+                    card.to_id(),
+                    obs_vec,
+                    value,
+                    log_prob,
+                    prev_hand_size,
+                    prev_tricks,
+                ));
+                step_ids[seat_idx] += 1;
+
+                // Execute action
+                tracker.note_card_played(current_player, card);
+                match match_state.round_mut().play_card(current_player, card) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Error playing card: {:?}", e);
+                        break;
+                    }
+                }
+
+                // Check if round is complete
+                if match_state.round().tricks_completed() >= 13 {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Assign rewards and record experiences for all seats
+        if let Some(ref mut coll) = collector {
+            for (
+                seat_idx,
+                step_id,
+                card_id,
+                obs_vec,
+                value,
+                log_prob,
+                prev_hand_size,
+                prev_tricks,
+            ) in pending_experiences.iter()
+            {
+                let seat = PlayerPosition::from_index(*seat_idx).expect("Valid seat index");
+                let is_final = *step_id == step_ids[*seat_idx] - 1;
+
+                // Compute step reward
+                let step_reward = reward_computer.compute_step_reward(
+                    &match_state,
+                    seat,
+                    *prev_hand_size,
+                    *prev_tricks,
+                );
+
+                // Compute terminal reward
+                let terminal_reward = reward_computer.compute_terminal_reward(&match_state, seat);
+
+                // Use step reward for intermediate steps, terminal reward for final step
+                let reward = if is_final {
+                    terminal_reward
+                } else {
+                    step_reward
+                };
+
+                let exp = RLExperience {
+                    observation: obs_vec.clone(),
+                    action: *card_id,
+                    reward,
+                    done: is_final,
+                    game_id: game_idx,
+                    step_id: *step_id,
+                    seat: *seat_idx as u8,
+                    value: *value,
+                    log_prob: *log_prob,
+                };
+
+                if let Err(e) = coll.record(exp) {
+                    eprintln!("Warning: Failed to record experience: {}", e);
+                }
+            }
+        }
+
+        // Tally scores
+        let round_points = match_state.round().penalty_totals();
+        for (idx, &points) in round_points.iter().enumerate() {
+            total_points[idx] += points as u32;
+        }
+
+        // Output progress
+        if (game_idx + 1) % (num_games / 10).max(1) == 0 || game_idx == num_games - 1 {
+            println!(
+                "Progress: {}/{} games ({:.1}%)",
+                game_idx + 1,
+                num_games,
+                (game_idx + 1) as f64 / num_games as f64 * 100.0
+            );
+        }
+    }
+
+    let elapsed = start_time.elapsed();
+
+    // Final summary
+    println!("\n=== Self-Play Evaluation Summary ===");
+    println!("Games: {}", num_games);
+    println!("Elapsed: {:.2}s", elapsed.as_secs_f64());
+    println!("Average points per seat:");
+    for (idx, &points) in total_points.iter().enumerate() {
+        println!("  Seat {}: {:.2}", idx, points as f64 / num_games as f64);
+    }
+
+    // Flush and report experience collection
+    if let Some(ref mut coll) = collector {
+        coll.flush()
+            .map_err(|e| CliError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        println!(
+            "\nCollected {} RL experiences to {}",
+            coll.count(),
+            collect_rl_path.as_ref().unwrap().display()
+        );
+    }
+
+    Ok(())
 }

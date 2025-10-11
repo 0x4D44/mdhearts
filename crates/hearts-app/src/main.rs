@@ -14,7 +14,11 @@ use windows::core::{PCWSTR, w};
 mod bot;
 mod cli;
 mod controller;
+mod eval;
 mod platform;
+mod policy;
+mod rl;
+mod weights;
 
 fn install_panic_hook() {
     static INIT: Once = Once::new();

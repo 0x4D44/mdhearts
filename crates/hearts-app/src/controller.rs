@@ -1,10 +1,9 @@
-use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner, UnseenTracker};
+use crate::bot::{BotDifficulty, UnseenTracker};
+use crate::policy::{HeuristicPolicy, Policy, PolicyContext};
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
-use hearts_core::model::rank::Rank;
 use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase};
-use hearts_core::model::suit::Suit;
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::core::PCWSTR;
 
@@ -50,17 +49,6 @@ impl GameController {
             bot_difficulty: BotDifficulty::from_env(),
             unseen_tracker,
         }
-    }
-
-    fn bot_context(&self, seat: PlayerPosition) -> BotContext<'_> {
-        BotContext::new(
-            seat,
-            self.match_state.round(),
-            self.match_state.scores(),
-            self.match_state.passing_direction(),
-            &self.unseen_tracker,
-            self.bot_difficulty,
-        )
     }
 
     #[cfg(test)]
@@ -212,34 +200,24 @@ impl GameController {
         if seat == stop_seat {
             return None;
         }
-        let enforce_two = {
-            let round = self.match_state.round();
-            round.is_first_trick() && round.current_trick().leader() == seat
+
+        // Create policy context
+        let hand = self.match_state.round().hand(seat);
+        let ctx = PolicyContext {
+            seat,
+            hand,
+            round: self.match_state.round(),
+            scores: self.match_state.scores(),
+            passing_direction: self.match_state.passing_direction(),
+            tracker: &self.unseen_tracker,
         };
-        let legal = self.legal_moves(seat);
-        let card_to_play = if enforce_two {
-            let two = Card::new(Rank::Two, Suit::Clubs);
-            if legal.contains(&two) {
-                Some(two)
-            } else {
-                legal.first().copied()
-            }
-        } else {
-            match self.bot_difficulty {
-                BotDifficulty::EasyLegacy => legal.first().copied(),
-                _ => {
-                    let ctx = self.bot_context(seat);
-                    PlayPlanner::choose(&legal, &ctx).or_else(|| legal.first().copied())
-                }
-            }
-        };
-        if let Some(card) = card_to_play {
-            Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
-            let _ = self.play(seat, card);
-            Some((seat, card))
-        } else {
-            None
-        }
+
+        let mut policy = HeuristicPolicy::new(self.bot_difficulty);
+        let card = policy.choose_play(&ctx);
+
+        Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
+        let _ = self.play(seat, card);
+        Some((seat, card))
     }
     pub fn hand(&self, seat: PlayerPosition) -> Vec<Card> {
         self.match_state
@@ -271,18 +249,21 @@ impl GameController {
 
     pub fn simple_pass_for(&self, seat: PlayerPosition) -> Option<[Card; 3]> {
         let hand = self.match_state.round().hand(seat);
-        match self.bot_difficulty {
-            BotDifficulty::EasyLegacy => {
-                if hand.len() < 3 {
-                    return None;
-                }
-                Some([hand.cards()[0], hand.cards()[1], hand.cards()[2]])
-            }
-            _ => {
-                let ctx = self.bot_context(seat);
-                PassPlanner::choose(hand, &ctx)
-            }
+        if hand.len() < 3 {
+            return None;
         }
+
+        let ctx = PolicyContext {
+            seat,
+            hand,
+            round: self.match_state.round(),
+            scores: self.match_state.scores(),
+            passing_direction: self.match_state.passing_direction(),
+            tracker: &self.unseen_tracker,
+        };
+
+        let mut policy = HeuristicPolicy::new(self.bot_difficulty);
+        Some(policy.choose_pass(&ctx))
     }
 
     pub fn submit_auto_passes_for_others(
