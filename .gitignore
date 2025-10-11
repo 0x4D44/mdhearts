@@ -7,3 +7,22 @@ venv/
 env/
 *.tmp
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.pt
+*.pth
+
+# Training artifacts
+runs/
+checkpoints/
+logs/
+*.jsonl
+*.npz

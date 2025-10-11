@@ -36,7 +36,8 @@
       "Bash(elif [ -f gen2_logs/*.tfevents.* ])",
       "Bash(then echo \"[IN PROGRESS] Training running...\")",
       "Bash(else echo \"[STARTING] Waiting for training to start...\")",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
