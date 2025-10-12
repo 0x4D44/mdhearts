@@ -37,7 +37,9 @@
       "Bash(then echo \"[IN PROGRESS] Training running...\")",
       "Bash(else echo \"[STARTING] Waiting for training to start...\")",
       "Bash(cp:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nReorganize AI training artifacts and documentation\n\nRestructured project to organize AI models, training data, and documentation:\n\n- Created ai_training/ directory structure\n  - ai_training/bc/ contains production BC model (Hard-level performance)\n  - ai_training/archive/gen0/ archives first supervised learning attempt\n  - Added comprehensive README documenting models and methodology\n\n- Moved all design documents from designs/ to docs/\n- Moved training result docs (FINAL_TRAINING_RESULTS.md, TRAINING_RESULTS.md) to docs/\n\n- Deleted failed Gen2 self-play RL artifacts (gen2_weights.json)\n- Deleted old experimental files (trained_weights.json, train_pipeline.bat, win32 dumps)\n\n- Updated .gitignore to exclude Python artifacts and large training data files\n\nProduction BC model (bc_hard_20ep_10k.json) achieves ~Hard difficulty level:\n- 93.94% training accuracy (20 epochs, 10k games, 15 min training)\n- ~31.8% win rate vs Hard (comparable performance)\n- Significantly outperforms Gen0 (+62% more wins)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

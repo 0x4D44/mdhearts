@@ -123,6 +123,36 @@ impl MatchState {
             && self.current_round.tricks_completed() == 13
     }
 
+    /// Check if match is complete (any player has 100+ points)
+    pub fn is_match_complete(&self) -> bool {
+        self.scores.standings().iter().any(|&score| score >= 100)
+    }
+
+    /// Get winner (player with lowest score when match is complete)
+    /// Returns None if match is not complete
+    pub fn winner(&self) -> Option<PlayerPosition> {
+        if !self.is_match_complete() {
+            return None;
+        }
+
+        let min_score = self.scores.standings().iter().min().copied()?;
+
+        PlayerPosition::LOOP
+            .iter()
+            .copied()
+            .find(|&pos| self.scores.score(pos) == min_score)
+    }
+
+    /// Get final standings as (position, score) sorted by score (lowest first)
+    pub fn final_standings(&self) -> Vec<(PlayerPosition, u32)> {
+        let mut results: Vec<_> = PlayerPosition::LOOP
+            .iter()
+            .map(|&pos| (pos, self.scores.score(pos)))
+            .collect();
+        results.sort_by_key(|(_, score)| *score);
+        results
+    }
+
     const fn passing_sequence() -> &'static [PassingDirection; 4] {
         &PassingDirection::CYCLE
     }
@@ -189,5 +219,68 @@ mod tests {
 
         assert_eq!(round.starting_player(), expected);
         assert_eq!(round.current_trick().leader(), expected);
+    }
+
+    #[test]
+    fn match_not_complete_under_100() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
+        match_state.scores_mut().set_score(PlayerPosition::North, 99);
+        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        assert!(!match_state.is_match_complete());
+        assert_eq!(match_state.winner(), None);
+    }
+
+    #[test]
+    fn match_completes_when_player_reaches_100() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
+        match_state.scores_mut().set_score(PlayerPosition::South, 105);
+        assert!(match_state.is_match_complete());
+    }
+
+    #[test]
+    fn match_completes_at_exactly_100() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
+        match_state.scores_mut().set_score(PlayerPosition::East, 100);
+        assert!(match_state.is_match_complete());
+    }
+
+    #[test]
+    fn winner_is_lowest_score_when_complete() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
+        match_state.scores_mut().set_score(PlayerPosition::North, 105);
+        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state.scores_mut().set_score(PlayerPosition::East, 92);
+        match_state.scores_mut().set_score(PlayerPosition::West, 98);
+
+        assert_eq!(match_state.winner(), Some(PlayerPosition::South));
+    }
+
+    #[test]
+    fn winner_is_first_player_in_tie() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
+        match_state.scores_mut().set_score(PlayerPosition::North, 105);
+        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state.scores_mut().set_score(PlayerPosition::East, 87);
+        match_state.scores_mut().set_score(PlayerPosition::West, 98);
+
+        // PlayerPosition::LOOP order is [North, East, South, West]
+        // East appears before South, so East wins the tie
+        assert_eq!(match_state.winner(), Some(PlayerPosition::East));
+    }
+
+    #[test]
+    fn final_standings_sorted_by_score() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
+        match_state.scores_mut().set_score(PlayerPosition::North, 105);
+        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state.scores_mut().set_score(PlayerPosition::East, 92);
+        match_state.scores_mut().set_score(PlayerPosition::West, 98);
+
+        let standings = match_state.final_standings();
+        assert_eq!(standings.len(), 4);
+        assert_eq!(standings[0], (PlayerPosition::South, 87));
+        assert_eq!(standings[1], (PlayerPosition::East, 92));
+        assert_eq!(standings[2], (PlayerPosition::West, 98));
+        assert_eq!(standings[3], (PlayerPosition::North, 105));
     }
 }

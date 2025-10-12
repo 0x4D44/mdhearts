@@ -36,11 +36,15 @@ impl GameController {
         }
     }
     pub fn new_with_seed(seed: Option<u64>, starting: PlayerPosition) -> Self {
-        let match_state = if let Some(s) = seed {
+        let mut match_state = if let Some(s) = seed {
             MatchState::with_seed(starting, s)
         } else {
             MatchState::new(starting)
         };
+
+        // TEMP HACK: Start South (human) with 98 points for testing win condition
+        match_state.scores_mut().set_score(PlayerPosition::South, 98);
+
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
         Self {
@@ -196,6 +200,10 @@ impl GameController {
         if self.in_passing_phase() {
             return None;
         }
+        // Don't autoplay if round is finished (all 13 tricks complete)
+        if self.match_state.is_round_ready_for_scoring() {
+            return None;
+        }
         let seat = self.expected_to_play();
         if seat == stop_seat {
             return None;
@@ -298,6 +306,27 @@ impl GameController {
             self.unseen_tracker
                 .reset_for_round(self.match_state.round());
         }
+    }
+
+    #[allow(dead_code)] // Will be used in UI implementation
+    pub fn is_match_complete(&self) -> bool {
+        self.match_state.is_match_complete()
+    }
+
+    #[allow(dead_code)] // Will be used in UI implementation
+    pub fn winner(&self) -> Option<PlayerPosition> {
+        self.match_state.winner()
+    }
+
+    #[allow(dead_code)] // Will be used in UI implementation
+    pub fn final_standings(&self) -> Vec<(PlayerPosition, u32)> {
+        self.match_state.final_standings()
+    }
+
+    #[allow(dead_code)] // Will be used in UI implementation
+    pub fn start_new_match(&mut self) {
+        let starting = PlayerPosition::North;
+        *self = Self::new_with_seed(None, starting);
     }
 }
 #[cfg(test)]

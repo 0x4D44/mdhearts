@@ -48,6 +48,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY, REG_OPTION_NON_VOLATILE,
     RRF_RT_REG_BINARY, RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
@@ -61,14 +62,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWLP_USERDATA, GetClientRect, GetMessageW, GetScrollInfo, GetSystemMetrics, GetWindowLongPtrW,
     GetWindowPlacement, GetWindowRect, HACCEL, HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow,
     LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG,
-    MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SB_BOTTOM,
+    MessageBoxW, PM_REMOVE, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW, SB_BOTTOM,
     SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
     SB_VERT, SCROLLBAR_COMMAND, SCROLLINFO, SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXSCREEN,
     SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
     SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
     SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
     SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+    WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
     WM_SIZE, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
     WS_OVERLAPPEDWINDOW, WS_VSCROLL, WaitMessage,
@@ -425,6 +426,15 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GamePhase {
+    Passing,
+    Playing,
+    #[allow(dead_code)] // Reserved for future use (show round scores before next round)
+    RoundComplete,
+    MatchComplete,
+}
+
 struct AppState {
     factory: ID2D1Factory,
     dwrite: IDWriteFactory,
@@ -445,6 +455,7 @@ struct AppState {
     await_pass_ack: Option<Vec<ModelCard>>, // highlight newly received cards until user clicks
     rotate_sides: bool,
     dpi: DpiScale,
+    game_phase: GamePhase,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -573,6 +584,11 @@ impl AppState {
             "mdhearts: ",
             &format!("rotate_sides={} (env MDH_ROTATE_SIDES)", rotate_sides),
         );
+        let game_phase = if controller.in_passing_phase() {
+            GamePhase::Passing
+        } else {
+            GamePhase::Playing
+        };
         let mut this = Self {
             factory,
             dwrite,
@@ -593,6 +609,7 @@ impl AppState {
             await_pass_ack: None,
             rotate_sides,
             dpi: DpiScale::uniform(initial_dpi),
+            game_phase,
         };
         if let Some(saved) = load_card_back() {
             this.card_back = saved;
@@ -1086,9 +1103,9 @@ impl AppState {
             )?;
             let border = rt.CreateSolidColorBrush(
                 &D2D1_COLOR_F {
-                    r: 0.2,
-                    g: 0.5,
-                    b: 0.3,
+                    r: 1.0,
+                    g: 0.95,
+                    b: 0.0,
                     a: 1.0,
                 },
                 None,
@@ -2058,6 +2075,10 @@ unsafe extern "system" fn window_proc(
             let y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
             if let Some(cell) = state_cell(hwnd) {
                 let mut state = cell.borrow_mut();
+                // Block all input when match is complete
+                if state.game_phase == GamePhase::MatchComplete {
+                    return LRESULT(0);
+                }
                 if state.collect.is_some() || state.anim.is_some() || state.pass.is_some() {
                     return LRESULT(0);
                 }
@@ -2158,7 +2179,8 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_TIMER => {
-            if let Some(cell) = state_cell(hwnd) {
+            // Extract match complete info if needed
+            let match_complete_info = if let Some(cell) = state_cell(hwnd) {
                 let mut state = cell.borrow_mut();
                 debug_out(
                     "mdhearts: ",
@@ -2213,18 +2235,42 @@ unsafe extern "system" fn window_proc(
                     }
                 }
                 // After collect completes, finish the round if we just played the 13th trick
-                if state.anim.is_none()
+                let match_complete_info = if state.anim.is_none()
                     && state.collect.is_none()
                     && state.await_pass_ack.is_none()
                     && state.pass.is_none()
                 {
                     debug_out("mdhearts: ", "Collect end / ready check");
                     state.controller.finish_round_if_ready();
-                }
+
+                    // Check if match is complete after finishing round
+                    // Only show dialog when transitioning INTO MatchComplete (not when already there)
+                    if state.controller.is_match_complete() && state.game_phase != GamePhase::MatchComplete {
+                        state.game_phase = GamePhase::MatchComplete;
+                        // Extract data for dialog (to show after dropping borrow)
+                        Some((
+                            state.controller.winner(),
+                            state.controller.final_standings()
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 unsafe {
                     let _ = InvalidateRect(Some(hwnd), None, true);
                 }
+                match_complete_info
+            } else {
+                None
+            };
+
+            // Show winner dialog AFTER dropping the borrow
+            if let Some((winner, standings)) = match_complete_info {
+                show_winner_dialog_with_data(hwnd, winner, standings);
             }
+
             LRESULT(0)
         }
         WM_COMMAND => {
@@ -2294,6 +2340,27 @@ unsafe extern "system" fn window_proc(
                 let _ = windows::Win32::UI::WindowsAndMessaging::KillTimer(Some(hwnd), 1);
                 PostQuitMessage(0)
             };
+            LRESULT(0)
+        }
+        _ if msg == WM_APP + 1 => {
+            // Custom message from winner dialog: start new match
+            if let Some(cell) = state_cell(hwnd) {
+                let mut state = cell.borrow_mut();
+                state.controller.start_new_match();
+                state.game_phase = if state.controller.in_passing_phase() {
+                    GamePhase::Passing
+                } else {
+                    GamePhase::Playing
+                };
+                state.passing_select.clear();
+                state.anim = None;
+                state.collect = None;
+                state.pass = None;
+                state.await_pass_ack = None;
+                unsafe {
+                    let _ = InvalidateRect(Some(hwnd), None, true);
+                }
+            }
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
@@ -2379,6 +2446,112 @@ fn show_about_dialog(owner: HWND) {
         if !owner.0.is_null() {
             let _ = SetForegroundWindow(owner);
         }
+    }
+}
+
+// Thread-local storage for the parent window during MessageBox centering
+thread_local! {
+    static MSGBOX_PARENT: std::cell::RefCell<Option<HWND>> = const { std::cell::RefCell::new(None) };
+}
+
+// Hook procedure to center MessageBox on parent window
+unsafe extern "system" fn center_msgbox_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, GetWindowRect, SetWindowPos, SWP_NOSIZE, SWP_NOZORDER, HCBT_ACTIVATE,
+    };
+
+    unsafe {
+        if code == HCBT_ACTIVATE as i32 {
+            let dialog_hwnd = HWND(wparam.0 as *mut std::ffi::c_void);
+
+            if let Some(parent) = MSGBOX_PARENT.with(|p| *p.borrow()) {
+                let mut parent_rect = std::mem::zeroed();
+                let mut dialog_rect = std::mem::zeroed();
+
+                if GetWindowRect(parent, &mut parent_rect).is_ok()
+                    && GetWindowRect(dialog_hwnd, &mut dialog_rect).is_ok()
+                {
+                    let dialog_width = dialog_rect.right - dialog_rect.left;
+                    let dialog_height = dialog_rect.bottom - dialog_rect.top;
+
+                    let parent_center_x = (parent_rect.left + parent_rect.right) / 2;
+                    let parent_center_y = (parent_rect.top + parent_rect.bottom) / 2;
+
+                    let new_x = parent_center_x - dialog_width / 2;
+                    let new_y = parent_center_y - dialog_height / 2;
+
+                    let _ = SetWindowPos(
+                        dialog_hwnd,
+                        None,
+                        new_x,
+                        new_y,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOZORDER,
+                    );
+                }
+            }
+        }
+
+        CallNextHookEx(None, code, wparam, lparam)
+    }
+}
+
+fn show_winner_dialog_with_data(
+    owner: HWND,
+    winner: Option<PlayerPosition>,
+    standings: Vec<(PlayerPosition, u32)>,
+) {
+
+    let message = if let Some(winner_pos) = winner {
+        format!(
+            "Match Complete!\n\n\
+             Winner: {}\n\n\
+             Final Scores:\n\
+             {} - {} points\n\
+             {} - {} points\n\
+             {} - {} points\n\
+             {} - {} points\n\n\
+             Click OK to start a new match.",
+            winner_pos,
+            standings[0].0, standings[0].1,
+            standings[1].0, standings[1].1,
+            standings[2].0, standings[2].1,
+            standings[3].0, standings[3].1,
+        )
+    } else {
+        "Match Complete!\n\nClick OK to start a new match.".to_string()
+    };
+
+    let wide_message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_title: Vec<u16> = "Hearts - Match Complete".encode_utf16().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            MessageBoxW, MB_OK, MB_ICONINFORMATION, SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT,
+        };
+
+        // Set up hook to center the MessageBox
+        MSGBOX_PARENT.with(|p| *p.borrow_mut() = Some(owner));
+
+        let hook = SetWindowsHookExW(WH_CBT, Some(center_msgbox_hook), None, GetCurrentThreadId())
+            .ok();
+
+        MessageBoxW(
+            Some(owner),
+            PCWSTR(wide_message.as_ptr()),
+            PCWSTR(wide_title.as_ptr()),
+            MB_OK | MB_ICONINFORMATION,
+        );
+
+        // Clean up hook
+        if let Some(h) = hook {
+            let _ = UnhookWindowsHookEx(h);
+        }
+        MSGBOX_PARENT.with(|p| *p.borrow_mut() = None);
+
+        // User clicked OK - start a new match by sending custom message to main window
+        PostMessageW(Some(owner), WM_APP + 1, WPARAM(0), LPARAM(0)).ok();
     }
 }
 
