@@ -2,17 +2,25 @@
 
 ## Checkpoint Schedule
 
-Gen3 training saves checkpoints every 50 iterations:
+Gen3 training saves checkpoints every 10 iterations (increased from 50 for better granularity):
 
 | Checkpoint | Iteration | Expected Time | Status |
 |------------|-----------|---------------|--------|
+| `checkpoint_10.pt` | 10/100 | ~1 hour after start | Pending |
+| `checkpoint_20.pt` | 20/100 | ~2 hours after start | Pending |
+| `checkpoint_30.pt` | 30/100 | ~3 hours after start | Pending |
+| `checkpoint_40.pt` | 40/100 | ~4 hours after start | Pending |
 | `checkpoint_50.pt` | 50/100 | ~5 hours after start | Pending |
+| `checkpoint_60.pt` | 60/100 | ~6 hours after start | Pending |
+| `checkpoint_70.pt` | 70/100 | ~7 hours after start | Pending |
+| `checkpoint_80.pt` | 80/100 | ~8 hours after start | Pending |
+| `checkpoint_90.pt` | 90/100 | ~9 hours after start | Pending |
 | `checkpoint_100.pt` | 100/100 | ~10 hours after start | Pending |
 | `gen3_weights.json` | Final export | After iteration 100 | Pending |
 
-**Training started**: 2025-10-12 17:08 UTC
-**Checkpoint 50 ETA**: 2025-10-12 ~22:00 UTC
-**Checkpoint 100 ETA**: 2025-10-13 ~03:00 UTC
+**Training restarted**: 2025-10-12 ~16:38 UTC (with --save-interval 10)
+**First checkpoint ETA**: 2025-10-12 ~17:40 UTC
+**Final checkpoint ETA**: 2025-10-13 ~02:40 UTC
 
 ## Baseline: BC Hard Performance
 
