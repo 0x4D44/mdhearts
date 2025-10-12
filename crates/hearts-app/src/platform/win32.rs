@@ -52,7 +52,6 @@ use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY, REG_OPTION_NON_VOLATILE,
     RRF_RT_REG_BINARY, RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
 };
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::SetScrollInfo;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -89,6 +88,7 @@ const VK_DOWN: u32 = 0x28;
 const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
 const ID_GAME_EXIT: u32 = 1003;
+const ID_GAME_TEST_ENDGAME: u32 = 1004;
 const ID_AI_EASY: u32 = 1101;
 const ID_AI_NORMAL: u32 = 1102;
 const ID_AI_HARD: u32 = 1103;
@@ -100,6 +100,9 @@ const IDI_APPICON: u16 = 501;
 const MAIN_TEXT_PT: f32 = 18.0;
 const ABOUT_HEADER_PT: f32 = 28.0;
 const ABOUT_BODY_PT: f32 = 16.0;
+const WINNER_HEADER_PT: f32 = 32.0;
+const WINNER_BODY_PT: f32 = 18.0;
+const WINNER_SCORE_PT: f32 = 16.0;
 const REG_SUBKEY_APP: &str = "Software\\0x4D44\\MDHearts";
 const REG_VALUE_WINDOW_PLACEMENT: &str = "WindowPlacement";
 const REG_VALUE_CARD_BACK: &str = "CardBack";
@@ -1953,6 +1956,14 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             w!("&Restart Round\tF5"),
         )
     };
+    let _ = unsafe {
+        AppendMenuW(
+            game,
+            MF_STRING,
+            ID_GAME_TEST_ENDGAME as usize,
+            w!("&Test End-Game..."),
+        )
+    };
     let _ = unsafe { AppendMenuW(game, MF_SEPARATOR, 0, None) };
     let _ = unsafe { AppendMenuW(game, MF_STRING, ID_GAME_EXIT as usize, w!("E&xit")) };
     let _ = unsafe { AppendMenuW(hmenu, MF_POPUP, game.0 as usize, w!("&Game")) };
@@ -2317,6 +2328,7 @@ unsafe extern "system" fn window_proc(
             let mut card_back_request: Option<CardBackId> = None;
             let mut show_about = false;
             let mut show_rules = false;
+            let mut show_winner_test = false;
             if let Some(cell) = state_cell(hwnd) {
                 {
                     let mut state = cell.borrow_mut();
@@ -2343,6 +2355,9 @@ unsafe extern "system" fn window_proc(
                             unsafe {
                                 let _ = InvalidateRect(Some(hwnd), None, true);
                             }
+                        }
+                        ID_GAME_TEST_ENDGAME => {
+                            show_winner_test = true;
                         }
                         ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
                         ID_AI_EASY => {
@@ -2399,6 +2414,17 @@ unsafe extern "system" fn window_proc(
             }
             if show_about {
                 show_about_dialog(hwnd);
+            }
+            if show_winner_test {
+                // Test data showing West winning with 1 point
+                let winner = Some(PlayerPosition::West);
+                let standings = vec![
+                    (PlayerPosition::West, 1),
+                    (PlayerPosition::South, 6),
+                    (PlayerPosition::East, 32),
+                    (PlayerPosition::North, 111),
+                ];
+                show_winner_dialog_with_data(hwnd, winner, standings);
             }
             LRESULT(0)
         }
@@ -2525,52 +2551,787 @@ fn show_about_dialog(owner: HWND) {
     }
 }
 
-// Thread-local storage for the parent window during MessageBox centering
-thread_local! {
-    static MSGBOX_PARENT: std::cell::RefCell<Option<HWND>> = const { std::cell::RefCell::new(None) };
+struct WinnerDialog;
+
+impl WinnerDialog {
+    fn show(
+        owner: HWND,
+        winner: Option<PlayerPosition>,
+        standings: Vec<(PlayerPosition, u32)>,
+    ) -> Result<()> {
+        WinnerDialogState::launch(owner, winner, standings)
+    }
 }
 
-// Hook procedure to center MessageBox on parent window
-unsafe extern "system" fn center_msgbox_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, GetWindowRect, HCBT_ACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
-    };
+struct WinnerDialogState {
+    factory: ID2D1Factory,
+    #[allow(dead_code)]
+    dwrite: IDWriteFactory,
+    header_format: IDWriteTextFormat,
+    body_format: IDWriteTextFormat,
+    score_format: IDWriteTextFormat,
+    render_target: Option<ID2D1HwndRenderTarget>,
+    wic: IWICImagingFactory,
+    cards_bitmap: Option<ID2D1Bitmap>,
+    #[allow(dead_code)]
+    atlas: AtlasMeta,
+    winner: Option<PlayerPosition>,
+    standings: Vec<(PlayerPosition, u32)>,
+    dpi: DpiScale,
+}
 
-    unsafe {
-        if code == HCBT_ACTIVATE as i32 {
-            let dialog_hwnd = HWND(wparam.0 as *mut std::ffi::c_void);
+const WINNER_CARD_FAN: [ModelCard; 4] = [
+    ModelCard::new(
+        hearts_core::model::rank::Rank::Ace,
+        hearts_core::model::suit::Suit::Hearts,
+    ),
+    ModelCard::new(
+        hearts_core::model::rank::Rank::King,
+        hearts_core::model::suit::Suit::Hearts,
+    ),
+    ModelCard::new(
+        hearts_core::model::rank::Rank::Queen,
+        hearts_core::model::suit::Suit::Spades,
+    ),
+    ModelCard::new(
+        hearts_core::model::rank::Rank::Jack,
+        hearts_core::model::suit::Suit::Hearts,
+    ),
+];
 
-            if let Some(parent) = MSGBOX_PARENT.with(|p| *p.borrow()) {
-                let mut parent_rect = std::mem::zeroed();
-                let mut dialog_rect = std::mem::zeroed();
+impl WinnerDialogState {
+    fn new(winner: Option<PlayerPosition>, standings: Vec<(PlayerPosition, u32)>) -> Result<Self> {
+        let factory: ID2D1Factory = unsafe {
+            D2D1CreateFactory::<ID2D1Factory>(
+                D2D1_FACTORY_TYPE_MULTI_THREADED,
+                Some(&D2D1_FACTORY_OPTIONS::default()),
+            )?
+        };
+        let dwrite: IDWriteFactory =
+            unsafe { DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED)? };
 
-                if GetWindowRect(parent, &mut parent_rect).is_ok()
-                    && GetWindowRect(dialog_hwnd, &mut dialog_rect).is_ok()
-                {
-                    let dialog_width = dialog_rect.right - dialog_rect.left;
-                    let dialog_height = dialog_rect.bottom - dialog_rect.top;
+        let header_format = unsafe {
+            let format = dwrite.CreateTextFormat(
+                w!("Segoe UI Semibold"),
+                None,
+                DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                WINNER_HEADER_PT,
+                w!("en-us"),
+            )?;
+            format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            format
+        };
 
-                    let parent_center_x = (parent_rect.left + parent_rect.right) / 2;
-                    let parent_center_y = (parent_rect.top + parent_rect.bottom) / 2;
+        let body_format = unsafe {
+            let format = dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                WINNER_BODY_PT,
+                w!("en-us"),
+            )?;
+            format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            format
+        };
 
-                    let new_x = parent_center_x - dialog_width / 2;
-                    let new_y = parent_center_y - dialog_height / 2;
+        let score_format = unsafe {
+            let format = dwrite.CreateTextFormat(
+                w!("Segoe UI"),
+                None,
+                DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                WINNER_SCORE_PT,
+                w!("en-us"),
+            )?;
+            format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING)?;
+            format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+            format
+        };
 
-                    let _ = SetWindowPos(
-                        dialog_hwnd,
-                        None,
-                        new_x,
-                        new_y,
-                        0,
-                        0,
-                        SWP_NOSIZE | SWP_NOZORDER,
-                    );
+        let wic: IWICImagingFactory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
+        let atlas = AtlasMeta::load_from_assets().map_err(|e| {
+            windows::core::Error::new(windows::core::HRESULT(0x80004005u32 as i32), e.to_string())
+        })?;
+
+        Ok(Self {
+            factory,
+            dwrite,
+            header_format,
+            body_format,
+            score_format,
+            render_target: None,
+            wic,
+            cards_bitmap: None,
+            atlas,
+            winner,
+            standings,
+            dpi: DpiScale::uniform(96),
+        })
+    }
+
+    fn layout_size(&self, size: D2D_SIZE_U) -> LayoutSize {
+        layout_size_for(size, self.dpi)
+    }
+
+    fn set_dpi(&mut self, dpi: DpiScale) {
+        if self.dpi == dpi {
+            return;
+        }
+        self.dpi = dpi;
+        if let Some(rt) = self.render_target.as_ref() {
+            let (dx, dy) = self.dpi.as_f32_pair();
+            unsafe {
+                rt.SetDpi(dx, dy);
+            }
+        }
+    }
+
+    fn resize(&mut self, hwnd: HWND) -> Result<()> {
+        if let Some(ref rt) = self.render_target {
+            let size = client_size(hwnd);
+            unsafe {
+                rt.Resize(&size)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_render_target(&mut self, hwnd: HWND) -> Result<()> {
+        if self.render_target.is_none() {
+            let rect = client_rect(hwnd);
+            if rect.right <= rect.left || rect.bottom <= rect.top {
+                return Ok(());
+            }
+            let props = D2D1_HWND_RENDER_TARGET_PROPERTIES {
+                hwnd,
+                pixelSize: D2D_SIZE_U {
+                    width: (rect.right - rect.left) as u32,
+                    height: (rect.bottom - rect.top) as u32,
+                },
+                presentOptions: D2D1_PRESENT_OPTIONS_NONE,
+            };
+            let rt = unsafe {
+                self.factory
+                    .CreateHwndRenderTarget(&D2D1_RENDER_TARGET_PROPERTIES::default(), &props)?
+            };
+            let (dx, dy) = self.dpi.as_f32_pair();
+            unsafe {
+                rt.SetDpi(dx, dy);
+            }
+            self.render_target = Some(rt);
+        }
+        Ok(())
+    }
+
+    fn ensure_cards_bitmap(&mut self, rt: &ID2D1HwndRenderTarget) -> Result<()> {
+        if self.cards_bitmap.is_some() {
+            return Ok(());
+        }
+        let stream: IWICStream = unsafe { self.wic.CreateStream()? };
+        let bytes = std::fs::read("assets/cards.png").map_err(|_| {
+            windows::core::Error::from(windows::core::HRESULT(0x80004005u32 as i32))
+        })?;
+        unsafe {
+            stream.InitializeFromMemory(bytes.as_slice())?;
+            let decoder = self.wic.CreateDecoderFromStream(
+                &stream,
+                std::ptr::null(),
+                WICDecodeMetadataCacheOnLoad,
+            )?;
+            let frame = decoder.GetFrame(0)?;
+            let converter = self.wic.CreateFormatConverter()?;
+            converter.Initialize(
+                &frame,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
+            let bitmap = rt.CreateBitmapFromWicBitmap(&converter, None)?;
+            self.cards_bitmap = Some(bitmap);
+        }
+        Ok(())
+    }
+
+    fn launch(
+        owner: HWND,
+        winner: Option<PlayerPosition>,
+        standings: Vec<(PlayerPosition, u32)>,
+    ) -> Result<()> {
+        static CLASS: std::sync::Once = std::sync::Once::new();
+        let class_name = w!("MDHEARTS_WINNER");
+        CLASS.call_once(|| {
+            let hmodule = unsafe { GetModuleHandleW(None).unwrap_or_default() };
+            let hinstance = HINSTANCE(hmodule.0);
+            let icon = unsafe {
+                LoadIconW(Some(hinstance), make_int_resource(IDI_APPICON))
+                    .unwrap_or_else(|_| LoadIconW(None, IDI_APPLICATION).unwrap_or_default())
+            };
+            let cursor = unsafe { LoadCursorW(None, IDC_ARROW).unwrap_or_default() };
+            let wc = WNDCLASSEXW {
+                cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(winner_window_proc),
+                cbClsExtra: 0,
+                cbWndExtra: std::mem::size_of::<*const RefCell<WinnerDialogState>>() as i32,
+                hInstance: hinstance,
+                hIcon: icon,
+                hCursor: cursor,
+                hbrBackground: HBRUSH::default(),
+                lpszMenuName: PCWSTR::null(),
+                lpszClassName: class_name,
+                hIconSm: icon,
+            };
+            unsafe {
+                let _ = RegisterClassExW(&wc);
+            }
+        });
+
+        let state = RefCell::new(Self::new(winner, standings)?);
+        let boxed = Box::new(state);
+        let ptr = Box::into_raw(boxed);
+
+        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
+        let dpi_scale = unsafe {
+            if !owner.0.is_null() {
+                DpiScale::uniform(GetDpiForWindow(owner))
+            } else {
+                DpiScale::uniform(GetDpiForSystem())
+            }
+        };
+        let base_width = 580;
+        let base_height = 340;
+        let scaled_width = (base_width * dpi_scale.x as i32 + 48) / 96;
+        let scaled_height = (base_height * dpi_scale.y as i32 + 48) / 96;
+        let mut window_rect = RECT {
+            left: 0,
+            top: 0,
+            right: scaled_width,
+            bottom: scaled_height,
+        };
+        unsafe {
+            let _ = AdjustWindowRectEx(&mut window_rect, style, false, WINDOW_EX_STYLE::default());
+        }
+        let width_px = window_rect.right - window_rect.left;
+        let height_px = window_rect.bottom - window_rect.top;
+        let hwnd_res = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class_name,
+                w!("Game Complete"),
+                style,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                width_px,
+                height_px,
+                Some(owner),
+                None,
+                None,
+                Some(ptr.cast::<c_void>()),
+            )
+        };
+
+        let hwnd = match hwnd_res {
+            Ok(h) => h,
+            Err(err) => {
+                unsafe {
+                    let _ = Box::from_raw(ptr);
+                }
+                return Err(err);
+            }
+        };
+
+        unsafe {
+            center_window(owner, hwnd);
+            let _ = ShowWindow(hwnd, SW_SHOW);
+        }
+        unsafe {
+            let mut msg = MSG::default();
+            while IsWindow(Some(hwnd)).as_bool() {
+                if PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    if msg.message == WM_QUIT {
+                        PostQuitMessage(msg.wParam.0 as i32);
+                        break;
+                    }
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                } else {
+                    let _ = WaitMessage();
                 }
             }
         }
 
-        CallNextHookEx(None, code, wparam, lparam)
+        // After dialog closes, send message to start new match
+        unsafe {
+            PostMessageW(Some(owner), WM_APP + 1, WPARAM(0), LPARAM(0)).ok();
+        }
+
+        Ok(())
     }
+
+    fn draw(&mut self, hwnd: HWND) -> Result<()> {
+        self.ensure_render_target(hwnd)?;
+        let Some(rt) = self.render_target.as_ref().cloned() else {
+            return Ok(());
+        };
+        let size_px = client_size(hwnd);
+        if size_px.width == 0 || size_px.height == 0 {
+            return Ok(());
+        }
+        self.ensure_cards_bitmap(&rt)?;
+
+        let layout = self.layout_size(size_px);
+        let width = layout.width;
+        let height = layout.height;
+        let (dx, dy) = self.dpi.as_f32_pair();
+        unsafe {
+            rt.SetDpi(dx, dy);
+        }
+
+        // Calculate card fan bounds
+        let available_area = D2D_RECT_F {
+            left: 0.0,
+            top: 40.0,
+            right: width * 0.5,
+            bottom: height - 0.0,
+        };
+        let card_bounds = self.calculate_card_fan_bounds(available_area);
+
+        // Add padding around cards to create panel
+        let panel_padding = 5.0;
+        let card_area = D2D_RECT_F {
+            left: card_bounds.left - panel_padding,
+            top: card_bounds.top - panel_padding,
+            right: card_bounds.right + panel_padding,
+            bottom: card_bounds.bottom + panel_padding,
+        };
+
+        // Position text area to the right of card panel
+        let text_area = D2D_RECT_F {
+            left: card_area.right + 30.0,
+            top: 40.0,
+            right: width - 10.0,
+            bottom: height - 10.0,
+        };
+
+        unsafe {
+            rt.BeginDraw();
+
+            // Dark green felt background
+            rt.Clear(Some(&D2D1_COLOR_F {
+                r: 0.05,
+                g: 0.14,
+                b: 0.10,
+                a: 1.0,
+            }));
+
+            // Create brushes
+            let gold_brush = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 1.0,
+                    g: 0.84,
+                    b: 0.0,
+                    a: 1.0,
+                },
+                None,
+            )?;
+            let white_brush = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.95,
+                    g: 0.95,
+                    b: 0.95,
+                    a: 1.0,
+                },
+                None,
+            )?;
+            let panel_brush = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.1,
+                    g: 0.15,
+                    b: 0.12,
+                    a: 0.9,
+                },
+                None,
+            )?;
+            let shadow_brush = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.5,
+                },
+                None,
+            )?;
+            let outline_brush = rt.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.2,
+                    g: 0.4,
+                    b: 0.5,
+                    a: 1.0,
+                },
+                None,
+            )?;
+
+            // Draw left card panel with shadow
+            let mut card_shadow_rect = card_area;
+            card_shadow_rect.left += 6.0;
+            card_shadow_rect.top += 6.0;
+            card_shadow_rect.right += 6.0;
+            card_shadow_rect.bottom += 6.0;
+            rt.FillRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect: card_shadow_rect,
+                    radiusX: 14.0,
+                    radiusY: 14.0,
+                },
+                &shadow_brush,
+            );
+
+            rt.FillRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect: card_area,
+                    radiusX: 14.0,
+                    radiusY: 14.0,
+                },
+                &panel_brush,
+            );
+            rt.DrawRoundedRectangle(
+                &D2D1_ROUNDED_RECT {
+                    rect: card_area,
+                    radiusX: 14.0,
+                    radiusY: 14.0,
+                },
+                &outline_brush,
+                1.5,
+                None,
+            );
+
+            // Draw card fan in left panel
+            if let Some(ref bmp) = self.cards_bitmap {
+                self.draw_card_fan(&rt, bmp, card_bounds)?;
+            }
+
+            // Header - centered at top of entire dialog
+            let header_text = if self.winner.is_some() {
+                "🏆 Game Complete!"
+            } else {
+                "Game Complete"
+            };
+            let header = string_to_wide(header_text);
+            let header_rect = D2D_RECT_F {
+                left: 0.0,
+                top: 20.0,
+                right: width,
+                bottom: 80.0,
+            };
+            rt.DrawText(
+                header.as_slice(),
+                &self.header_format,
+                &header_rect,
+                &gold_brush,
+                Default::default(),
+                DWRITE_MEASURING_MODE::default(),
+            );
+
+            // Winner announcement - centered below header
+            if let Some(winner_pos) = self.winner {
+                let winner_text = format!("Winner: {}", winner_pos);
+                let winner_str = string_to_wide(&winner_text);
+                let winner_rect = D2D_RECT_F {
+                    left: 0.0,
+                    top: 70.0,
+                    right: width,
+                    bottom: 120.0,
+                };
+                rt.DrawText(
+                    winner_str.as_slice(),
+                    &self.body_format,
+                    &winner_rect,
+                    &gold_brush,
+                    Default::default(),
+                    DWRITE_MEASURING_MODE::default(),
+                );
+            }
+
+            // Scores header - moved down and left
+            let scores_left = text_area.left - 160.0;
+            let mut current_y = 125.0;
+            let scores_header = string_to_wide("Final Scores:");
+            let scores_header_rect = D2D_RECT_F {
+                left: scores_left,
+                top: current_y,
+                right: text_area.right,
+                bottom: current_y + 28.0,
+            };
+            rt.DrawText(
+                scores_header.as_slice(),
+                &self.body_format,
+                &scores_header_rect,
+                &white_brush,
+                Default::default(),
+                DWRITE_MEASURING_MODE::default(),
+            );
+            current_y = scores_header_rect.bottom + 10.0;
+
+            // Draw scores - indented slightly from "Final Scores:"
+            for (pos, score) in &self.standings {
+                let score_text = if *score == 1 {
+                    format!("{}: {} point", pos, score)
+                } else {
+                    format!("{}: {} points", pos, score)
+                };
+                let score_str = string_to_wide(&score_text);
+                let score_rect = D2D_RECT_F {
+                    left: scores_left + 200.0,
+                    top: current_y,
+                    right: text_area.right,
+                    bottom: current_y + 32.0,
+                };
+
+                // Highlight winner row
+                let brush = if Some(*pos) == self.winner {
+                    &gold_brush
+                } else {
+                    &white_brush
+                };
+
+                rt.DrawText(
+                    score_str.as_slice(),
+                    &self.score_format,
+                    &score_rect,
+                    brush,
+                    Default::default(),
+                    DWRITE_MEASURING_MODE::default(),
+                );
+                current_y += 24.0;
+            }
+
+            // Footer instructions - moved up a bit
+            current_y += 24.0;
+            let footer_text = string_to_wide("Click anywhere or press Enter to start a new match");
+            let footer_rect = D2D_RECT_F {
+                left: text_area.left,
+                top: current_y,
+                right: text_area.right,
+                bottom: current_y + 30.0,
+            };
+            rt.DrawText(
+                footer_text.as_slice(),
+                &self.score_format,
+                &footer_rect,
+                &white_brush,
+                Default::default(),
+                DWRITE_MEASURING_MODE::default(),
+            );
+
+            let end_result = rt.EndDraw(None, None);
+            if let Err(err) = end_result {
+                if err.code().0 == D2DERR_RECREATE_TARGET {
+                    self.render_target = None;
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn calculate_card_fan_bounds(&self, available_area: D2D_RECT_F) -> D2D_RECT_F {
+        let width = available_area.right - available_area.left;
+        let height = available_area.bottom - available_area.top;
+
+        // Use a reference height for card sizing
+        let card_height = height * 0.40;
+        let card_width = card_height / 1.4;
+
+        // Center the fan horizontally
+        let base_left = available_area.left + (width - card_width) * 0.5;
+        let base_top = available_area.top + height * 0.3;
+
+        let offsets = [-24.0_f32, -9.0, 9.0, 24.0];
+        let lifts = [11.25_f32, 3.75, -3.75, -11.25];
+
+        // Calculate bounding box
+        let min_left = base_left + offsets[0]; // -24.0 is the min
+        let max_right = base_left + offsets[3] + card_width; // 24.0 is the max
+        let min_top = base_top + lifts[3]; // -11.25 is the min
+        let max_bottom = base_top + lifts[0] + card_height; // 11.25 is the max
+
+        D2D_RECT_F {
+            left: min_left,
+            top: min_top,
+            right: max_right,
+            bottom: max_bottom,
+        }
+    }
+
+    fn draw_card_fan(
+        &self,
+        rt: &ID2D1HwndRenderTarget,
+        bmp: &ID2D1Bitmap,
+        bounds: D2D_RECT_F,
+    ) -> Result<()> {
+        let offsets = [-24.0_f32, -9.0, 9.0, 24.0];
+        let lifts = [11.25_f32, 3.75, -3.75, -11.25];
+
+        // Extract the parameters used to calculate bounds
+        let card_height = bounds.bottom - bounds.top - 22.5; // Subtract the lift range (11.25 * 2)
+        let card_width = card_height / 1.4;
+        let base_left = bounds.left - offsets[0]; // bounds.left + 24.0
+        let base_top = bounds.top - lifts[3]; // bounds.top + 11.25
+
+        for (i, card) in WINNER_CARD_FAN.iter().enumerate() {
+            if let Some(src) = self.atlas.src_rect_for(*card) {
+                let dest = D2D_RECT_F {
+                    left: base_left + offsets[i],
+                    top: base_top + lifts[i],
+                    right: base_left + offsets[i] + card_width,
+                    bottom: base_top + lifts[i] + card_height,
+                };
+                let dest = snap_rect(dest);
+                let radius = card_corner_radius(&dest);
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: dest,
+                    radiusX: radius,
+                    radiusY: radius,
+                };
+                let src = inset_rect(src, 0.5, 0.5);
+                draw_bitmap_with_round_corners(
+                    &self.factory,
+                    rt,
+                    &rounded,
+                    bmp,
+                    Some(&src),
+                    1.0,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+unsafe extern "system" fn winner_window_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_NCCREATE => unsafe {
+            let cs = &*(lparam.0 as *const CREATESTRUCTW);
+            let ptr = cs.lpCreateParams as *mut RefCell<WinnerDialogState>;
+            if !ptr.is_null() {
+                let dpi = GetDpiForWindow(hwnd);
+                (*ptr).borrow_mut().set_dpi(DpiScale::uniform(dpi));
+            }
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, ptr as isize);
+            LRESULT(1)
+        },
+        WM_CLOSE => {
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_DESTROY => LRESULT(0),
+        WM_NCDESTROY => {
+            if let Some(ptr) = winner_state_ptr(hwnd) {
+                unsafe {
+                    let _ = Box::from_raw(ptr);
+                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_DPICHANGED => {
+            let suggested = unsafe { *(lparam.0 as *const RECT) };
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    suggested.left,
+                    suggested.top,
+                    suggested.right - suggested.left,
+                    suggested.bottom - suggested.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            if let Some(cell) = winner_state_cell(hwnd) {
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let new_dpi = dpi_from_wparam(wparam);
+                    state.set_dpi(new_dpi);
+                    let _ = state.resize(hwnd);
+                }
+            }
+            unsafe {
+                let _ = InvalidateRect(Some(hwnd), None, true);
+            }
+            LRESULT(0)
+        }
+        WM_SIZE => {
+            if let Some(cell) = winner_state_cell(hwnd) {
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let _ = state.resize(hwnd);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            unsafe {
+                let _ = BeginPaint(hwnd, &mut ps);
+            }
+            if let Some(cell) = winner_state_cell(hwnd) {
+                if let Ok(mut state) = cell.try_borrow_mut() {
+                    let _ = state.draw(hwnd);
+                }
+            }
+            unsafe {
+                let _ = EndPaint(hwnd, &ps);
+            }
+            LRESULT(0)
+        }
+        WM_KEYDOWN => {
+            let key = wparam.0 as u32;
+            if key == VK_ESCAPE || key == VK_RETURN {
+                unsafe {
+                    let _ = DestroyWindow(hwnd);
+                }
+            }
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn winner_state_ptr(hwnd: HWND) -> Option<*mut RefCell<WinnerDialogState>> {
+    let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    if ptr == 0 {
+        None
+    } else {
+        Some(ptr as *mut RefCell<WinnerDialogState>)
+    }
+}
+
+fn winner_state_cell(hwnd: HWND) -> Option<&'static RefCell<WinnerDialogState>> {
+    winner_state_ptr(hwnd).map(|p| unsafe { &*p })
 }
 
 fn show_winner_dialog_with_data(
@@ -2578,62 +3339,14 @@ fn show_winner_dialog_with_data(
     winner: Option<PlayerPosition>,
     standings: Vec<(PlayerPosition, u32)>,
 ) {
-    let message = if let Some(winner_pos) = winner {
-        format!(
-            "Match Complete!\n\n\
-             Winner: {}\n\n\
-             Final Scores:\n\
-             {} - {} points\n\
-             {} - {} points\n\
-             {} - {} points\n\
-             {} - {} points\n\n\
-             Click OK to start a new match.",
-            winner_pos,
-            standings[0].0,
-            standings[0].1,
-            standings[1].0,
-            standings[1].1,
-            standings[2].0,
-            standings[2].1,
-            standings[3].0,
-            standings[3].1,
-        )
-    } else {
-        "Match Complete!\n\nClick OK to start a new match.".to_string()
-    };
-
-    let wide_message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
-    let wide_title: Vec<u16> = "Hearts - Match Complete"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
+    // Use the new custom dialog
+    if let Err(err) = WinnerDialog::show(owner, winner, standings) {
+        debug_out("mdhearts: ", &format!("Winner dialog error: {:?}", err));
+    }
     unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::{
-            MB_ICONINFORMATION, MB_OK, MessageBoxW, SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT,
-        };
-
-        // Set up hook to center the MessageBox
-        MSGBOX_PARENT.with(|p| *p.borrow_mut() = Some(owner));
-
-        let hook =
-            SetWindowsHookExW(WH_CBT, Some(center_msgbox_hook), None, GetCurrentThreadId()).ok();
-
-        MessageBoxW(
-            Some(owner),
-            PCWSTR(wide_message.as_ptr()),
-            PCWSTR(wide_title.as_ptr()),
-            MB_OK | MB_ICONINFORMATION,
-        );
-
-        // Clean up hook
-        if let Some(h) = hook {
-            let _ = UnhookWindowsHookEx(h);
+        if !owner.0.is_null() {
+            let _ = SetForegroundWindow(owner);
         }
-        MSGBOX_PARENT.with(|p| *p.borrow_mut() = None);
-
-        // User clicked OK - start a new match by sending custom message to main window
-        PostMessageW(Some(owner), WM_APP + 1, WPARAM(0), LPARAM(0)).ok();
     }
 }
 
