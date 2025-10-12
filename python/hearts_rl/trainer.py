@@ -239,8 +239,16 @@ class PPOTrainer:
         """Load model checkpoint.
 
         Args:
-            checkpoint_path: Path to checkpoint file
+            checkpoint_path: Path to checkpoint file (.pt or .json)
         """
+        checkpoint_path_obj = Path(checkpoint_path)
+
+        # Check if it's a JSON weights file
+        if checkpoint_path_obj.suffix == '.json':
+            self.load_weights_from_json(checkpoint_path)
+            return
+
+        # Otherwise, load PyTorch checkpoint
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
@@ -250,6 +258,47 @@ class PPOTrainer:
 
         print(f"Loaded checkpoint from {checkpoint_path}")
         print(f"Resuming from iteration {checkpoint['iteration']}, epoch {self.epoch}")
+
+    def load_weights_from_json(self, json_path: str):
+        """Load model weights from JSON file (BC or exported weights).
+
+        Args:
+            json_path: Path to JSON weights file
+        """
+        with open(json_path, 'r') as f:
+            weights = json.load(f)
+
+        # Build state dict from JSON weights
+        state_dict = {}
+
+        # Layer 1: 270 -> 256
+        layer1_weights = torch.tensor(weights['layer1']['weights']).reshape(256, 270)
+        layer1_biases = torch.tensor(weights['layer1']['biases'])
+        state_dict['trunk.0.weight'] = layer1_weights
+        state_dict['trunk.0.bias'] = layer1_biases
+
+        # Layer 2: 256 -> 128
+        layer2_weights = torch.tensor(weights['layer2']['weights']).reshape(128, 256)
+        layer2_biases = torch.tensor(weights['layer2']['biases'])
+        state_dict['trunk.2.weight'] = layer2_weights
+        state_dict['trunk.2.bias'] = layer2_biases
+
+        # Layer 3 (actor head): 128 -> 52
+        layer3_weights = torch.tensor(weights['layer3']['weights']).reshape(52, 128)
+        layer3_biases = torch.tensor(weights['layer3']['biases'])
+        state_dict['actor_head.weight'] = layer3_weights
+        state_dict['actor_head.bias'] = layer3_biases
+
+        # Initialize critic head with small random weights (not trained yet)
+        # This will be learned during RL training
+        state_dict['critic_head.weight'] = torch.randn(1, 128) * 0.01
+        state_dict['critic_head.bias'] = torch.zeros(1)
+
+        # Load into model
+        self.model.load_state_dict(state_dict)
+
+        print(f"Loaded weights from {json_path}")
+        print(f"Initialized actor from BC/exported weights, critic head randomly initialized")
 
     def export_weights(self, output_path: str, schema_version: str = None, schema_hash: str = None):
         """Export model weights to JSON format for Rust inference.
