@@ -72,7 +72,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
     WM_SIZE, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-    WS_OVERLAPPEDWINDOW, WS_VSCROLL, WaitMessage,
+    WS_OVERLAPPEDWINDOW, WS_THICKFRAME, WS_VSCROLL, WaitMessage,
 };
 use windows::core::{Interface, PCWSTR, Result, w};
 
@@ -2800,7 +2800,7 @@ impl WinnerDialogState {
         let boxed = Box::new(state);
         let ptr = Box::into_raw(boxed);
 
-        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
+        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX & !WS_THICKFRAME;
         let dpi_scale = unsafe {
             if !owner.0.is_null() {
                 DpiScale::uniform(GetDpiForWindow(owner))
@@ -3498,7 +3498,7 @@ impl AboutDialogState {
         let boxed = Box::new(state);
         let ptr = Box::into_raw(boxed);
 
-        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX;
+        let style = WS_OVERLAPPEDWINDOW & !WS_MAXIMIZEBOX & !WS_MINIMIZEBOX & !WS_THICKFRAME;
         let dpi_scale = unsafe {
             if !owner.0.is_null() {
                 DpiScale::uniform(GetDpiForWindow(owner))
