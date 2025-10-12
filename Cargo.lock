@@ -120,7 +120,7 @@ checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
 
 [[package]]
 name = "hearts-app"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "embed-resource",
  "hearts-core",
@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "hearts-core"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "rand",
  "serde",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "hearts-ui"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "once_cell",
  "serde",

@@ -2,7 +2,7 @@
 ; Build with: iscc installers\Hearts.iss
 
 #define MyAppName "MD Hearts"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "0x4D44 Software"
 #define MyAppExeName "mdhearts.exe"
 #define MyAppIco "..\crates\hearts-app\res\app.ico"

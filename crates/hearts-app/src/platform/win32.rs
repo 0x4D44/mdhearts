@@ -3931,7 +3931,7 @@ Built with Rust, Direct2D, and plenty of card shuffling.",
     ) -> Result<()> {
         let width = area.right - area.left;
         let height = area.bottom - area.top;
-        let card_height = height * 0.78;
+        let card_height = height * 0.702; // 0.78 * 0.9 = 10% smaller
         let card_width = card_height / 1.4;
         let base_left = area.left + width * 0.18;
         let base_top = area.top + height * 0.08;
