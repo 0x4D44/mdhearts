@@ -88,7 +88,6 @@ const VK_DOWN: u32 = 0x28;
 const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
 const ID_GAME_EXIT: u32 = 1003;
-const ID_GAME_TEST_ENDGAME: u32 = 1004;
 const ID_AI_EASY: u32 = 1101;
 const ID_AI_NORMAL: u32 = 1102;
 const ID_AI_HARD: u32 = 1103;
@@ -109,6 +108,28 @@ const REG_VALUE_CARD_BACK: &str = "CardBack";
 const REG_VALUE_AI_SELECTION: &str = "AiSelection";
 const MIN_WINDOW_WIDTH: i32 = 720;
 const MIN_WINDOW_HEIGHT: i32 = 540;
+
+// Direct FFI for EnableWindow (not available in windows crate 0.62.1)
+unsafe fn enable_window(hwnd: HWND, enable: bool) -> bool {
+    use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    use windows::core::s;
+
+    unsafe {
+        let user32 = GetModuleHandleW(windows::core::w!("user32.dll")).ok();
+        if let Some(hmodule) = user32 {
+            let proc = GetProcAddress(hmodule, s!("EnableWindow"));
+            if let Some(enable_window_fn) = proc {
+                type EnableWindowFn = unsafe extern "system" fn(HWND, i32) -> i32;
+                let func: EnableWindowFn = std::mem::transmute(enable_window_fn);
+                func(hwnd, if enable { 1 } else { 0 }) != 0
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CardBackId {
@@ -1956,14 +1977,6 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             w!("&Restart Round\tF5"),
         )
     };
-    let _ = unsafe {
-        AppendMenuW(
-            game,
-            MF_STRING,
-            ID_GAME_TEST_ENDGAME as usize,
-            w!("&Test End-Game..."),
-        )
-    };
     let _ = unsafe { AppendMenuW(game, MF_SEPARATOR, 0, None) };
     let _ = unsafe { AppendMenuW(game, MF_STRING, ID_GAME_EXIT as usize, w!("E&xit")) };
     let _ = unsafe { AppendMenuW(hmenu, MF_POPUP, game.0 as usize, w!("&Game")) };
@@ -2328,7 +2341,6 @@ unsafe extern "system" fn window_proc(
             let mut card_back_request: Option<CardBackId> = None;
             let mut show_about = false;
             let mut show_rules = false;
-            let mut show_winner_test = false;
             if let Some(cell) = state_cell(hwnd) {
                 {
                     let mut state = cell.borrow_mut();
@@ -2355,9 +2367,6 @@ unsafe extern "system" fn window_proc(
                             unsafe {
                                 let _ = InvalidateRect(Some(hwnd), None, true);
                             }
-                        }
-                        ID_GAME_TEST_ENDGAME => {
-                            show_winner_test = true;
                         }
                         ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
                         ID_AI_EASY => {
@@ -2414,17 +2423,6 @@ unsafe extern "system" fn window_proc(
             }
             if show_about {
                 show_about_dialog(hwnd);
-            }
-            if show_winner_test {
-                // Test data showing West winning with 1 point
-                let winner = Some(PlayerPosition::West);
-                let standings = vec![
-                    (PlayerPosition::West, 1),
-                    (PlayerPosition::South, 6),
-                    (PlayerPosition::East, 32),
-                    (PlayerPosition::North, 111),
-                ];
-                show_winner_dialog_with_data(hwnd, winner, standings);
             }
             LRESULT(0)
         }
@@ -2852,6 +2850,10 @@ impl WinnerDialogState {
 
         unsafe {
             center_window(owner, hwnd);
+            // Disable parent window to make this modal
+            if !owner.0.is_null() {
+                enable_window(owner, false);
+            }
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
         unsafe {
@@ -2870,8 +2872,12 @@ impl WinnerDialogState {
             }
         }
 
-        // After dialog closes, send message to start new match
+        // Re-enable parent window and send message to start new match
         unsafe {
+            if !owner.0.is_null() {
+                enable_window(owner, true);
+                let _ = SetForegroundWindow(owner);
+            }
             PostMessageW(Some(owner), WM_APP + 1, WPARAM(0), LPARAM(0)).ok();
         }
 
@@ -3550,6 +3556,10 @@ impl AboutDialogState {
 
         unsafe {
             center_window(owner, hwnd);
+            // Disable parent window to make this modal
+            if !owner.0.is_null() {
+                enable_window(owner, false);
+            }
             let _ = ShowWindow(hwnd, SW_SHOW);
         }
         unsafe {
@@ -3565,6 +3575,14 @@ impl AboutDialogState {
                 } else {
                     let _ = WaitMessage();
                 }
+            }
+        }
+
+        // Re-enable parent window
+        unsafe {
+            if !owner.0.is_null() {
+                enable_window(owner, true);
+                let _ = SetForegroundWindow(owner);
             }
         }
 

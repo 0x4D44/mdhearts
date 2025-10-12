@@ -69,16 +69,11 @@ impl GameController {
         starting: PlayerPosition,
         ai_mode: AiMode,
     ) -> Self {
-        let mut match_state = if let Some(s) = seed {
+        let match_state = if let Some(s) = seed {
             MatchState::with_seed(starting, s)
         } else {
             MatchState::new(starting)
         };
-
-        // TEMP HACK: Start South (human) with 98 points for testing win condition
-        match_state
-            .scores_mut()
-            .set_score(PlayerPosition::South, 98);
 
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
