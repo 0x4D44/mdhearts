@@ -87,6 +87,12 @@ def main():
         help='TensorBoard log directory (default: runs)',
     )
     parser.add_argument(
+        '--save-interval',
+        type=int,
+        default=50,
+        help='Save checkpoint every N iterations (default: 50)',
+    )
+    parser.add_argument(
         '--resume',
         type=str,
         default=None,
@@ -116,6 +122,7 @@ def main():
         gae_lambda=args.gae_lambda,
         checkpoint_dir=args.checkpoint_dir,
         log_dir=args.log_dir,
+        save_interval=args.save_interval,
         device=args.device,
     )
 
