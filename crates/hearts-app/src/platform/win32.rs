@@ -7,7 +7,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::rc::Rc;
 use windows_numerics::{Matrix3x2, Vector2};
 
-use crate::controller::GameController;
+use crate::controller::{AiMode, GameController};
 use hearts_core::model::card::Card as ModelCard;
 use hearts_core::model::player::PlayerPosition;
 
@@ -48,28 +48,29 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_BINARY, REG_OPTION_NON_VOLATILE,
     RRF_RT_REG_BINARY, RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
 };
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::SetScrollInfo;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
     ACCEL, AdjustWindowRectEx, AppendMenuW, CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW,
-    CW_USEDEFAULT, CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW,
-    DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY,
-    GWLP_USERDATA, GetClientRect, GetMessageW, GetScrollInfo, GetSystemMetrics, GetWindowLongPtrW,
-    GetWindowPlacement, GetWindowRect, HACCEL, HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow,
-    LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG,
-    MessageBoxW, PM_REMOVE, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassExW, SB_BOTTOM,
-    SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
-    SB_VERT, SCROLLBAR_COMMAND, SCROLLINFO, SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXSCREEN,
-    SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
-    SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
-    SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
+    CW_USEDEFAULT, CheckMenuItem, CreateAcceleratorTableW, CreateMenu, CreatePopupMenu,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL,
+    FVIRTKEY, GWLP_USERDATA, GetClientRect, GetMenu, GetMessageW, GetScrollInfo, GetSystemMetrics,
+    GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, HACCEL, HMENU, IDC_ARROW,
+    IDI_APPLICATION, IsWindow, LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK, MF_CHECKED,
+    MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, MessageBoxW, PM_REMOVE, PeekMessageW,
+    PostMessageW, PostQuitMessage, RegisterClassExW, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
+    SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLBAR_COMMAND,
+    SCROLLINFO, SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXSCREEN, SM_CYSCREEN, SPI_GETWORKAREA,
+    SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu, SetWindowLongPtrW,
+    SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow, SystemParametersInfoW,
+    TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE, WINDOWPLACEMENT, WM_APP, WM_CLOSE,
+    WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_INITMENUPOPUP, WM_KEYDOWN,
     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
     WM_SIZE, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
     WS_OVERLAPPEDWINDOW, WS_VSCROLL, WaitMessage,
@@ -88,6 +89,10 @@ const VK_DOWN: u32 = 0x28;
 const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
 const ID_GAME_EXIT: u32 = 1003;
+const ID_AI_EASY: u32 = 1101;
+const ID_AI_NORMAL: u32 = 1102;
+const ID_AI_HARD: u32 = 1103;
+const ID_AI_BC: u32 = 1104;
 const ID_OPTIONS_CARD_BACK: u32 = 1201;
 const ID_HELP_ABOUT: u32 = 1301;
 const ID_HELP_RULES: u32 = 1302;
@@ -98,6 +103,7 @@ const ABOUT_BODY_PT: f32 = 16.0;
 const REG_SUBKEY_APP: &str = "Software\\0x4D44\\MDHearts";
 const REG_VALUE_WINDOW_PLACEMENT: &str = "WindowPlacement";
 const REG_VALUE_CARD_BACK: &str = "CardBack";
+const REG_VALUE_AI_SELECTION: &str = "AiSelection";
 const MIN_WINDOW_WIDTH: i32 = 720;
 const MIN_WINDOW_HEIGHT: i32 = 540;
 
@@ -456,6 +462,7 @@ struct AppState {
     rotate_sides: bool,
     dpi: DpiScale,
     game_phase: GamePhase,
+    ai_selection: AiSelection,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -571,7 +578,12 @@ impl AppState {
             format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             format
         };
-        let controller = GameController::new_with_seed(None, PlayerPosition::North);
+        // Load AI selection from registry (default to Normal)
+        let ai_selection = load_ai_selection().unwrap_or(AiSelection::Normal);
+        let ai_mode = ai_selection.to_ai_mode();
+
+        let controller =
+            GameController::new_with_seed_and_mode(None, PlayerPosition::North, ai_mode);
         let wic: IWICImagingFactory =
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
         let atlas = AtlasMeta::load_from_assets().unwrap_or_default();
@@ -610,6 +622,7 @@ impl AppState {
             rotate_sides,
             dpi: DpiScale::uniform(initial_dpi),
             game_phase,
+            ai_selection,
         };
         if let Some(saved) = load_card_back() {
             this.card_back = saved;
@@ -1921,6 +1934,8 @@ impl AppState {
 
 fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
     let hmenu: HMENU = unsafe { CreateMenu().expect("menu") };
+
+    // Game menu
     let game = unsafe { CreatePopupMenu().expect("game") };
     let _ = unsafe {
         AppendMenuW(
@@ -1938,18 +1953,40 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             w!("&Restart Round\tF5"),
         )
     };
+    let _ = unsafe { AppendMenuW(game, MF_SEPARATOR, 0, None) };
+    let _ = unsafe { AppendMenuW(game, MF_STRING, ID_GAME_EXIT as usize, w!("E&xit")) };
+    let _ = unsafe { AppendMenuW(hmenu, MF_POPUP, game.0 as usize, w!("&Game")) };
+
+    // Options menu
+    let options = unsafe { CreatePopupMenu().expect("options") };
+
+    // AI Player submenu
+    let ai_menu = unsafe { CreatePopupMenu().expect("ai_menu") };
+    let _ = unsafe { AppendMenuW(ai_menu, MF_STRING, ID_AI_EASY as usize, w!("&Easy")) };
+    let _ = unsafe { AppendMenuW(ai_menu, MF_STRING, ID_AI_NORMAL as usize, w!("&Normal")) };
+    let _ = unsafe { AppendMenuW(ai_menu, MF_STRING, ID_AI_HARD as usize, w!("&Hard")) };
+    let _ = unsafe { AppendMenuW(ai_menu, MF_SEPARATOR, 0, None) };
     let _ = unsafe {
         AppendMenuW(
-            game,
+            ai_menu,
+            MF_STRING,
+            ID_AI_BC as usize,
+            w!("&Behavioral Cloning (Hard-level)"),
+        )
+    };
+
+    let _ = unsafe { AppendMenuW(options, MF_POPUP, ai_menu.0 as usize, w!("AI &Player")) };
+    let _ = unsafe {
+        AppendMenuW(
+            options,
             MF_STRING,
             ID_OPTIONS_CARD_BACK as usize,
             w!("&Card Back..."),
         )
     };
-    let _ = unsafe { AppendMenuW(game, MF_SEPARATOR, 0, None) };
-    let _ = unsafe { AppendMenuW(game, MF_STRING, ID_GAME_EXIT as usize, w!("E&xit")) };
-    let _ = unsafe { AppendMenuW(hmenu, MF_POPUP, game.0 as usize, w!("&Game")) };
+    let _ = unsafe { AppendMenuW(hmenu, MF_POPUP, options.0 as usize, w!("&Options")) };
 
+    // Help menu
     let help = unsafe { CreatePopupMenu().expect("help") };
     let _ = unsafe { AppendMenuW(help, MF_STRING, ID_HELP_RULES as usize, w!("&Rules...")) };
     let _ = unsafe {
@@ -2245,12 +2282,14 @@ unsafe extern "system" fn window_proc(
 
                     // Check if match is complete after finishing round
                     // Only show dialog when transitioning INTO MatchComplete (not when already there)
-                    if state.controller.is_match_complete() && state.game_phase != GamePhase::MatchComplete {
+                    if state.controller.is_match_complete()
+                        && state.game_phase != GamePhase::MatchComplete
+                    {
                         state.game_phase = GamePhase::MatchComplete;
                         // Extract data for dialog (to show after dropping borrow)
                         Some((
                             state.controller.winner(),
-                            state.controller.final_standings()
+                            state.controller.final_standings(),
                         ))
                     } else {
                         None
@@ -2283,8 +2322,17 @@ unsafe extern "system" fn window_proc(
                     let mut state = cell.borrow_mut();
                     match id {
                         ID_GAME_NEW => {
-                            state.controller =
-                                GameController::new_with_seed(None, PlayerPosition::North);
+                            let ai_mode = state.ai_selection.to_ai_mode();
+                            state.controller = GameController::new_with_seed_and_mode(
+                                None,
+                                PlayerPosition::North,
+                                ai_mode,
+                            );
+                            state.game_phase = if state.controller.in_passing_phase() {
+                                GamePhase::Passing
+                            } else {
+                                GamePhase::Playing
+                            };
                             state.passing_select.clear();
                             unsafe {
                                 let _ = InvalidateRect(Some(hwnd), None, true);
@@ -2297,6 +2345,26 @@ unsafe extern "system" fn window_proc(
                             }
                         }
                         ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
+                        ID_AI_EASY => {
+                            state.ai_selection = AiSelection::Easy;
+                            save_ai_selection(AiSelection::Easy);
+                            update_ai_menu_checks(hwnd, AiSelection::Easy);
+                        }
+                        ID_AI_NORMAL => {
+                            state.ai_selection = AiSelection::Normal;
+                            save_ai_selection(AiSelection::Normal);
+                            update_ai_menu_checks(hwnd, AiSelection::Normal);
+                        }
+                        ID_AI_HARD => {
+                            state.ai_selection = AiSelection::Hard;
+                            save_ai_selection(AiSelection::Hard);
+                            update_ai_menu_checks(hwnd, AiSelection::Hard);
+                        }
+                        ID_AI_BC => {
+                            state.ai_selection = AiSelection::BehavioralCloning;
+                            save_ai_selection(AiSelection::BehavioralCloning);
+                            update_ai_menu_checks(hwnd, AiSelection::BehavioralCloning);
+                        }
                         ID_OPTIONS_CARD_BACK => {
                             card_back_request = Some(state.card_back);
                         }
@@ -2331,6 +2399,14 @@ unsafe extern "system" fn window_proc(
             }
             if show_about {
                 show_about_dialog(hwnd);
+            }
+            LRESULT(0)
+        }
+        WM_INITMENUPOPUP => {
+            // Update menu checkmarks when menu is opened
+            if let Some(cell) = state_cell(hwnd) {
+                let state = cell.borrow();
+                update_ai_menu_checks(hwnd, state.ai_selection);
             }
             LRESULT(0)
         }
@@ -2457,7 +2533,7 @@ thread_local! {
 // Hook procedure to center MessageBox on parent window
 unsafe extern "system" fn center_msgbox_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     use windows::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, GetWindowRect, SetWindowPos, SWP_NOSIZE, SWP_NOZORDER, HCBT_ACTIVATE,
+        CallNextHookEx, GetWindowRect, HCBT_ACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
     };
 
     unsafe {
@@ -2502,7 +2578,6 @@ fn show_winner_dialog_with_data(
     winner: Option<PlayerPosition>,
     standings: Vec<(PlayerPosition, u32)>,
 ) {
-
     let message = if let Some(winner_pos) = winner {
         format!(
             "Match Complete!\n\n\
@@ -2514,28 +2589,35 @@ fn show_winner_dialog_with_data(
              {} - {} points\n\n\
              Click OK to start a new match.",
             winner_pos,
-            standings[0].0, standings[0].1,
-            standings[1].0, standings[1].1,
-            standings[2].0, standings[2].1,
-            standings[3].0, standings[3].1,
+            standings[0].0,
+            standings[0].1,
+            standings[1].0,
+            standings[1].1,
+            standings[2].0,
+            standings[2].1,
+            standings[3].0,
+            standings[3].1,
         )
     } else {
         "Match Complete!\n\nClick OK to start a new match.".to_string()
     };
 
     let wide_message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
-    let wide_title: Vec<u16> = "Hearts - Match Complete".encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_title: Vec<u16> = "Hearts - Match Complete"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{
-            MessageBoxW, MB_OK, MB_ICONINFORMATION, SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT,
+            MB_ICONINFORMATION, MB_OK, MessageBoxW, SetWindowsHookExW, UnhookWindowsHookEx, WH_CBT,
         };
 
         // Set up hook to center the MessageBox
         MSGBOX_PARENT.with(|p| *p.borrow_mut() = Some(owner));
 
-        let hook = SetWindowsHookExW(WH_CBT, Some(center_msgbox_hook), None, GetCurrentThreadId())
-            .ok();
+        let hook =
+            SetWindowsHookExW(WH_CBT, Some(center_msgbox_hook), None, GetCurrentThreadId()).ok();
 
         MessageBoxW(
             Some(owner),
@@ -3351,6 +3433,135 @@ fn load_card_back() -> Option<CardBackId> {
             return None;
         }
         CardBackId::from_u32(raw)
+    }
+}
+
+/// AI selection for registry persistence
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AiSelection {
+    Easy = 0,
+    Normal = 1,
+    Hard = 2,
+    BehavioralCloning = 3,
+}
+
+impl AiSelection {
+    fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(AiSelection::Easy),
+            1 => Some(AiSelection::Normal),
+            2 => Some(AiSelection::Hard),
+            3 => Some(AiSelection::BehavioralCloning),
+            _ => None,
+        }
+    }
+
+    fn as_u32(self) -> u32 {
+        self as u32
+    }
+
+    fn to_ai_mode(self) -> AiMode {
+        use crate::bot::BotDifficulty;
+        match self {
+            AiSelection::Easy => AiMode::Heuristic(BotDifficulty::EasyLegacy),
+            AiSelection::Normal => AiMode::Heuristic(BotDifficulty::NormalHeuristic),
+            AiSelection::Hard => AiMode::Heuristic(BotDifficulty::FutureHard),
+            AiSelection::BehavioralCloning => AiMode::BehavioralCloning,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn from_ai_mode(mode: AiMode) -> Self {
+        use crate::bot::BotDifficulty;
+        match mode {
+            AiMode::Heuristic(BotDifficulty::EasyLegacy) => AiSelection::Easy,
+            AiMode::Heuristic(BotDifficulty::NormalHeuristic) => AiSelection::Normal,
+            AiMode::Heuristic(BotDifficulty::FutureHard) => AiSelection::Hard,
+            AiMode::BehavioralCloning => AiSelection::BehavioralCloning,
+        }
+    }
+}
+
+fn save_ai_selection(selection: AiSelection) {
+    unsafe {
+        let key_path = string_to_wide_z(REG_SUBKEY_APP);
+        let mut hkey = HKEY::default();
+        if RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(key_path.as_ptr()),
+            Some(0),
+            None,
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE | KEY_QUERY_VALUE,
+            None,
+            &mut hkey,
+            None,
+        )
+        .is_err()
+        {
+            return;
+        }
+        let value_name = string_to_wide_z(REG_VALUE_AI_SELECTION);
+        let raw = selection.as_u32();
+        let data = std::slice::from_raw_parts(
+            (&raw as *const u32) as *const u8,
+            std::mem::size_of::<u32>(),
+        );
+        let _ = RegSetValueExW(
+            hkey,
+            PCWSTR(value_name.as_ptr()),
+            Some(0),
+            REG_BINARY,
+            Some(data),
+        );
+        let _ = RegCloseKey(hkey);
+    }
+}
+
+fn load_ai_selection() -> Option<AiSelection> {
+    unsafe {
+        let subkey = string_to_wide_z(REG_SUBKEY_APP);
+        let value = string_to_wide_z(REG_VALUE_AI_SELECTION);
+        let mut raw: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_BINARY,
+            None,
+            Some((&mut raw as *mut u32).cast()),
+            Some(&mut size),
+        )
+        .is_err()
+            || size < std::mem::size_of::<u32>() as u32
+        {
+            return None;
+        }
+        AiSelection::from_u32(raw)
+    }
+}
+
+/// Update menu checkmarks to show the currently selected AI difficulty
+fn update_ai_menu_checks(hwnd: HWND, current: AiSelection) {
+    unsafe {
+        let hmenu = GetMenu(hwnd);
+        if !hmenu.is_invalid() {
+            // Clear all checkmarks first
+            let _ = CheckMenuItem(hmenu, ID_AI_EASY, MF_UNCHECKED.0);
+            let _ = CheckMenuItem(hmenu, ID_AI_NORMAL, MF_UNCHECKED.0);
+            let _ = CheckMenuItem(hmenu, ID_AI_HARD, MF_UNCHECKED.0);
+            let _ = CheckMenuItem(hmenu, ID_AI_BC, MF_UNCHECKED.0);
+
+            // Set checkmark for current selection
+            let check_id = match current {
+                AiSelection::Easy => ID_AI_EASY,
+                AiSelection::Normal => ID_AI_NORMAL,
+                AiSelection::Hard => ID_AI_HARD,
+                AiSelection::BehavioralCloning => ID_AI_BC,
+            };
+            let _ = CheckMenuItem(hmenu, check_id, MF_CHECKED.0);
+        }
     }
 }
 

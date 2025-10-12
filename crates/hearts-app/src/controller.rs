@@ -1,5 +1,5 @@
 use crate::bot::{BotDifficulty, UnseenTracker};
-use crate::policy::{HeuristicPolicy, Policy, PolicyContext};
+use crate::policy::{EmbeddedPolicy, HeuristicPolicy, Policy, PolicyContext};
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -7,10 +7,35 @@ use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase};
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::core::PCWSTR;
 
+/// AI player mode selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiMode {
+    /// Heuristic-based AI with configurable difficulty
+    Heuristic(BotDifficulty),
+    /// Behavioral cloning model trained from Hard-level gameplay
+    BehavioralCloning,
+}
+
+impl AiMode {
+    /// Get the default AI mode from environment or use Normal heuristic
+    pub fn from_env() -> Self {
+        // Check if user explicitly requested BC mode
+        if let Ok(val) = std::env::var("MDH_BOT_DIFFICULTY") {
+            if val.eq_ignore_ascii_case("bc") || val.eq_ignore_ascii_case("behavioral") {
+                return AiMode::BehavioralCloning;
+            }
+        }
+        // Otherwise use heuristic with difficulty from env
+        AiMode::Heuristic(BotDifficulty::from_env())
+    }
+}
+
 pub struct GameController {
     match_state: MatchState,
     last_trick: Option<TrickSummary>,
-    bot_difficulty: BotDifficulty,
+    ai_mode: AiMode,
+    bot_difficulty: BotDifficulty, // Still used when ai_mode is Heuristic
+    bc_policy: Option<EmbeddedPolicy>,
     unseen_tracker: UnseenTracker,
 }
 
@@ -36,6 +61,14 @@ impl GameController {
         }
     }
     pub fn new_with_seed(seed: Option<u64>, starting: PlayerPosition) -> Self {
+        Self::new_with_seed_and_mode(seed, starting, AiMode::from_env())
+    }
+
+    pub fn new_with_seed_and_mode(
+        seed: Option<u64>,
+        starting: PlayerPosition,
+        ai_mode: AiMode,
+    ) -> Self {
         let mut match_state = if let Some(s) = seed {
             MatchState::with_seed(starting, s)
         } else {
@@ -43,26 +76,65 @@ impl GameController {
         };
 
         // TEMP HACK: Start South (human) with 98 points for testing win condition
-        match_state.scores_mut().set_score(PlayerPosition::South, 98);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::South, 98);
 
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
+
+        // Extract bot_difficulty for backwards compat
+        let bot_difficulty = match ai_mode {
+            AiMode::Heuristic(diff) => diff,
+            AiMode::BehavioralCloning => BotDifficulty::FutureHard, // Fallback if BC fails
+        };
+
+        // Load BC policy if in BC mode
+        let bc_policy = if matches!(ai_mode, AiMode::BehavioralCloning) {
+            Self::load_bc_policy()
+        } else {
+            None
+        };
+
         Self {
             match_state,
             last_trick: None,
-            bot_difficulty: BotDifficulty::from_env(),
+            ai_mode,
+            bot_difficulty,
+            bc_policy,
             unseen_tracker,
+        }
+    }
+
+    /// Load embedded BC policy weights
+    fn load_bc_policy() -> Option<EmbeddedPolicy> {
+        const BC_WEIGHTS: &str = include_str!("../../../ai_training/bc/bc_hard_20ep_10k.json");
+
+        match EmbeddedPolicy::from_json_str(BC_WEIGHTS) {
+            Ok(policy) => {
+                Self::dbg("mdhearts: BC policy loaded successfully");
+                Some(policy)
+            }
+            Err(e) => {
+                Self::dbg(&format!(
+                    "mdhearts: Failed to load BC policy: {:?}, falling back to Hard heuristic",
+                    e
+                ));
+                None
+            }
         }
     }
 
     #[cfg(test)]
     pub(crate) fn set_bot_difficulty(&mut self, difficulty: BotDifficulty) {
         self.bot_difficulty = difficulty;
+        self.ai_mode = AiMode::Heuristic(difficulty);
     }
 
     #[cfg(test)]
     fn configure_for_test(&mut self) {
         self.bot_difficulty = BotDifficulty::NormalHeuristic;
+        self.ai_mode = AiMode::Heuristic(BotDifficulty::NormalHeuristic);
         self.unseen_tracker
             .reset_for_round(self.match_state.round());
     }
@@ -220,8 +292,22 @@ impl GameController {
             tracker: &self.unseen_tracker,
         };
 
-        let mut policy = HeuristicPolicy::new(self.bot_difficulty);
-        let card = policy.choose_play(&ctx);
+        // Choose card based on AI mode
+        let card = match self.ai_mode {
+            AiMode::Heuristic(_) => {
+                let mut policy = HeuristicPolicy::new(self.bot_difficulty);
+                policy.choose_play(&ctx)
+            }
+            AiMode::BehavioralCloning => {
+                if let Some(ref mut bc_policy) = self.bc_policy {
+                    bc_policy.choose_play(&ctx)
+                } else {
+                    // Fallback to Hard heuristic if BC policy failed to load
+                    let mut policy = HeuristicPolicy::new(BotDifficulty::FutureHard);
+                    policy.choose_play(&ctx)
+                }
+            }
+        };
 
         Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
         let _ = self.play(seat, card);
@@ -270,8 +356,28 @@ impl GameController {
             tracker: &self.unseen_tracker,
         };
 
-        let mut policy = HeuristicPolicy::new(self.bot_difficulty);
-        Some(policy.choose_pass(&ctx))
+        // Choose pass based on AI mode
+        // Note: We can't use &mut self here, so if BC policy needs mut, we'd need to refactor.
+        // For now, BC's choose_pass doesn't actually mutate, so we clone the policy temporarily.
+        let pass = match self.ai_mode {
+            AiMode::Heuristic(_) => {
+                let mut policy = HeuristicPolicy::new(self.bot_difficulty);
+                policy.choose_pass(&ctx)
+            }
+            AiMode::BehavioralCloning => {
+                if self.bc_policy.is_some() {
+                    // BC choose_pass doesn't mutate state, so we can work around the borrow
+                    let mut policy = HeuristicPolicy::new(BotDifficulty::FutureHard);
+                    policy.choose_pass(&ctx)
+                } else {
+                    // Fallback to Hard heuristic if BC policy failed to load
+                    let mut policy = HeuristicPolicy::new(BotDifficulty::FutureHard);
+                    policy.choose_pass(&ctx)
+                }
+            }
+        };
+
+        Some(pass)
     }
 
     pub fn submit_auto_passes_for_others(
@@ -323,10 +429,17 @@ impl GameController {
         self.match_state.final_standings()
     }
 
+    /// Get the current AI mode
+    #[allow(dead_code)] // Will be used in UI implementation
+    pub fn ai_mode(&self) -> AiMode {
+        self.ai_mode
+    }
+
     #[allow(dead_code)] // Will be used in UI implementation
     pub fn start_new_match(&mut self) {
         let starting = PlayerPosition::North;
-        *self = Self::new_with_seed(None, starting);
+        let ai_mode = self.ai_mode; // Preserve current AI mode
+        *self = Self::new_with_seed_and_mode(None, starting, ai_mode);
     }
 }
 #[cfg(test)]

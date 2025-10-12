@@ -168,15 +168,15 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                         ai_test = Some(AiType::from_str(&ai_str)?);
                     }
                     "--ai-per-seat" => {
-                        let types_str = args
-                            .next()
-                            .ok_or(CliError::MissingArgument("--ai-per-seat <type1>,<type2>,<type3>,<type4>"))?;
+                        let types_str = args.next().ok_or(CliError::MissingArgument(
+                            "--ai-per-seat <type1>,<type2>,<type3>,<type4>",
+                        ))?;
                         ai_per_seat = Some(types_str);
                     }
                     "--weights-per-seat" => {
-                        let paths_str = args
-                            .next()
-                            .ok_or(CliError::MissingArgument("--weights-per-seat <path1>,<path2>,<path3>,<path4>"))?;
+                        let paths_str = args.next().ok_or(CliError::MissingArgument(
+                            "--weights-per-seat <path1>,<path2>,<path3>,<path4>",
+                        ))?;
                         weights_per_seat = Some(paths_str);
                     }
                     _ => {
@@ -188,7 +188,14 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             // Determine evaluation mode
             if ai_test.is_some() || ai_per_seat.is_some() {
                 // Mixed evaluation mode
-                run_mixed_eval_cli(num_games, ai_type, weights_path, ai_test, ai_per_seat, weights_per_seat)?;
+                run_mixed_eval_cli(
+                    num_games,
+                    ai_type,
+                    weights_path,
+                    ai_test,
+                    ai_per_seat,
+                    weights_per_seat,
+                )?;
             } else if self_play {
                 use crate::rl::StepRewardMode;
                 let reward_mode =
@@ -387,7 +394,7 @@ fn run_mixed_eval_cli(
     ai_per_seat: Option<String>,
     weights_per_seat: Option<String>,
 ) -> Result<(), CliError> {
-    use crate::eval::mixed::{run_mixed_eval, EvalError};
+    use crate::eval::mixed::{EvalError, run_mixed_eval};
     use crate::eval::types::{MixedEvalConfig, OutputMode, PolicyConfig, RotationMode};
 
     // Build policy configs based on mode
@@ -438,8 +445,10 @@ fn run_mixed_eval_cli(
             )));
         }
 
-        let ai_types: Result<Vec<AiType>, CliError> =
-            type_parts.iter().map(|s| AiType::from_str(s.trim())).collect();
+        let ai_types: Result<Vec<AiType>, CliError> = type_parts
+            .iter()
+            .map(|s| AiType::from_str(s.trim()))
+            .collect();
         let ai_types = ai_types?;
 
         // Parse weights if provided
@@ -530,7 +539,10 @@ fn run_mixed_eval_cli(
     println!();
 
     for policy_result in &results.policy_results {
-        println!("Policy {}: {}", policy_result.policy_index, policy_result.ai_label);
+        println!(
+            "Policy {}: {}",
+            policy_result.policy_index, policy_result.ai_label
+        );
         println!("  Avg points: {:.2}", policy_result.avg_points);
         println!("  Total points: {}", policy_result.total_points);
         println!("  Wins: {}", policy_result.win_count);
@@ -540,20 +552,14 @@ fn run_mixed_eval_cli(
 
     if let Some(comparison) = &results.comparison {
         println!("=== Comparison Results ===");
-        println!(
-            "Test policy: Policy {}",
-            comparison.test_policy_index
-        );
+        println!("Test policy: Policy {}", comparison.test_policy_index);
         println!("Test avg: {:.2} points", comparison.test_avg);
         println!("Baseline avg: {:.2} points", comparison.baseline_avg);
         println!(
             "Difference: {:.2} points (negative = better)",
             comparison.difference
         );
-        println!(
-            "Improvement: {:.1}%",
-            comparison.percent_improvement
-        );
+        println!("Improvement: {:.1}%", comparison.percent_improvement);
 
         if let Some(p_value) = comparison.statistical_significance {
             println!("Statistical test: {}", comparison.statistical_test);

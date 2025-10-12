@@ -53,6 +53,34 @@ impl EmbeddedPolicy {
         }
     }
 
+    /// Create a new embedded policy from a JSON string
+    pub fn from_json_str(json: &str) -> Result<Self, String> {
+        let weights = WeightManifest::from_json_str(json)?;
+
+        // Validate schema compatibility
+        if SCHEMA_VERSION != weights.schema_version {
+            return Err(format!(
+                "Schema version mismatch: observation uses {} but weights expect {}",
+                SCHEMA_VERSION, weights.schema_version
+            ));
+        }
+
+        if SCHEMA_HASH != weights.schema_hash {
+            return Err(format!(
+                "Schema hash mismatch: observation hash {} but weights expect {}",
+                SCHEMA_HASH, weights.schema_hash
+            ));
+        }
+
+        // Validate dimensions
+        weights.validate()?;
+
+        Ok(Self {
+            obs_builder: ObservationBuilder::new(),
+            custom_weights: Some(weights),
+        })
+    }
+
     /// Create a new embedded policy from a weight file
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let weights = WeightManifest::from_file(path)?;

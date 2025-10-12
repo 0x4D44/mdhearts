@@ -224,8 +224,12 @@ mod tests {
     #[test]
     fn match_not_complete_under_100() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
-        match_state.scores_mut().set_score(PlayerPosition::North, 99);
-        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::North, 99);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::South, 87);
         assert!(!match_state.is_match_complete());
         assert_eq!(match_state.winner(), None);
     }
@@ -233,22 +237,30 @@ mod tests {
     #[test]
     fn match_completes_when_player_reaches_100() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
-        match_state.scores_mut().set_score(PlayerPosition::South, 105);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::South, 105);
         assert!(match_state.is_match_complete());
     }
 
     #[test]
     fn match_completes_at_exactly_100() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
-        match_state.scores_mut().set_score(PlayerPosition::East, 100);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::East, 100);
         assert!(match_state.is_match_complete());
     }
 
     #[test]
     fn winner_is_lowest_score_when_complete() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
-        match_state.scores_mut().set_score(PlayerPosition::North, 105);
-        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::North, 105);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::South, 87);
         match_state.scores_mut().set_score(PlayerPosition::East, 92);
         match_state.scores_mut().set_score(PlayerPosition::West, 98);
 
@@ -258,8 +270,12 @@ mod tests {
     #[test]
     fn winner_is_first_player_in_tie() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
-        match_state.scores_mut().set_score(PlayerPosition::North, 105);
-        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::North, 105);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::South, 87);
         match_state.scores_mut().set_score(PlayerPosition::East, 87);
         match_state.scores_mut().set_score(PlayerPosition::West, 98);
 
@@ -271,8 +287,12 @@ mod tests {
     #[test]
     fn final_standings_sorted_by_score() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
-        match_state.scores_mut().set_score(PlayerPosition::North, 105);
-        match_state.scores_mut().set_score(PlayerPosition::South, 87);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::North, 105);
+        match_state
+            .scores_mut()
+            .set_score(PlayerPosition::South, 87);
         match_state.scores_mut().set_score(PlayerPosition::East, 92);
         match_state.scores_mut().set_score(PlayerPosition::West, 98);
 

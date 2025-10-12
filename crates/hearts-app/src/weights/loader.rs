@@ -30,7 +30,12 @@ impl WeightManifest {
         let contents =
             fs::read_to_string(path).map_err(|e| format!("Failed to read weight file: {}", e))?;
 
-        let manifest: WeightManifest = serde_json::from_str(&contents)
+        Self::from_json_str(&contents)
+    }
+
+    /// Load weights from a JSON string
+    pub fn from_json_str(json: &str) -> Result<Self, String> {
+        let manifest: WeightManifest = serde_json::from_str(json)
             .map_err(|e| format!("Failed to parse weight JSON: {}", e))?;
 
         Ok(manifest)
