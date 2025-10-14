@@ -91,7 +91,7 @@ class PPOTrainer:
             state_dict['critic_head.bias'] = torch.zeros(1)
 
             self.bc_reference.load_state_dict(state_dict)
-            print(f"BC reference loaded (λ={config.bc_lambda})")
+            print(f"BC reference loaded (lambda={config.bc_lambda})")
             print(f"Initial KL-divergence will be computed on first training batch")
 
         # Initialize optimizer

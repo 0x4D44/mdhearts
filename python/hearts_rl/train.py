@@ -154,7 +154,7 @@ def main():
     print(f"Gamma: {config.gamma}")
     print(f"GAE lambda: {config.gae_lambda}")
     if config.bc_lambda > 0.0:
-        print(f"BC regularization: λ={config.bc_lambda}")
+        print(f"BC regularization: lambda={config.bc_lambda}")
         if args.bc_reference:
             print(f"BC reference: {args.bc_reference}")
     print("=" * 60)

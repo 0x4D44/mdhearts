@@ -42,7 +42,7 @@ def compute_gae(
         # TD error: δ_t = r_t + γ * V(s_{t+1}) - V(s_t)
         delta = rewards[t] + gamma * next_value - values[t]
 
-        # GAE: A_t = δ_t + (γ * λ) * A_{t+1}
+        # GAE: A_t = delta_t + (gamma * lambda) * A_{t+1}
         last_gae = delta + gamma * gae_lambda * (1.0 - dones[t]) * last_gae
         advantages[t] = last_gae
 
