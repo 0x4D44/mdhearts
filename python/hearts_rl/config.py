@@ -26,6 +26,9 @@ class TrainingConfig:
     num_epochs: int = 4
     max_grad_norm: float = 0.5
 
+    # BC regularization (Gen4+)
+    bc_lambda: float = 0.0  # Coefficient for BC regularization loss (0 = disabled)
+
     # Data settings
     data_path: str = "experiences.jsonl"
     checkpoint_dir: str = "checkpoints"
@@ -62,6 +65,7 @@ class TrainingConfig:
             "batch_size": self.batch_size,
             "num_epochs": self.num_epochs,
             "max_grad_norm": self.max_grad_norm,
+            "bc_lambda": self.bc_lambda,
             "data_path": self.data_path,
             "checkpoint_dir": self.checkpoint_dir,
             "log_dir": self.log_dir,

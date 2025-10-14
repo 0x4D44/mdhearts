@@ -73,6 +73,20 @@ def main():
         help='GAE lambda (default: 0.95)',
     )
 
+    # BC regularization arguments (Gen4+)
+    parser.add_argument(
+        '--bc-lambda',
+        type=float,
+        default=0.0,
+        help='BC regularization coefficient (default: 0.0 = disabled)',
+    )
+    parser.add_argument(
+        '--bc-reference',
+        type=str,
+        default=None,
+        help='Path to BC reference model for regularization (JSON weights)',
+    )
+
     # Checkpoint arguments
     parser.add_argument(
         '--checkpoint-dir',
@@ -120,6 +134,7 @@ def main():
         clip_epsilon=args.clip_epsilon,
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
+        bc_lambda=args.bc_lambda,
         checkpoint_dir=args.checkpoint_dir,
         log_dir=args.log_dir,
         save_interval=args.save_interval,
@@ -138,10 +153,14 @@ def main():
     print(f"Clip epsilon: {config.clip_epsilon}")
     print(f"Gamma: {config.gamma}")
     print(f"GAE lambda: {config.gae_lambda}")
+    if config.bc_lambda > 0.0:
+        print(f"BC regularization: λ={config.bc_lambda}")
+        if args.bc_reference:
+            print(f"BC reference: {args.bc_reference}")
     print("=" * 60)
 
     # Initialize trainer
-    trainer = PPOTrainer(config)
+    trainer = PPOTrainer(config, bc_reference_path=args.bc_reference)
 
     # Resume from checkpoint if specified
     if args.resume:

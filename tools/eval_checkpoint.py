@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Evaluate a Gen3 training checkpoint to map loss -> performance.
+Evaluate a training checkpoint to map loss -> performance.
 
 Usage:
-    python tools/eval_checkpoint.py gen3_checkpoints/checkpoint_50.pt --games 200
+    python tools/eval_checkpoint.py gen4_checkpoints/checkpoint_50.pt --games 200
+    python tools/eval_checkpoint.py gen3_checkpoints/checkpoint_50.pt --games 200 --prefix gen3
 """
 
 import argparse
@@ -28,7 +29,7 @@ def export_checkpoint_to_json(checkpoint_path: str, output_json: str):
         print(f"Error exporting checkpoint: {result.stderr}")
         sys.exit(1)
 
-    print(f"✓ Exported to {output_json}")
+    print(f"Exported to {output_json}")
 
 
 def run_evaluation(weights_json: str, num_games: int):
@@ -73,10 +74,11 @@ def parse_eval_results(output: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate Gen3 checkpoint")
+    parser = argparse.ArgumentParser(description="Evaluate training checkpoint")
     parser.add_argument("checkpoint", help="Path to checkpoint .pt file")
     parser.add_argument("--games", type=int, default=200, help="Number of evaluation games")
     parser.add_argument("--keep-json", action="store_true", help="Keep exported JSON file")
+    parser.add_argument("--prefix", type=str, default=None, help="Prefix for output files (auto-detected if not specified)")
 
     args = parser.parse_args()
 
@@ -88,8 +90,20 @@ def main():
     # Extract iteration number from checkpoint name (e.g., checkpoint_50.pt)
     iteration = checkpoint_path.stem.split('_')[-1]
 
+    # Auto-detect prefix from checkpoint directory if not specified
+    if args.prefix is None:
+        checkpoint_dir = checkpoint_path.parent.name
+        if 'gen4' in checkpoint_dir.lower():
+            prefix = 'gen4'
+        elif 'gen3' in checkpoint_dir.lower():
+            prefix = 'gen3'
+        else:
+            prefix = 'training'
+    else:
+        prefix = args.prefix
+
     # Export to JSON
-    json_path = f"gen3_iter{iteration}_eval.json"
+    json_path = f"{prefix}_iter{iteration}_eval.json"
     export_checkpoint_to_json(str(checkpoint_path), json_path)
 
     # Run evaluation
@@ -100,7 +114,7 @@ def main():
 
     # Display results
     print("\n" + "="*60)
-    print(f"Gen3 Iteration {iteration} Evaluation Results ({args.games} games)")
+    print(f"{prefix.upper()} Iteration {iteration} Evaluation Results ({args.games} games)")
     print("="*60)
     print(f"Test policy avg:     {results.get('test_avg', 'N/A')} points")
     print(f"Baseline (Hard) avg: {results.get('baseline_avg', 'N/A')} points")
@@ -110,7 +124,8 @@ def main():
     print("="*60)
 
     # Append to tracking file
-    with open("gen3_checkpoint_tracking.txt", "a") as f:
+    tracking_file = f"{prefix}_checkpoint_tracking.txt"
+    with open(tracking_file, "a") as f:
         f.write(f"Iter {iteration}: {results.get('improvement_pct', 'N/A'):.1f}% improvement, "
                 f"p={results.get('p_value', 'N/A'):.4f}, "
                 f"sig={'Y' if results.get('significant') else 'N'}\n")
