@@ -18,10 +18,14 @@ impl PlayPlanner {
         let style = determine_style(ctx);
         let snapshot = snapshot_scores(ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
+
+        // Compute void inference - use the tracker's knowledge!
+        let voids = ctx.tracker.infer_voids(ctx.seat, ctx.round);
+
         let mut best: Option<(Card, i32)> = None;
 
         for &card in legal {
-            let (winner, penalties) = simulate_trick(card, ctx, style);
+            let (winner, penalties) = simulate_trick(card, ctx, style, &voids);
             let will_capture = winner == ctx.seat;
             let mut score = base_score(
                 ctx,
@@ -101,7 +105,8 @@ impl PlayPlanner {
 pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> i32 {
     let snapshot = snapshot_scores(ctx.scores);
     let lead_suit = ctx.round.current_trick().lead_suit();
-    let (winner, penalties) = simulate_trick(card, ctx, style);
+    let voids = ctx.tracker.infer_voids(ctx.seat, ctx.round);
+    let (winner, penalties) = simulate_trick(card, ctx, style, &voids);
     let will_capture = winner == ctx.seat;
     let mut score = base_score(
         ctx,
@@ -211,7 +216,12 @@ fn base_score(
     score
 }
 
-fn simulate_trick(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> (PlayerPosition, u8) {
+fn simulate_trick(
+    card: Card,
+    ctx: &BotContext<'_>,
+    style: BotStyle,
+    voids: &[[bool; 4]; 4],
+) -> (PlayerPosition, u8) {
     let mut sim = ctx.round.clone();
     let seat = ctx.seat;
     let mut outcome = match sim.play_card(seat, card) {
@@ -221,7 +231,7 @@ fn simulate_trick(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> (PlayerP
 
     while !matches!(outcome, PlayOutcome::TrickCompleted { .. }) {
         let next_seat = next_to_play(&sim);
-        let response = choose_followup_card(&sim, next_seat, style);
+        let response = choose_followup_card(&sim, next_seat, style, voids);
         outcome = match sim.play_card(next_seat, response) {
             Ok(result) => result,
             Err(_) => break,
@@ -243,21 +253,34 @@ fn next_to_play(round: &RoundState) -> PlayerPosition {
         .unwrap_or(trick.leader())
 }
 
-fn choose_followup_card(round: &RoundState, seat: PlayerPosition, _style: BotStyle) -> Card {
+fn choose_followup_card(
+    round: &RoundState,
+    seat: PlayerPosition,
+    _style: BotStyle,
+    voids: &[[bool; 4]; 4],
+) -> Card {
     let legal = legal_moves_for(round, seat);
     let lead_suit = round.current_trick().lead_suit();
 
     if let Some(lead) = lead_suit {
-        if let Some(card) = legal
-            .iter()
-            .copied()
-            .filter(|c| c.suit == lead)
-            .min_by_key(|card| card.rank.value())
-        {
-            return card;
+        // Check if this player is void in the led suit
+        let is_void = voids[seat.index()][lead as usize];
+
+        if !is_void {
+            // Player can follow suit - play lowest card in suit
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .filter(|c| c.suit == lead)
+                .min_by_key(|card| card.rank.value())
+            {
+                return card;
+            }
         }
+        // If void (or couldn't find card in suit), fall through to dump logic
     }
 
+    // Dump highest penalty card
     legal
         .into_iter()
         .max_by(|a, b| compare_penalty_dump(*a, *b))
