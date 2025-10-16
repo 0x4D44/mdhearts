@@ -1,7 +1,9 @@
-﻿[workspace]
+[workspace]
 members = [
     "crates/hearts-core",
     "crates/hearts-ui",
-    "crates/hearts-app"
+    "crates/hearts-app",
+    "crates/hearts-bench",
+    "crates/hearts-bot",
 ]
 resolver = "2"

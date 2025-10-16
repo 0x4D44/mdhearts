@@ -1,0 +1,7 @@
+[package]
+name = "hearts-bot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hearts-core = { path = "../hearts-core" }

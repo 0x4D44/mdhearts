@@ -1,0 +1,23 @@
+[package]
+name = "hearts-bench"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+hearts-bot = { path = "../hearts-bot" }
+hearts-core = { path = "../hearts-core" }
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder"] }
+rand = { version = "0.8", features = ["std", "std_rng"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+statrs = "0.16"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["fmt", "json", "env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

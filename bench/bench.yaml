@@ -1,0 +1,31 @@
+run_id: "stage0_smoke"
+deals:
+  seed: 1337
+  hands: 8
+  permutations: 4
+agents:
+  - name: "baseline_normal"
+    kind: "heuristic"
+    params:
+      difficulty: "normal"
+  - name: "baseline_easy"
+    kind: "heuristic"
+    params:
+      difficulty: "easy"
+  - name: "baseline_hard"
+    kind: "heuristic"
+    params:
+      difficulty: "hard"
+  - name: "baseline_normal_2"
+    kind: "heuristic"
+    params:
+      difficulty: "normal"
+outputs:
+  jsonl: "bench/out/{run_id}/deals.jsonl"
+  summary_md: "bench/out/{run_id}/summary.md"
+  plots_dir: "bench/out/{run_id}/plots"
+metrics:
+  baseline: "baseline_normal"
+logging:
+  enable_structured: false
+  tracing_level: "info"

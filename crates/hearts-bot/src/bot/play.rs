@@ -1,0 +1,715 @@
+use super::{
+    BotContext, BotStyle, card_sort_key, count_cards_in_suit, determine_style, snapshot_scores,
+};
+use hearts_core::model::card::Card;
+use hearts_core::model::player::PlayerPosition;
+use hearts_core::model::round::{PlayOutcome, RoundState};
+use hearts_core::model::suit::Suit;
+use std::cmp::Ordering;
+
+pub struct PlayPlanner;
+
+impl PlayPlanner {
+    pub fn choose(legal: &[Card], ctx: &BotContext<'_>) -> Option<Card> {
+        if legal.is_empty() {
+            return None;
+        }
+
+        let style = determine_style(ctx);
+        let snapshot = snapshot_scores(ctx.scores);
+        let lead_suit = ctx.round.current_trick().lead_suit();
+
+        // Compute void inference - use the tracker's knowledge!
+        let voids = ctx.tracker.infer_voids(ctx.seat, ctx.round);
+
+        let mut best: Option<(Card, i32)> = None;
+
+        for &card in legal {
+            let (winner, penalties) = simulate_trick(card, ctx, style, &voids);
+            let will_capture = winner == ctx.seat;
+            let mut score = base_score(
+                ctx,
+                card,
+                winner,
+                will_capture,
+                penalties,
+                lead_suit,
+                style,
+                &snapshot,
+            );
+
+            // Void creation bonus.
+            let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
+            if suit_remaining <= 1 {
+                score += ctx.params.play_void_creation_bonus;
+            }
+
+            // Prefer dumping high cards when following suit.
+            if let Some(lead) = lead_suit {
+                if card.suit == lead {
+                    score += (card.rank.value() as i32) * ctx.params.play_follow_rank_mult;
+                } else {
+                    score += card.penalty_value() as i32 * ctx.params.play_slough_penalty_mult;
+                }
+            } else {
+                // We are leading.
+                score += (card.rank.value() as i32) * ctx.params.play_lead_rank_mult;
+                if card.suit == Suit::Hearts
+                    && !ctx.round.hearts_broken()
+                    && style != BotStyle::HuntLeader
+                {
+                    score += ctx.params.play_break_hearts_penalty;
+                }
+                if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
+                    score += ctx.params.play_hunt_lead_penalty_base
+                        + (card.penalty_value() as i32 * ctx.params.play_hunt_lead_penalty_mult);
+                }
+                if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
+                    score += ctx.params.play_moon_lead_hearts;
+                }
+            }
+
+            // Late-round urgency to shed penalties if we are at risk.
+            if snapshot.max_player == ctx.seat && snapshot.max_score >= 90 {
+                if will_capture {
+                    score += penalties as i32 * ctx.params.play_desperate_take_mult;
+                } else {
+                    score += penalties as i32 * ctx.params.play_desperate_dump_mult;
+                }
+            }
+
+            // Tracker-based pacing: fewer unseen cards => accelerate shedding points.
+            let cards_played = ctx.cards_played() as i32;
+            score += cards_played * ctx.params.play_cards_played_mult;
+            if ctx.tracker.is_unseen(card) {
+                score += ctx.params.play_unseen_bonus;
+            }
+
+            match best {
+                None => best = Some((card, score)),
+                Some((best_card, best_score)) => {
+                    if score > best_score
+                        || (score == best_score
+                            && card_sort_key(card).cmp(&card_sort_key(best_card)) == Ordering::Less)
+                    {
+                        best = Some((card, score));
+                    }
+                }
+            }
+        }
+
+        best.map(|(card, _)| card)
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> i32 {
+    let snapshot = snapshot_scores(ctx.scores);
+    let lead_suit = ctx.round.current_trick().lead_suit();
+    let voids = ctx.tracker.infer_voids(ctx.seat, ctx.round);
+    let (winner, penalties) = simulate_trick(card, ctx, style, &voids);
+    let will_capture = winner == ctx.seat;
+    let mut score = base_score(
+        ctx,
+        card,
+        winner,
+        will_capture,
+        penalties,
+        lead_suit,
+        style,
+        &snapshot,
+    );
+
+    let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
+    if suit_remaining <= 1 {
+        score += ctx.params.play_void_creation_bonus;
+    }
+
+    if let Some(lead) = lead_suit {
+        if card.suit == lead {
+            score += (card.rank.value() as i32) * ctx.params.play_follow_rank_mult;
+        } else {
+            score += card.penalty_value() as i32 * ctx.params.play_slough_penalty_mult;
+        }
+    } else {
+        score += (card.rank.value() as i32) * ctx.params.play_lead_rank_mult;
+        if card.suit == Suit::Hearts && !ctx.round.hearts_broken() && style != BotStyle::HuntLeader
+        {
+            score += ctx.params.play_break_hearts_penalty;
+        }
+        if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
+            score += ctx.params.play_hunt_lead_penalty_base
+                + (card.penalty_value() as i32 * ctx.params.play_hunt_lead_penalty_mult);
+        }
+        if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
+            score += ctx.params.play_moon_lead_hearts;
+        }
+    }
+
+    if snapshot.max_player == ctx.seat && snapshot.max_score >= 90 {
+        if will_capture {
+            score += penalties as i32 * ctx.params.play_desperate_take_mult;
+        } else {
+            score += penalties as i32 * ctx.params.play_desperate_dump_mult;
+        }
+    }
+
+    let cards_played = ctx.cards_played() as i32;
+    score += cards_played * ctx.params.play_cards_played_mult;
+    if ctx.tracker.is_unseen(card) {
+        score += ctx.params.play_unseen_bonus;
+    }
+
+    score
+}
+
+#[allow(clippy::too_many_arguments)]
+fn base_score(
+    ctx: &BotContext<'_>,
+    card: Card,
+    winner: PlayerPosition,
+    will_capture: bool,
+    penalties: u8,
+    lead_suit: Option<Suit>,
+    style: BotStyle,
+    snapshot: &super::ScoreSnapshot,
+) -> i32 {
+    let penalties_i32 = penalties as i32;
+    let mut score: i32 = 0;
+
+    if will_capture {
+        score += ctx.params.play_take_trick_penalty;
+        score += penalties_i32 * ctx.params.play_take_points_mult;
+    } else {
+        score += ctx.params.play_avoid_trick_reward;
+        score += penalties_i32 * ctx.params.play_dump_points_mult;
+    }
+
+    if penalties == 0 && will_capture {
+        // Winning a clean trick is still mildly negative to keep low profile.
+        score += (card.rank.value() as i32) * ctx.params.play_clean_trick_rank_mult;
+    }
+
+    if let Some(lead) = lead_suit {
+        if card.suit != lead && !ctx.round.current_trick().plays().is_empty() {
+            score += 200;
+        }
+    }
+
+    match style {
+        BotStyle::AggressiveMoon => {
+            if will_capture {
+                score += ctx.params.play_moon_take_trick
+                    + penalties_i32 * ctx.params.play_moon_take_points_mult;
+            } else {
+                score += penalties_i32 * ctx.params.play_moon_avoid_points_mult;
+            }
+        }
+        BotStyle::HuntLeader => {
+            if !will_capture && penalties > 0 && winner == snapshot.max_player {
+                score += penalties_i32 * ctx.params.play_hunt_feed_leader_mult;
+            }
+            if will_capture {
+                score += ctx.params.play_hunt_avoid_trick;
+            }
+        }
+        BotStyle::Cautious => {}
+    }
+
+    score
+}
+
+fn simulate_trick(
+    card: Card,
+    ctx: &BotContext<'_>,
+    style: BotStyle,
+    voids: &[[bool; 4]; 4],
+) -> (PlayerPosition, u8) {
+    let mut sim = ctx.round.clone();
+    let seat = ctx.seat;
+    let mut outcome = match sim.play_card(seat, card) {
+        Ok(result) => result,
+        Err(_) => return (seat, 0),
+    };
+
+    while !matches!(outcome, PlayOutcome::TrickCompleted { .. }) {
+        let next_seat = next_to_play(&sim);
+        let response = choose_followup_card(&sim, next_seat, style, voids);
+        outcome = match sim.play_card(next_seat, response) {
+            Ok(result) => result,
+            Err(_) => break,
+        };
+    }
+
+    match outcome {
+        PlayOutcome::TrickCompleted { winner, penalties } => (winner, penalties),
+        _ => (seat, 0),
+    }
+}
+
+fn next_to_play(round: &RoundState) -> PlayerPosition {
+    let trick = round.current_trick();
+    trick
+        .plays()
+        .last()
+        .map(|play| play.position.next())
+        .unwrap_or(trick.leader())
+}
+
+fn choose_followup_card(
+    round: &RoundState,
+    seat: PlayerPosition,
+    _style: BotStyle,
+    voids: &[[bool; 4]; 4],
+) -> Card {
+    let legal = legal_moves_for(round, seat);
+    let lead_suit = round.current_trick().lead_suit();
+
+    if let Some(lead) = lead_suit {
+        // Check if this player is void in the led suit
+        let is_void = voids[seat.index()][lead as usize];
+
+        if !is_void {
+            // Player can follow suit - play lowest card in suit
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .filter(|c| c.suit == lead)
+                .min_by_key(|card| card.rank.value())
+            {
+                return card;
+            }
+        }
+        // If void (or couldn't find card in suit), fall through to dump logic
+    }
+
+    // Dump highest penalty card
+    legal
+        .into_iter()
+        .max_by(|a, b| compare_penalty_dump(*a, *b))
+        .expect("at least one legal card")
+}
+
+fn legal_moves_for(round: &RoundState, seat: PlayerPosition) -> Vec<Card> {
+    round
+        .hand(seat)
+        .iter()
+        .copied()
+        .filter(|card| {
+            let mut probe = round.clone();
+            probe.play_card(seat, *card).is_ok()
+        })
+        .collect()
+}
+
+fn compare_penalty_dump(a: Card, b: Card) -> Ordering {
+    let weight = |card: Card| -> (i32, i32) {
+        let penalty = card.penalty_value() as i32;
+        let rank = card.rank.value() as i32;
+        (penalty * 100 + rank, rank)
+    };
+    weight(a).cmp(&weight(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bot::tracker::UnseenTracker;
+    use crate::bot::{BotContext, BotDifficulty, BotParams};
+    use hearts_core::model::card::Card;
+    use hearts_core::model::hand::Hand;
+    use hearts_core::model::passing::PassingDirection;
+    use hearts_core::model::player::PlayerPosition;
+    use hearts_core::model::rank::Rank;
+    use hearts_core::model::round::{RoundPhase, RoundState};
+    use hearts_core::model::score::ScoreBoard;
+    use hearts_core::model::suit::Suit;
+
+    fn build_round(
+        starting: PlayerPosition,
+        hands_vec: [Vec<Card>; 4],
+        plays: &[(PlayerPosition, Card)],
+        hearts_broken: bool,
+    ) -> RoundState {
+        let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
+        for (idx, cards) in hands_vec.into_iter().enumerate() {
+            hands[idx] = Hand::with_cards(cards);
+        }
+        let mut seed_trick = hearts_core::model::trick::Trick::new(starting);
+        let mut seat_iter = starting;
+        let seed_cards = [
+            Card::new(Rank::Two, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Clubs),
+            Card::new(Rank::Five, Suit::Clubs),
+        ];
+        for card in seed_cards {
+            seed_trick.play(seat_iter, card).unwrap();
+            seat_iter = seat_iter.next();
+        }
+        let mut current_trick = hearts_core::model::trick::Trick::new(starting);
+        for &(seat, card) in plays {
+            current_trick.play(seat, card).unwrap();
+        }
+        RoundState::from_hands_with_state(
+            hands,
+            starting,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+            current_trick,
+            vec![seed_trick],
+            hearts_broken,
+        )
+    }
+
+    fn build_scores(values: [u32; 4]) -> ScoreBoard {
+        let mut scores = ScoreBoard::new();
+        for (idx, value) in values.iter().enumerate() {
+            if let Some(pos) = PlayerPosition::from_index(idx) {
+                scores.set_score(pos, *value);
+            }
+        }
+        scores
+    }
+
+    fn make_ctx<'a>(
+        seat: PlayerPosition,
+        round: &'a RoundState,
+        scores: &'a ScoreBoard,
+        tracker: &'a UnseenTracker,
+        difficulty: BotDifficulty,
+        params: &'a BotParams,
+    ) -> BotContext<'a> {
+        BotContext::new(
+            seat,
+            round,
+            scores,
+            PassingDirection::Hold,
+            tracker,
+            difficulty,
+            params,
+        )
+    }
+
+    #[test]
+    fn cautious_dumps_points_when_safe() {
+        let seat = PlayerPosition::South;
+        let round = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::King, Suit::Clubs)],
+                vec![Card::new(Rank::Ace, Suit::Clubs)],
+                vec![
+                    Card::new(Rank::Queen, Suit::Hearts),
+                    Card::new(Rank::Ten, Suit::Hearts),
+                    Card::new(Rank::Three, Suit::Spades),
+                ],
+                vec![Card::new(Rank::Two, Suit::Clubs)],
+            ],
+            &[
+                (PlayerPosition::North, Card::new(Rank::King, Suit::Clubs)),
+                (PlayerPosition::East, Card::new(Rank::Ace, Suit::Clubs)),
+            ],
+            false,
+        );
+
+        let scores = build_scores([20, 18, 22, 19]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert!(legal.len() >= 2);
+        assert_eq!(choice.suit, Suit::Hearts);
+        assert!(choice.rank >= Rank::Ten);
+        assert!(choice.penalty_value() > 0);
+    }
+
+    #[test]
+    fn cautious_avoids_capturing_points_when_possible() {
+        let seat = PlayerPosition::South;
+        let round = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Ten, Suit::Hearts)],
+                vec![Card::new(Rank::Queen, Suit::Hearts)],
+                vec![
+                    Card::new(Rank::King, Suit::Hearts),
+                    Card::new(Rank::Two, Suit::Hearts),
+                    Card::new(Rank::Four, Suit::Diamonds),
+                ],
+                vec![Card::new(Rank::Three, Suit::Hearts)],
+            ],
+            &[
+                (PlayerPosition::North, Card::new(Rank::Ten, Suit::Hearts)),
+                (PlayerPosition::East, Card::new(Rank::Queen, Suit::Hearts)),
+            ],
+            false,
+        );
+
+        let scores = build_scores([14, 25, 20, 22]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert_ne!(choice, Card::new(Rank::King, Suit::Hearts));
+        assert!(choice.suit == Suit::Hearts);
+    }
+
+    #[test]
+    fn aggressive_player_grabs_trick_for_moon_attempt() {
+        let seat = PlayerPosition::South;
+        let round = build_round(
+            PlayerPosition::West,
+            [
+                vec![Card::new(Rank::Six, Suit::Hearts)],
+                vec![Card::new(Rank::Four, Suit::Hearts)],
+                vec![
+                    Card::new(Rank::Ace, Suit::Hearts),
+                    Card::new(Rank::King, Suit::Hearts),
+                    Card::new(Rank::Queen, Suit::Hearts),
+                    Card::new(Rank::Jack, Suit::Hearts),
+                    Card::new(Rank::Ten, Suit::Hearts),
+                    Card::new(Rank::Nine, Suit::Hearts),
+                    Card::new(Rank::Eight, Suit::Hearts),
+                    Card::new(Rank::Ace, Suit::Spades),
+                    Card::new(Rank::King, Suit::Spades),
+                ],
+                vec![Card::new(Rank::Three, Suit::Hearts)],
+            ],
+            &[
+                (PlayerPosition::West, Card::new(Rank::Three, Suit::Hearts)),
+                (PlayerPosition::North, Card::new(Rank::Six, Suit::Hearts)),
+                (PlayerPosition::East, Card::new(Rank::Four, Suit::Hearts)),
+            ],
+            false,
+        );
+
+        let scores = build_scores([32, 34, 38, 35]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert_eq!(choice.suit, Suit::Hearts);
+        assert!(choice.rank.value() > Rank::Six.value());
+    }
+
+    #[test]
+    fn play_tracker_considers_unseen() {
+        let seat = PlayerPosition::South;
+        let round = build_round(
+            seat,
+            [
+                vec![Card::new(Rank::Two, Suit::Clubs)],
+                vec![Card::new(Rank::Three, Suit::Diamonds)],
+                vec![
+                    Card::new(Rank::Seven, Suit::Hearts),
+                    Card::new(Rank::Four, Suit::Clubs),
+                ],
+                vec![Card::new(Rank::Five, Suit::Spades)],
+            ],
+            &[],
+            false,
+        );
+        let scores = build_scores([20, 18, 22, 16]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx_unseen = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let style = determine_style(&ctx_unseen);
+        let heart = Card::new(Rank::Seven, Suit::Hearts);
+
+        let score_unseen = super::score_candidate_for_tests(heart, &ctx_unseen, style);
+
+        let mut tracker_seen = tracker.clone();
+        tracker_seen.note_card_revealed(heart);
+        let ctx_seen = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker_seen,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let score_seen = super::score_candidate_for_tests(heart, &ctx_seen, style);
+
+        assert!(score_unseen > score_seen);
+    }
+
+    #[test]
+    fn play_lead_unbroken_hearts() {
+        let seat = PlayerPosition::South;
+        let round = build_round(
+            seat,
+            [
+                vec![Card::new(Rank::Two, Suit::Clubs)],
+                vec![Card::new(Rank::Three, Suit::Diamonds)],
+                vec![
+                    Card::new(Rank::Queen, Suit::Hearts),
+                    Card::new(Rank::Four, Suit::Clubs),
+                ],
+                vec![Card::new(Rank::Six, Suit::Spades)],
+            ],
+            &[],
+            false,
+        );
+        let scores = build_scores([20, 18, 24, 19]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert_ne!(choice.suit, Suit::Hearts);
+    }
+
+    #[test]
+    fn play_lead_moon_mode() {
+        let seat = PlayerPosition::South;
+        let round = build_round(
+            seat,
+            [
+                vec![Card::new(Rank::Two, Suit::Clubs)],
+                vec![Card::new(Rank::Three, Suit::Diamonds)],
+                vec![
+                    Card::new(Rank::Ace, Suit::Hearts),
+                    Card::new(Rank::King, Suit::Hearts),
+                ],
+                vec![Card::new(Rank::Six, Suit::Spades)],
+            ],
+            &[],
+            false,
+        );
+        let scores = build_scores([18, 22, 20, 21]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert!(legal.len() >= 2);
+        assert_eq!(choice.suit, Suit::Hearts);
+        assert!(choice.rank >= Rank::King);
+    }
+
+    #[test]
+    fn play_hunt_avoids_self_dump() {
+        let seat = PlayerPosition::East;
+        let round = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Ten, Suit::Hearts)],
+                vec![
+                    Card::new(Rank::Queen, Suit::Hearts),
+                    Card::new(Rank::Two, Suit::Hearts),
+                ],
+                vec![Card::new(Rank::Five, Suit::Clubs)],
+                vec![Card::new(Rank::Three, Suit::Hearts)],
+            ],
+            &[(PlayerPosition::North, Card::new(Rank::Ten, Suit::Hearts))],
+            true,
+        );
+        let scores = build_scores([20, 18, 22, 95]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+        assert!(legal.contains(&Card::new(Rank::Queen, Suit::Hearts)));
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert_eq!(choice, Card::new(Rank::Two, Suit::Hearts));
+    }
+
+    #[test]
+    fn hunt_leader_feeds_points_to_player_near_target() {
+        let seat = PlayerPosition::East;
+        let round = build_round(
+            seat,
+            [
+                vec![Card::new(Rank::Ace, Suit::Hearts)],
+                vec![
+                    Card::new(Rank::Queen, Suit::Hearts),
+                    Card::new(Rank::Two, Suit::Clubs),
+                    Card::new(Rank::Four, Suit::Clubs),
+                ],
+                vec![Card::new(Rank::Ten, Suit::Hearts)],
+                vec![Card::new(Rank::Five, Suit::Hearts)],
+            ],
+            &[],
+            true,
+        );
+        let scores = build_scores([95, 40, 45, 60]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let params = BotParams::default();
+        let ctx = make_ctx(
+            seat,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        let legal = legal_moves_for(&round, seat);
+
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        assert_eq!(choice, Card::new(Rank::Queen, Suit::Hearts));
+    }
+}
