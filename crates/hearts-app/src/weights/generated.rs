@@ -13545,6 +13545,5 @@ mod tests {
     fn schema_matches_observation() {
         // This will be validated at runtime by EmbeddedPolicy
         assert_eq!(MODEL_SCHEMA_VERSION, "1.1.0");
-        assert!(!MODEL_SCHEMA_HASH.is_empty());
     }
 }

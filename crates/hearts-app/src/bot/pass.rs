@@ -83,11 +83,13 @@ fn score_card(
     if card.suit == Suit::Hearts {
         score += ctx.params.pass_hearts_base + rank_value * ctx.params.pass_hearts_rank_mult;
     } else if rank_value >= Rank::King.value() as i32 {
-        score += ctx.params.pass_high_cards_base + rank_value * ctx.params.pass_high_cards_rank_mult;
+        score +=
+            ctx.params.pass_high_cards_base + rank_value * ctx.params.pass_high_cards_rank_mult;
     }
 
     if suit_len <= 2 {
-        score += ctx.params.pass_void_creation_base - (suit_len as i32 * ctx.params.pass_void_creation_mult);
+        score += ctx.params.pass_void_creation_base
+            - (suit_len as i32 * ctx.params.pass_void_creation_mult);
     } else if suit_len >= 5 {
         score -= (suit_len as i32 - 4) * ctx.params.pass_long_suit_penalty;
     }

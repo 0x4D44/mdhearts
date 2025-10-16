@@ -96,7 +96,7 @@ class TrainingOrchestrator:
         with open(output_path, 'r') as f:
             num_experiences = sum(1 for _ in f)
 
-        print(f"\n✓ Collected {num_experiences} experiences to {output_path}")
+        print(f"\n[OK] Collected {num_experiences} experiences to {output_path}")
         return num_experiences
 
     def train_ppo(
@@ -157,7 +157,7 @@ class TrainingOrchestrator:
         if not Path(output_weights).exists():
             raise RuntimeError(f"Weights file not created: {output_weights}")
 
-        print(f"\n✓ Training complete, weights saved to {output_weights}")
+        print(f"\n[OK] Training complete, weights saved to {output_weights}")
 
     def evaluate_policy(
         self,
@@ -208,7 +208,7 @@ class TrainingOrchestrator:
         if results_path.exists():
             with open(results_path, 'r') as f:
                 results = json.load(f)
-            print(f"\n✓ Evaluation complete")
+            print(f"\n[OK] Evaluation complete")
             return results
 
         return None
@@ -311,7 +311,7 @@ class TrainingOrchestrator:
             return metadata
 
         except Exception as e:
-            print(f"\n✗ Pipeline failed: {e}")
+            print(f"\n[FAIL] Pipeline failed: {e}")
             raise
 
 

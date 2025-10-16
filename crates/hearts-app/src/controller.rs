@@ -138,7 +138,7 @@ impl GameController {
         let passing = self.match_state.passing_direction().as_str();
         let leader = round.current_trick().leader();
         format!(
-            "Round {} • Passing: {} • Leader: {}",
+            "Round {} | Passing: {} | Leader: {}",
             self.match_state.round_number(),
             passing,
             leader

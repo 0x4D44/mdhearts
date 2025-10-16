@@ -198,14 +198,15 @@ impl HeartsEnv {
     /// Step with playing action
     #[allow(dead_code)]
     pub fn step_play(&mut self, card: Card) -> Result<Step, String> {
+        let actor = self.current_seat;
         let round = self.match_state.round_mut();
 
         // Play the card
         let outcome = round
-            .play_card(self.current_seat, card)
+            .play_card(actor, card)
             .map_err(|e| format!("Invalid play: {:?}", e))?;
 
-        self.tracker.note_card_played(self.current_seat, card);
+        self.tracker.note_card_played(actor, card);
         self.step_count += 1;
 
         // Determine next seat and check if round is complete
@@ -214,7 +215,7 @@ impl HeartsEnv {
         match outcome {
             PlayOutcome::Played => {
                 // Continue in same trick
-                self.current_seat = self.current_seat.next();
+                self.current_seat = actor.next();
                 Ok(Step {
                     obs: self.build_observation(),
                     reward: 0.0,
@@ -234,7 +235,7 @@ impl HeartsEnv {
                 if round.trick_history().len() == 13 {
                     // Round complete, compute rewards
                     let final_points = self.compute_round_points();
-                    let reward = self.compute_reward(&final_points);
+                    let reward = self.compute_reward_for(actor, &final_points);
 
                     Ok(Step {
                         obs: self.build_observation(),
@@ -287,7 +288,7 @@ impl HeartsEnv {
         ]
     }
 
-    fn compute_reward(&self, final_points: &[u32; 4]) -> f32 {
+    fn compute_reward_for(&self, seat: PlayerPosition, final_points: &[u32; 4]) -> f32 {
         // Detect successful moon shooting: one player has 26, others have 0
         let moon_shooter = final_points.iter().position(|&p| p == 26);
 
@@ -304,19 +305,19 @@ impl HeartsEnv {
                 // Successful moon! Shooter gets huge reward, victims get penalty
                 let mut rewards = [-26.0f32; 4];
                 rewards[shooter_idx] = 78.0; // 3×26 advantage
-                return rewards[self.current_seat.index()];
+                return rewards[seat.index()];
             }
         }
 
         // Normal scoring: relative rewards
-        let my_points = final_points[self.current_seat.index()] as f32;
+        let my_points = final_points[seat.index()] as f32;
 
         match self.config.reward_mode {
             RewardMode::Relative => {
                 let opponent_avg: f32 = final_points
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| *i != self.current_seat.index())
+                    .filter(|(i, _)| *i != seat.index())
                     .map(|(_, &p)| p as f32)
                     .sum::<f32>()
                     / 3.0;
@@ -325,7 +326,7 @@ impl HeartsEnv {
             }
 
             RewardMode::Rank => {
-                let rank = self.compute_rank(final_points);
+                let rank = self.compute_rank(final_points, seat);
                 match rank {
                     1 => 3.0,
                     2 => 1.0,
@@ -337,8 +338,8 @@ impl HeartsEnv {
         }
     }
 
-    fn compute_rank(&self, points: &[u32; 4]) -> usize {
-        let my_points = points[self.current_seat.index()];
+    fn compute_rank(&self, points: &[u32; 4], seat: PlayerPosition) -> usize {
+        let my_points = points[seat.index()];
         let better_count = points.iter().filter(|&&p| p < my_points).count();
         better_count + 1 // Rank is 1-indexed
     }
@@ -394,7 +395,7 @@ mod tests {
 
         // Simulate moon shoot: South (index 2) gets 26, others get 0
         let points = [0, 0, 26, 0]; // points[South.index()] = 26
-        let reward = env.compute_reward(&points);
+        let reward = env.compute_reward_for(PlayerPosition::South, &points);
 
         // South (current_seat) should get huge positive reward
         assert_eq!(reward, 78.0);
@@ -412,7 +413,7 @@ mod tests {
 
         // Normal scoring: North=8, East=3, South=5, West=10
         let points = [8, 3, 5, 10]; // South is at index 2
-        let reward = env.compute_reward(&points);
+        let reward = env.compute_reward_for(PlayerPosition::South, &points);
 
         // Opponent average = (8+3+10)/3 = 7.0
         // Reward = 7.0 - 5.0 = 2.0
@@ -431,13 +432,94 @@ mod tests {
 
         // North=8, East=5, South=3 (1st), West=10
         let points = [8, 5, 3, 10]; // South at index 2
-        let reward = env.compute_reward(&points);
+        let reward = env.compute_reward_for(PlayerPosition::South, &points);
         assert_eq!(reward, 3.0); // 1st place
 
         // North=5, East=8, South=10 (4th), West=3
         let points = [5, 8, 10, 3]; // South at index 2
-        let reward = env.compute_reward(&points);
+        let reward = env.compute_reward_for(PlayerPosition::South, &points);
         assert_eq!(reward, -3.0); // 4th place
+    }
+
+    #[test]
+    fn terminal_reward_assigned_to_actor() {
+        use hearts_core::model::card::Card;
+        use hearts_core::model::hand::Hand;
+        use hearts_core::model::passing::PassingDirection;
+        use hearts_core::model::rank::Rank;
+        use hearts_core::model::round::{RoundPhase, RoundState};
+        use hearts_core::model::suit::Suit;
+        use hearts_core::model::trick::Trick;
+
+        let config = EnvConfig {
+            reward_mode: RewardMode::Rank,
+        };
+        let mut env = HeartsEnv::new(0, config);
+
+        let mut history = Vec::with_capacity(12);
+        for _ in 0..12 {
+            let mut trick = Trick::new(PlayerPosition::North);
+            trick
+                .play(PlayerPosition::North, Card::new(Rank::Two, Suit::Clubs))
+                .unwrap();
+            trick
+                .play(PlayerPosition::East, Card::new(Rank::Three, Suit::Clubs))
+                .unwrap();
+            trick
+                .play(PlayerPosition::South, Card::new(Rank::Four, Suit::Clubs))
+                .unwrap();
+            trick
+                .play(PlayerPosition::West, Card::new(Rank::Five, Suit::Clubs))
+                .unwrap();
+            history.push(trick);
+        }
+
+        let mut current_trick = Trick::new(PlayerPosition::South);
+        current_trick
+            .play(PlayerPosition::South, Card::new(Rank::King, Suit::Hearts))
+            .unwrap();
+        current_trick
+            .play(PlayerPosition::West, Card::new(Rank::Queen, Suit::Spades))
+            .unwrap();
+        current_trick
+            .play(PlayerPosition::North, Card::new(Rank::Ace, Suit::Hearts))
+            .unwrap();
+
+        let hands = [
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(vec![Card::new(Rank::Two, Suit::Hearts)]),
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+        ];
+
+        let round = RoundState::from_hands_with_state(
+            hands,
+            PlayerPosition::South,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+            current_trick,
+            history,
+            true,
+        );
+
+        env.match_state = MatchState::with_seed(PlayerPosition::South, 0);
+        *env.match_state.round_mut() = round;
+        env.current_seat = PlayerPosition::East;
+        env.tracker.reset_for_round(env.match_state.round());
+
+        let step = env
+            .step_play(Card::new(Rank::Two, Suit::Hearts))
+            .expect("final card plays successfully");
+
+        assert!(step.done);
+        assert_eq!(step.reward, 3.0);
+        let final_points = step
+            .info
+            .final_points
+            .expect("final points available at terminal state");
+        assert_eq!(final_points, [16, 0, 0, 0]);
+        // North (index 0) captured the trick and absorbed penalties; actor East (index 1) still
+        // receives the positive reward for finishing with the lowest score.
     }
 
     #[test]

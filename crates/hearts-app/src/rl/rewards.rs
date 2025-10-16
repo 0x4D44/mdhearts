@@ -67,13 +67,16 @@ impl RewardComputer {
         seat: PlayerPosition,
         prev_hand_size: usize,
         prev_tricks_completed: usize,
+        prev_penalties: [u8; 4],
     ) -> f32 {
         match self.mode {
             StepRewardMode::Terminal => 0.0,
             StepRewardMode::PerTrick => {
-                self.per_trick_reward(match_state, seat, prev_tricks_completed)
+                self.per_trick_reward(match_state, seat, prev_tricks_completed, prev_penalties)
             }
-            StepRewardMode::Shaped => self.shaped_reward(match_state, seat, prev_hand_size),
+            StepRewardMode::Shaped => {
+                self.shaped_reward(match_state, seat, prev_hand_size, prev_penalties)
+            }
         }
     }
 
@@ -101,18 +104,16 @@ impl RewardComputer {
         match_state: &MatchState,
         seat: PlayerPosition,
         prev_tricks_completed: usize,
+        prev_penalties: [u8; 4],
     ) -> f32 {
         let round = match_state.round();
         let current_tricks = round.tricks_completed();
+        let penalties = round.penalty_totals();
+        let delta = penalties[seat.index()] as i32 - prev_penalties[seat.index()] as i32;
 
         // Just completed a trick?
-        if current_tricks > prev_tricks_completed {
-            let penalty_totals = round.penalty_totals();
-            let current_points = penalty_totals[seat.index()] as f32;
-
-            // For simplicity, we penalize based on total points so far
-            // A more sophisticated approach would track delta points
-            -current_points / 26.0
+        if current_tricks > prev_tricks_completed && delta > 0 {
+            -(delta as f32) / 26.0
         } else {
             0.0
         }
@@ -124,24 +125,16 @@ impl RewardComputer {
         match_state: &MatchState,
         seat: PlayerPosition,
         prev_hand_size: usize,
+        prev_penalties: [u8; 4],
     ) -> f32 {
         let round = match_state.round();
         let current_hand_size = round.hand(seat).len();
+        let penalties = round.penalty_totals();
+        let delta = penalties[seat.index()] as i32 - prev_penalties[seat.index()] as i32;
 
         // Did we just play a card?
-        if current_hand_size < prev_hand_size {
-            let trick = round.current_trick();
-
-            // Trick just completed?
-            if trick.is_complete() {
-                if let Some(winner) = trick.winner() {
-                    if winner == seat {
-                        // We won the trick - penalize for points taken
-                        let points = trick.penalty_total() as f32;
-                        return -points / 26.0;
-                    }
-                }
-            }
+        if current_hand_size < prev_hand_size && delta > 0 {
+            return -(delta as f32) / 26.0;
         }
 
         0.0
@@ -187,8 +180,15 @@ mod tests {
     fn terminal_mode_gives_zero_step_reward() {
         let computer = RewardComputer::new(StepRewardMode::Terminal);
         let match_state = MatchState::with_seed(PlayerPosition::South, 42);
+        let prev_penalties = match_state.round().penalty_totals();
 
-        let reward = computer.compute_step_reward(&match_state, PlayerPosition::South, 13, 0);
+        let reward = computer.compute_step_reward(
+            &match_state,
+            PlayerPosition::South,
+            13,
+            0,
+            prev_penalties,
+        );
 
         assert_eq!(reward, 0.0);
     }
@@ -197,9 +197,16 @@ mod tests {
     fn per_trick_mode_gives_zero_when_no_trick_completed() {
         let computer = RewardComputer::new(StepRewardMode::PerTrick);
         let match_state = MatchState::with_seed(PlayerPosition::South, 42);
+        let prev_penalties = match_state.round().penalty_totals();
 
         // Same trick count, so no reward
-        let reward = computer.compute_step_reward(&match_state, PlayerPosition::South, 13, 0);
+        let reward = computer.compute_step_reward(
+            &match_state,
+            PlayerPosition::South,
+            13,
+            0,
+            prev_penalties,
+        );
 
         assert_eq!(reward, 0.0);
     }
@@ -208,13 +215,121 @@ mod tests {
     fn shaped_mode_gives_zero_when_hand_unchanged() {
         let computer = RewardComputer::new(StepRewardMode::Shaped);
         let match_state = MatchState::with_seed(PlayerPosition::South, 42);
+        let prev_penalties = match_state.round().penalty_totals();
 
         let hand_size = match_state.round().hand(PlayerPosition::South).len();
 
         // Hand size unchanged, so no reward
-        let reward =
-            computer.compute_step_reward(&match_state, PlayerPosition::South, hand_size, 0);
+        let reward = computer.compute_step_reward(
+            &match_state,
+            PlayerPosition::South,
+            hand_size,
+            0,
+            prev_penalties,
+        );
 
         assert_eq!(reward, 0.0);
+    }
+
+    #[test]
+    fn shaped_reward_penalizes_points() {
+        use hearts_core::model::card::Card;
+        use hearts_core::model::hand::Hand;
+        use hearts_core::model::passing::PassingDirection;
+        use hearts_core::model::rank::Rank;
+        use hearts_core::model::round::{RoundPhase, RoundState};
+        use hearts_core::model::suit::Suit;
+        use hearts_core::model::trick::Trick;
+
+        let mut trick = Trick::new(PlayerPosition::South);
+        trick
+            .play(PlayerPosition::South, Card::new(Rank::Ace, Suit::Hearts))
+            .unwrap();
+        trick
+            .play(PlayerPosition::West, Card::new(Rank::Queen, Suit::Spades))
+            .unwrap();
+        trick
+            .play(PlayerPosition::North, Card::new(Rank::Two, Suit::Hearts))
+            .unwrap();
+        trick
+            .play(PlayerPosition::East, Card::new(Rank::Three, Suit::Hearts))
+            .unwrap();
+        assert_eq!(trick.winner(), Some(PlayerPosition::South));
+        assert_eq!(trick.penalty_total(), 16);
+
+        let hands = [
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+        ];
+        let round = RoundState::from_hands_with_state(
+            hands,
+            PlayerPosition::South,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+            Trick::new(PlayerPosition::South),
+            vec![trick],
+            true,
+        );
+
+        let mut match_state = MatchState::with_seed(PlayerPosition::South, 0);
+        *match_state.round_mut() = round;
+
+        let computer = RewardComputer::new(StepRewardMode::Shaped);
+        let prev_penalties = [0, 0, 0, 0];
+        let reward =
+            computer.compute_step_reward(&match_state, PlayerPosition::South, 1, 0, prev_penalties);
+        assert!((reward - (-16.0 / 26.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn per_trick_reward_penalizes_delta() {
+        use hearts_core::model::card::Card;
+        use hearts_core::model::hand::Hand;
+        use hearts_core::model::passing::PassingDirection;
+        use hearts_core::model::rank::Rank;
+        use hearts_core::model::round::{RoundPhase, RoundState};
+        use hearts_core::model::suit::Suit;
+        use hearts_core::model::trick::Trick;
+
+        let mut trick = Trick::new(PlayerPosition::South);
+        trick
+            .play(PlayerPosition::South, Card::new(Rank::King, Suit::Hearts))
+            .unwrap();
+        trick
+            .play(PlayerPosition::West, Card::new(Rank::Queen, Suit::Spades))
+            .unwrap();
+        trick
+            .play(PlayerPosition::North, Card::new(Rank::Two, Suit::Hearts))
+            .unwrap();
+        trick
+            .play(PlayerPosition::East, Card::new(Rank::Three, Suit::Hearts))
+            .unwrap();
+        assert_eq!(trick.winner(), Some(PlayerPosition::South));
+        let hands = [
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+            Hand::with_cards(Vec::<Card>::new()),
+        ];
+        let round = RoundState::from_hands_with_state(
+            hands,
+            PlayerPosition::South,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+            Trick::new(PlayerPosition::South),
+            vec![trick],
+            true,
+        );
+
+        let mut match_state = MatchState::with_seed(PlayerPosition::South, 0);
+        *match_state.round_mut() = round;
+
+        let computer = RewardComputer::new(StepRewardMode::PerTrick);
+        let prev_penalties = [0, 0, 0, 0];
+        let reward =
+            computer.compute_step_reward(&match_state, PlayerPosition::South, 1, 0, prev_penalties);
+        assert!(reward < 0.0);
     }
 }

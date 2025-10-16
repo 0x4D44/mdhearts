@@ -2,7 +2,6 @@
 ///
 /// These values control the behavior of the PassPlanner and PlayPlanner.
 /// Extracted from hardcoded magic numbers to enable systematic tuning.
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct BotParams {
@@ -245,8 +244,10 @@ impl BotParams {
             play_slough_penalty_mult: (default.play_slough_penalty_mult as f32 * factor) as i32,
             play_lead_rank_mult: (default.play_lead_rank_mult as f32 * factor) as i32,
             play_break_hearts_penalty: (default.play_break_hearts_penalty as f32 * factor) as i32,
-            play_hunt_lead_penalty_base: (default.play_hunt_lead_penalty_base as f32 * factor) as i32,
-            play_hunt_lead_penalty_mult: (default.play_hunt_lead_penalty_mult as f32 * factor) as i32,
+            play_hunt_lead_penalty_base: (default.play_hunt_lead_penalty_base as f32 * factor)
+                as i32,
+            play_hunt_lead_penalty_mult: (default.play_hunt_lead_penalty_mult as f32 * factor)
+                as i32,
             play_moon_lead_hearts: (default.play_moon_lead_hearts as f32 * factor) as i32,
             play_desperate_take_mult: (default.play_desperate_take_mult as f32 * factor) as i32,
             play_desperate_dump_mult: (default.play_desperate_dump_mult as f32 * factor) as i32,
@@ -254,7 +255,8 @@ impl BotParams {
             play_unseen_bonus: (default.play_unseen_bonus as f32 * factor) as i32,
             play_moon_take_trick: (default.play_moon_take_trick as f32 * factor) as i32,
             play_moon_take_points_mult: (default.play_moon_take_points_mult as f32 * factor) as i32,
-            play_moon_avoid_points_mult: (default.play_moon_avoid_points_mult as f32 * factor) as i32,
+            play_moon_avoid_points_mult: (default.play_moon_avoid_points_mult as f32 * factor)
+                as i32,
             play_hunt_avoid_trick: (default.play_hunt_avoid_trick as f32 * factor) as i32,
             play_hunt_feed_leader_mult: (default.play_hunt_feed_leader_mult as f32 * factor) as i32,
         }

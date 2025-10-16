@@ -61,7 +61,8 @@ impl PlayPlanner {
                     score += ctx.params.play_break_hearts_penalty;
                 }
                 if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
-                    score += ctx.params.play_hunt_lead_penalty_base + (card.penalty_value() as i32 * ctx.params.play_hunt_lead_penalty_mult);
+                    score += ctx.params.play_hunt_lead_penalty_base
+                        + (card.penalty_value() as i32 * ctx.params.play_hunt_lead_penalty_mult);
                 }
                 if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
                     score += ctx.params.play_moon_lead_hearts;
@@ -137,7 +138,8 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
             score += ctx.params.play_break_hearts_penalty;
         }
         if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
-            score += ctx.params.play_hunt_lead_penalty_base + (card.penalty_value() as i32 * ctx.params.play_hunt_lead_penalty_mult);
+            score += ctx.params.play_hunt_lead_penalty_base
+                + (card.penalty_value() as i32 * ctx.params.play_hunt_lead_penalty_mult);
         }
         if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
             score += ctx.params.play_moon_lead_hearts;
@@ -197,7 +199,8 @@ fn base_score(
     match style {
         BotStyle::AggressiveMoon => {
             if will_capture {
-                score += ctx.params.play_moon_take_trick + penalties_i32 * ctx.params.play_moon_take_points_mult;
+                score += ctx.params.play_moon_take_trick
+                    + penalties_i32 * ctx.params.play_moon_take_points_mult;
             } else {
                 score += penalties_i32 * ctx.params.play_moon_avoid_points_mult;
             }

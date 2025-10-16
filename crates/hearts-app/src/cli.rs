@@ -4,6 +4,7 @@ use hearts_core::model::player::PlayerPosition;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::WindowsAndMessaging::{
     MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MESSAGEBOX_STYLE, MessageBoxW,
@@ -317,11 +318,30 @@ fn parse_seat(input: &str) -> Result<PlayerPosition, CliError> {
 
 pub fn show_error_box(message: &str) {
     eprintln!("{message}");
-    show_box("mdhearts CLI", message, MB_ICONERROR | MB_OK);
+    if message_boxes_enabled() {
+        show_box("mdhearts CLI", message, MB_ICONERROR | MB_OK);
+    }
 }
 
 fn show_info_box(title: &str, message: &str) {
-    show_box(title, message, MB_ICONINFORMATION | MB_OK);
+    if message_boxes_enabled() {
+        show_box(title, message, MB_ICONINFORMATION | MB_OK);
+    }
+}
+
+fn message_boxes_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("MDH_CLI_POPUPS")
+            .map(|value| {
+                let value = value.trim();
+                value == "1"
+                    || value.eq_ignore_ascii_case("true")
+                    || value.eq_ignore_ascii_case("yes")
+                    || value.eq_ignore_ascii_case("on")
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn show_box(title: &str, message: &str, flags: MESSAGEBOX_STYLE) {
@@ -339,50 +359,6 @@ fn show_box(title: &str, message: &str, flags: MESSAGEBOX_STYLE) {
 
 fn encode_wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ai_type_parsing() {
-        assert_eq!(AiType::from_str("easy").unwrap(), AiType::Easy);
-        assert_eq!(AiType::from_str("legacy").unwrap(), AiType::Easy);
-        assert_eq!(AiType::from_str("normal").unwrap(), AiType::Normal);
-        assert_eq!(AiType::from_str("default").unwrap(), AiType::Normal);
-        assert_eq!(AiType::from_str("hard").unwrap(), AiType::Hard);
-        assert_eq!(AiType::from_str("future").unwrap(), AiType::Hard);
-        assert_eq!(AiType::from_str("embedded").unwrap(), AiType::Embedded);
-        assert_eq!(AiType::from_str("ml").unwrap(), AiType::Embedded);
-
-        // Case insensitive
-        assert_eq!(AiType::from_str("EASY").unwrap(), AiType::Easy);
-        assert_eq!(AiType::from_str("Embedded").unwrap(), AiType::Embedded);
-
-        // Invalid
-        assert!(matches!(
-            AiType::from_str("invalid"),
-            Err(CliError::InvalidAiType(_))
-        ));
-    }
-
-    #[test]
-    #[ignore] // Slow test: runs full game
-    fn eval_runs_without_panic() {
-        // This test verifies that eval mode can run a small number of games
-        // without panicking (basic smoke test)
-        let result = run_eval(1, AiType::Normal, None, None);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    #[ignore] // Slow test: runs full game with ML inference
-    fn eval_embedded_ai_runs() {
-        // Verify that embedded AI can complete games
-        let result = run_eval(1, AiType::Embedded, None, None);
-        assert!(result.is_ok());
-    }
 }
 
 /// Run mixed AI evaluation mode (--ai-test or --ai-per-seat)
@@ -891,6 +867,54 @@ fn run_self_play_eval(
     let obs_builder = ObservationBuilder::new();
     let reward_computer = RewardComputer::new(reward_mode);
 
+    struct PendingExperience {
+        observation: Vec<f32>,
+        action: u8,
+        value: f32,
+        log_prob: f32,
+        seat_idx: usize,
+        step_id: usize,
+        prev_hand_size: usize,
+        prev_tricks: usize,
+        prev_penalties: [u8; 4],
+    }
+
+    fn emit_pending(
+        coll: &mut RLExperienceCollector,
+        reward_computer: &RewardComputer,
+        state: &MatchState,
+        pending: PendingExperience,
+        done: bool,
+        game_id: usize,
+    ) {
+        let seat = PlayerPosition::from_index(pending.seat_idx).expect("valid seat index");
+        let step_reward = reward_computer.compute_step_reward(
+            state,
+            seat,
+            pending.prev_hand_size,
+            pending.prev_tricks,
+            pending.prev_penalties,
+        );
+        let terminal_reward = reward_computer.compute_terminal_reward(state, seat);
+        let reward = if done { terminal_reward } else { step_reward };
+
+        let experience = RLExperience {
+            observation: pending.observation,
+            action: pending.action,
+            reward,
+            done,
+            game_id,
+            step_id: pending.step_id,
+            seat: pending.seat_idx as u8,
+            value: pending.value,
+            log_prob: pending.log_prob,
+        };
+
+        if let Err(e) = coll.record(experience) {
+            eprintln!("Warning: Failed to record experience: {}", e);
+        }
+    }
+
     let mut total_points = [0u32; 4];
     let start_time = std::time::Instant::now();
 
@@ -900,9 +924,7 @@ fn run_self_play_eval(
         let mut tracker = UnseenTracker::new();
         tracker.reset_for_round(match_state.round());
 
-        // Track experiences for all 4 seats
-        type PendingExp = (usize, usize, u8, Vec<f32>, f32, f32, usize, usize);
-        let mut pending_experiences: Vec<PendingExp> = Vec::new();
+        let mut pending: [Option<PendingExperience>; 4] = [None, None, None, None];
         let mut step_ids = [0usize; 4];
 
         // Play one complete round
@@ -941,6 +963,16 @@ fn run_self_play_eval(
                         .unwrap_or(trick.leader())
                 };
 
+                let seat_idx = current_player.index();
+
+                if let Some(ref mut coll) = collector {
+                    if let Some(prev) = pending[seat_idx].take() {
+                        emit_pending(coll, &reward_computer, &match_state, prev, false, game_idx);
+                    }
+                } else {
+                    pending[seat_idx] = None;
+                }
+
                 let hand = match_state.round().hand(current_player);
                 let scores = match_state.scores();
                 let passing_dir = match_state.passing_direction();
@@ -956,7 +988,7 @@ fn run_self_play_eval(
 
                 // Build observation
                 let obs = obs_builder.build(&ctx);
-                let obs_vec = obs.as_array().to_vec();
+                let observation = obs.as_array().to_vec();
 
                 // Get action with value and log_prob
                 let (card, value, log_prob) = policy.forward_with_critic(&ctx);
@@ -964,21 +996,23 @@ fn run_self_play_eval(
                 // Track state before action
                 let prev_hand_size = hand.len();
                 let prev_tricks = match_state.round().tricks_completed();
-
-                // Store experience data for later reward assignment
-                let seat_idx = current_player.index();
+                let prev_penalties = match_state.round().penalty_totals();
                 let step_id = step_ids[seat_idx];
-                pending_experiences.push((
-                    seat_idx,
-                    step_id,
-                    card.to_id(),
-                    obs_vec,
-                    value,
-                    log_prob,
-                    prev_hand_size,
-                    prev_tricks,
-                ));
-                step_ids[seat_idx] += 1;
+                let card_id = card.to_id();
+
+                if collector.is_some() {
+                    pending[seat_idx] = Some(PendingExperience {
+                        observation,
+                        action: card_id,
+                        value,
+                        log_prob,
+                        seat_idx,
+                        step_id,
+                        prev_hand_size,
+                        prev_tricks,
+                        prev_penalties,
+                    });
+                }
 
                 // Execute action
                 tracker.note_card_played(current_player, card);
@@ -989,6 +1023,7 @@ fn run_self_play_eval(
                         break;
                     }
                 }
+                step_ids[seat_idx] += 1;
 
                 // Check if round is complete
                 if match_state.round().tricks_completed() >= 13 {
@@ -999,54 +1034,10 @@ fn run_self_play_eval(
             }
         }
 
-        // Assign rewards and record experiences for all seats
         if let Some(ref mut coll) = collector {
-            for (
-                seat_idx,
-                step_id,
-                card_id,
-                obs_vec,
-                value,
-                log_prob,
-                prev_hand_size,
-                prev_tricks,
-            ) in pending_experiences.iter()
-            {
-                let seat = PlayerPosition::from_index(*seat_idx).expect("Valid seat index");
-                let is_final = *step_id == step_ids[*seat_idx] - 1;
-
-                // Compute step reward
-                let step_reward = reward_computer.compute_step_reward(
-                    &match_state,
-                    seat,
-                    *prev_hand_size,
-                    *prev_tricks,
-                );
-
-                // Compute terminal reward
-                let terminal_reward = reward_computer.compute_terminal_reward(&match_state, seat);
-
-                // Use step reward for intermediate steps, terminal reward for final step
-                let reward = if is_final {
-                    terminal_reward
-                } else {
-                    step_reward
-                };
-
-                let exp = RLExperience {
-                    observation: obs_vec.clone(),
-                    action: *card_id,
-                    reward,
-                    done: is_final,
-                    game_id: game_idx,
-                    step_id: *step_id,
-                    seat: *seat_idx as u8,
-                    value: *value,
-                    log_prob: *log_prob,
-                };
-
-                if let Err(e) = coll.record(exp) {
-                    eprintln!("Warning: Failed to record experience: {}", e);
+            for entry in pending.iter_mut() {
+                if let Some(prev) = entry.take() {
+                    emit_pending(coll, &reward_computer, &match_state, prev, true, game_idx);
                 }
             }
         }
@@ -1091,4 +1082,88 @@ fn run_self_play_eval(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ai_type_parsing() {
+        assert_eq!(AiType::from_str("easy").unwrap(), AiType::Easy);
+        assert_eq!(AiType::from_str("legacy").unwrap(), AiType::Easy);
+        assert_eq!(AiType::from_str("normal").unwrap(), AiType::Normal);
+        assert_eq!(AiType::from_str("default").unwrap(), AiType::Normal);
+        assert_eq!(AiType::from_str("hard").unwrap(), AiType::Hard);
+        assert_eq!(AiType::from_str("future").unwrap(), AiType::Hard);
+        assert_eq!(AiType::from_str("embedded").unwrap(), AiType::Embedded);
+        assert_eq!(AiType::from_str("ml").unwrap(), AiType::Embedded);
+
+        // Case insensitive
+        assert_eq!(AiType::from_str("EASY").unwrap(), AiType::Easy);
+        assert_eq!(AiType::from_str("Embedded").unwrap(), AiType::Embedded);
+
+        // Invalid
+        assert!(matches!(
+            AiType::from_str("invalid"),
+            Err(CliError::InvalidAiType(_))
+        ));
+    }
+
+    #[test]
+    fn self_play_collects_non_zero_rewards() {
+        use tempfile::NamedTempFile;
+
+        let temp_shaped = NamedTempFile::new().unwrap();
+        run_self_play_eval(
+            1,
+            None,
+            Some(temp_shaped.path().to_path_buf()),
+            crate::rl::StepRewardMode::Shaped,
+        )
+        .unwrap();
+
+        let shaped_data = std::fs::read_to_string(temp_shaped.path()).unwrap();
+        let shaped_has_reward = shaped_data.lines().any(|line| {
+            let exp: crate::rl::RLExperience = serde_json::from_str(line).unwrap();
+            exp.reward.abs() > 1e-6
+        });
+        assert!(
+            shaped_has_reward,
+            "shaped mode should emit at least one non-zero reward"
+        );
+
+        let temp_per_trick = NamedTempFile::new().unwrap();
+        run_self_play_eval(
+            1,
+            None,
+            Some(temp_per_trick.path().to_path_buf()),
+            crate::rl::StepRewardMode::PerTrick,
+        )
+        .unwrap();
+
+        let per_trick_data = std::fs::read_to_string(temp_per_trick.path()).unwrap();
+        let per_trick_has_reward = per_trick_data.lines().any(|line| {
+            let exp: crate::rl::RLExperience = serde_json::from_str(line).unwrap();
+            exp.reward.abs() > 1e-6
+        });
+        assert!(
+            per_trick_has_reward,
+            "per_trick mode should emit at least one non-zero reward"
+        );
+    }
+
+    #[test]
+    #[ignore] // Slow test: runs full game
+    fn eval_runs_without_panic() {
+        let result = run_eval(1, AiType::Normal, None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[ignore] // Slow test: runs full game with ML inference
+    fn eval_embedded_ai_runs() {
+        let result = run_eval(1, AiType::Embedded, None, None);
+        assert!(result.is_ok());
+    }
 }

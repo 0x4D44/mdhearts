@@ -657,8 +657,8 @@ mod tests {
     #[test]
     fn softmax_sums_to_one() {
         let mut logits = [1.0f32; 52];
-        for i in 0..5 {
-            logits[i] = (i + 1) as f32;
+        for (i, logit) in logits.iter_mut().enumerate().take(5) {
+            *logit = (i + 1) as f32;
         }
         let probs = softmax(&logits);
 
