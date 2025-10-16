@@ -67,73 +67,73 @@ fn score_card(
     let card_penalty = card.penalty_value() as i32;
 
     if card.is_queen_of_spades() {
-        score += 18_000;
+        score += ctx.params.pass_queen_spades;
     }
 
     if card.suit == Suit::Spades && !matches!(style, BotStyle::AggressiveMoon) {
         match card.rank {
-            Rank::Ace => score += 5_000,
-            Rank::King => score += 7_000,
-            Rank::Queen => score += 18_000,
-            Rank::Jack => score += 2_500,
+            Rank::Ace => score += ctx.params.pass_ace_spades,
+            Rank::King => score += ctx.params.pass_king_spades,
+            Rank::Queen => score += ctx.params.pass_queen_spades,
+            Rank::Jack => score += ctx.params.pass_jack_spades,
             _ => {}
         }
     }
 
     if card.suit == Suit::Hearts {
-        score += 6_000 + rank_value * 120;
+        score += ctx.params.pass_hearts_base + rank_value * ctx.params.pass_hearts_rank_mult;
     } else if rank_value >= Rank::King.value() as i32 {
-        score += 2_200 + rank_value * 80;
+        score += ctx.params.pass_high_cards_base + rank_value * ctx.params.pass_high_cards_rank_mult;
     }
 
     if suit_len <= 2 {
-        score += 4_000 - (suit_len as i32 * 800);
+        score += ctx.params.pass_void_creation_base - (suit_len as i32 * ctx.params.pass_void_creation_mult);
     } else if suit_len >= 5 {
-        score -= (suit_len as i32 - 4) * 400;
+        score -= (suit_len as i32 - 4) * ctx.params.pass_long_suit_penalty;
     }
 
     if passing_to_trailing {
-        score += card_penalty * 1_400;
+        score += card_penalty * ctx.params.pass_to_trailing_mult;
     }
 
     if passing_to_leader {
-        score -= card_penalty * 1_200;
+        score += card_penalty * ctx.params.pass_to_leader_mult;
     }
 
     if my_score >= 75 {
-        score += card_penalty * 1_600;
+        score += card_penalty * ctx.params.pass_desperate_mult;
     }
 
     if ctx.tracker.is_unseen(card) {
-        score += 90;
+        score += ctx.params.pass_unseen_bonus;
     }
 
     let two_of_clubs = Card::new(Rank::Two, Suit::Clubs);
     if card == two_of_clubs {
-        score -= 4_000;
+        score += ctx.params.pass_two_clubs_penalty;
     }
 
     // Style adjustments
     match style {
         BotStyle::AggressiveMoon => {
             if card.suit == Suit::Hearts {
-                score -= 9_000;
+                score += ctx.params.pass_moon_keep_hearts;
             }
             if card.is_queen_of_spades() {
-                score -= 12_000;
+                score += ctx.params.pass_moon_keep_queen;
             }
             if card.suit == Suit::Spades && card.rank >= Rank::Queen {
-                score -= 9_000;
+                score += ctx.params.pass_moon_keep_spades;
             }
             if suit_len == 1 && card.suit != Suit::Hearts {
-                score += 2_500;
+                score += ctx.params.pass_moon_void_bonus;
             }
         }
         BotStyle::HuntLeader => {
             if card_penalty > 0 {
-                score += 900 * card_penalty;
+                score += ctx.params.pass_hunt_penalty_mult * card_penalty;
                 if passing_to_trailing {
-                    score += 600 * card_penalty;
+                    score += ctx.params.pass_hunt_trailing_mult * card_penalty;
                 }
             }
         }
@@ -142,11 +142,11 @@ fn score_card(
 
     // Late-round adjustment to shed high cards.
     let cards_played = ctx.cards_played() as i32;
-    score += cards_played * 12;
+    score += cards_played * ctx.params.pass_cards_played_mult;
 
     // Bias towards discarding the very highest ranks when we are well ahead.
     if snapshot.min_player == ctx.seat && snapshot.max_score - snapshot.min_score >= 15 {
-        score += rank_value * 40;
+        score += rank_value * ctx.params.pass_leader_rank_mult;
     }
 
     score
@@ -156,7 +156,7 @@ fn score_card(
 mod tests {
     use super::*;
     use crate::bot::tracker::UnseenTracker;
-    use crate::bot::{BotContext, BotDifficulty};
+    use crate::bot::{BotContext, BotDifficulty, BotParams};
     use hearts_core::model::card::Card;
     use hearts_core::model::hand::Hand;
     use hearts_core::model::passing::{PassingDirection, PassingState};
@@ -210,6 +210,7 @@ mod tests {
         let scores = build_scores([20, 10, 30, 25]);
         let mut tracker = UnseenTracker::new();
         tracker.reset_for_round(&round);
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -217,6 +218,7 @@ mod tests {
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -246,6 +248,7 @@ mod tests {
         let scores = build_scores([35, 36, 40, 38]);
         let mut tracker = UnseenTracker::new();
         tracker.reset_for_round(&round);
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -253,6 +256,7 @@ mod tests {
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -294,6 +298,7 @@ mod tests {
         let scores = build_scores([15, 22, 18, 20]);
         let mut tracker = UnseenTracker::new();
         tracker.reset_for_round(&round);
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -301,6 +306,7 @@ mod tests {
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -331,6 +337,7 @@ mod tests {
 
         let mut tracker_unseen = UnseenTracker::new();
         tracker_unseen.reset_for_round(&round);
+        let params = BotParams::default();
         let ctx_unseen = BotContext::new(
             seat,
             &round,
@@ -338,6 +345,7 @@ mod tests {
             passing,
             &tracker_unseen,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
         let style = determine_style(&ctx_unseen);
         let snapshot = snapshot_scores(ctx_unseen.scores);
@@ -368,6 +376,7 @@ mod tests {
             passing,
             &tracker_seen,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
         let snapshot_seen = snapshot_scores(ctx_seen.scores);
         let score_seen = super::score_card(
