@@ -1,7 +1,9 @@
+mod params;
 mod pass;
 mod play;
 mod tracker;
 
+pub use params::BotParams;
 pub use pass::PassPlanner;
 pub use play::PlayPlanner;
 pub use tracker::UnseenTracker;
@@ -70,6 +72,8 @@ pub struct BotContext<'a> {
     pub passing_direction: PassingDirection,
     pub tracker: &'a UnseenTracker,
     pub difficulty: BotDifficulty,
+    #[allow(dead_code)]
+    pub params: &'a BotParams,
 }
 
 impl<'a> BotContext<'a> {
@@ -80,6 +84,7 @@ impl<'a> BotContext<'a> {
         passing_direction: PassingDirection,
         tracker: &'a UnseenTracker,
         difficulty: BotDifficulty,
+        params: &'a BotParams,
     ) -> Self {
         Self {
             seat,
@@ -88,6 +93,7 @@ impl<'a> BotContext<'a> {
             passing_direction,
             tracker,
             difficulty,
+            params,
         }
     }
 
@@ -238,6 +244,7 @@ mod tests {
         let round = build_round(seat, &hand);
         let scores = build_scores([18, 24, 22, 27]);
         let tracker = make_tracker(&round);
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -245,6 +252,7 @@ mod tests {
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
         assert_eq!(determine_style(&ctx), BotStyle::AggressiveMoon);
     }
@@ -260,6 +268,7 @@ mod tests {
         let round = build_round(seat, &hand);
         let scores = build_scores([15, 94, 20, 18]);
         let tracker = make_tracker(&round);
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -267,6 +276,7 @@ mod tests {
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
         assert_eq!(determine_style(&ctx), BotStyle::HuntLeader);
     }
@@ -282,6 +292,7 @@ mod tests {
         let round = build_round(seat, &hand);
         let scores = build_scores([40, 50, 82, 60]);
         let tracker = make_tracker(&round);
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -289,6 +300,7 @@ mod tests {
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::FutureHard,
+            &params,
         );
         assert_eq!(determine_style(&ctx), BotStyle::HuntLeader);
     }
@@ -317,6 +329,7 @@ mod tests {
         for rank in Rank::ORDERED.iter().take(10) {
             tracker.note_card_revealed(Card::new(*rank, Suit::Clubs));
         }
+        let params = BotParams::default();
         let ctx = BotContext::new(
             seat,
             &round,
@@ -324,6 +337,7 @@ mod tests {
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
+            &params,
         );
         assert_eq!(determine_style(&ctx), BotStyle::Cautious);
     }
@@ -335,6 +349,7 @@ mod tests {
         let round = build_round(seat, &hand);
         let tracker = make_tracker(&round);
 
+        let params = BotParams::default();
         let style_89 = {
             let scores = build_scores([10, 20, 30, 89]);
             let ctx = BotContext::new(
@@ -344,6 +359,7 @@ mod tests {
                 PassingDirection::Hold,
                 &tracker,
                 BotDifficulty::NormalHeuristic,
+                &params,
             );
             determine_style(&ctx)
         };
@@ -358,6 +374,7 @@ mod tests {
                 PassingDirection::Hold,
                 &tracker,
                 BotDifficulty::NormalHeuristic,
+                &params,
             );
             determine_style(&ctx)
         };

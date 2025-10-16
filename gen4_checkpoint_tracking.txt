@@ -1,0 +1,6 @@
+Iter 5: -26.5% improvement, p=0.0485, sig=Y
+Iter 20: -15.0% improvement, p=0.4672, sig=N
+Iter 30: -13.4% improvement, p=0.6897, sig=N
+Iter 40: -3.1% improvement, p=0.4448, sig=N
+Iter 50: -13.5% improvement, p=0.2864, sig=N
+Iter 60: -39.4% improvement, p=0.0017, sig=Y

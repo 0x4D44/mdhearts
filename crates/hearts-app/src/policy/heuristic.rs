@@ -33,6 +33,7 @@ impl HeuristicPolicy {
 
 impl Policy for HeuristicPolicy {
     fn choose_pass(&mut self, ctx: &PolicyContext) -> [Card; 3] {
+        let params = crate::bot::BotParams::default();
         let bot_ctx = BotContext::new(
             ctx.seat,
             ctx.round,
@@ -40,6 +41,7 @@ impl Policy for HeuristicPolicy {
             ctx.passing_direction,
             ctx.tracker,
             self.difficulty,
+            &params,
         );
 
         // For EasyLegacy, just return first 3 cards
@@ -52,6 +54,7 @@ impl Policy for HeuristicPolicy {
     }
 
     fn choose_play(&mut self, ctx: &PolicyContext) -> Card {
+        let params = crate::bot::BotParams::default();
         let bot_ctx = BotContext::new(
             ctx.seat,
             ctx.round,
@@ -59,6 +62,7 @@ impl Policy for HeuristicPolicy {
             ctx.passing_direction,
             ctx.tracker,
             self.difficulty,
+            &params,
         );
 
         // Compute legal moves

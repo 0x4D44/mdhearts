@@ -1,8 +1,8 @@
 # Gen3 RL Experiment: Bootstrap from Hard-Level BC Model
 
 **Date**: 2025-10-12
-**Status**: Training in progress
-**Branch**: `gen3-hard-bootstrap`
+**Status**: ❌ **COMPLETED - FAILED** (see [GEN3_RESULTS.md](GEN3_RESULTS.md) for full analysis)
+**Branch**: `ai-model`
 
 ## Hypothesis
 
@@ -203,6 +203,19 @@ ls -lh gen3_weights.json
 
 ---
 
-**Training started**: 2025-10-12 17:08 UTC
-**Expected completion**: 2025-10-13 ~03:00 UTC
-**Check back in**: ~10 hours
+**Training started**: 2025-10-12 16:38 UTC
+**Training completed**: 2025-10-13 14:35 UTC
+**Result**: ❌ All checkpoints (10, 20, 30, 40, 50, 60, 70, 80, 90, 100) showed performance degradation (-2% to -22%)
+**Conclusion**: Self-play RL causes catastrophic forgetting even from strong BC Hard starting point
+
+## Final Results Summary
+
+Training completed successfully (100 iterations, 10 checkpoints), but **all checkpoints performed worse than BC Hard baseline**:
+
+- Best checkpoint: Iteration 10 (-2.3%, not significant, p=0.51)
+- Worst checkpoint: Iteration 60 (-22.4%, p=0.15)
+- Final checkpoint: Iteration 100 (-5.4%, p=0.73)
+- Policy loss decreased 57% (0.034 → -0.023), but gameplay degraded
+- **Verdict**: Catastrophic forgetting - RL unlearned BC strategies
+
+**See [GEN3_RESULTS.md](GEN3_RESULTS.md) for complete analysis, results table, and lessons learned.**

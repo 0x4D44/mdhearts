@@ -42,7 +42,17 @@
       "Bash(git push:*)",
       "Bash(taskkill:*)",
       "Bash(cargo search:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(cat:*)",
+      "WebSearch",
+      "WebFetch(domain:sites.ualberta.ca)",
+      "WebFetch(domain:www.mdpi.com)",
+      "Bash(./launch_gen4.bat)",
+      "Bash(for i in 2 3 4)",
+      "Bash(do echo \"Collecting batch $i...\")",
+      "WebFetch(domain:webdocs.cs.ualberta.ca)",
+      "WebFetch(domain:www.movingai.com)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []
