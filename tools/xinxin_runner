@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""
+Lightweight adapter for external Hearts agents.
+
+This script provides a drop-in stand-in for the OpenSpiel xinxin bot until the
+real binary is wired up. It reads a single JSON request from stdin and writes
+a JSON response to stdout. The request payload is augmented by the benchmark
+harness with an `"action"` field (`"pass"` or `"play"`).
+"""
+
+import argparse
+import json
+import sys
+import time
+from typing import Any, Dict
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Proxy external Hearts agents")
+    parser.add_argument(
+        "--mode",
+        choices=["auto", "pass", "play"],
+        default="auto",
+        help="Force a specific action mode. Default detects from incoming payload.",
+    )
+    parser.add_argument(
+        "--delay-ms",
+        type=int,
+        default=0,
+        help="Optional artificial latency to simulate slower agents.",
+    )
+    return parser.parse_args()
+
+
+def choose_pass(payload: Dict[str, Any]) -> Dict[str, Any]:
+    hand = payload.get("hand", [])
+    if len(hand) < 3:
+        raise ValueError("pass request contains fewer than 3 cards")
+    return {"cards": hand[:3]}
+
+
+def choose_play(payload: Dict[str, Any]) -> Dict[str, Any]:
+    legal_moves = payload.get("legal_moves") or payload.get("hand")
+    if not legal_moves:
+        raise ValueError("play request missing legal moves")
+    return {"card": legal_moves[0]}
+
+
+def main() -> int:
+    args = parse_args()
+    raw = sys.stdin.readline()
+    if not raw:
+        print("expected JSON request on stdin", file=sys.stderr)
+        return 1
+
+    try:
+        payload: Dict[str, Any] = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        print(f"invalid JSON payload: {exc}", file=sys.stderr)
+        return 1
+
+    action = payload.get("action")
+    if args.mode != "auto":
+        action = args.mode
+
+    if action not in {"pass", "play"}:
+        print(f"unknown action '{action}' in payload", file=sys.stderr)
+        return 1
+
+    if args.delay_ms > 0:
+        time.sleep(args.delay_ms / 1000.0)
+
+    if action == "pass":
+        response = choose_pass(payload)
+    else:
+        response = choose_play(payload)
+
+    json.dump(response, sys.stdout)
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

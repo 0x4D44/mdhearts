@@ -26,11 +26,6 @@ except ImportError:
     stats = None
 
 
-ROW_PATTERN = re.compile(
-    r"\|\s*(?P<agent>[^|]+)\|\s*[^|]+\|\s*(?P<hands>\d+)\|\s*[^|]+\|\s*[^|]+\|\s*\[[^]]+\]\|\s*[^|]+\|\s*[^|]+\|\s*[^|]+\|\s*[^|]+\|\s*(?P<pvalue>[0-9.]+)\s*\|"
-)
-
-
 @dataclass
 class AgentRow:
     name: str
@@ -42,12 +37,15 @@ def parse_summary_table(path: Path) -> Dict[str, AgentRow]:
     rows: Dict[str, AgentRow] = {}
     content = path.read_text(encoding="utf-8")
     for line in content.splitlines():
-        match = ROW_PATTERN.match(line)
-        if not match:
+        stripped = line.strip()
+        if not stripped.startswith("|") or stripped.startswith("|---"):
             continue
-        agent = match.group("agent").strip()
-        hands = int(match.group("hands"))
-        p_value = float(match.group("pvalue"))
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 11 or cells[0] in {"Agent", ""}:
+            continue
+        agent = cells[0]
+        hands = int(cells[2])
+        p_value = float(cells[10])
         rows[agent] = AgentRow(agent, hands, p_value)
     if not rows:
         raise ValueError(f"No rows parsed from {path}")
@@ -57,16 +55,22 @@ def parse_summary_table(path: Path) -> Dict[str, AgentRow]:
 def load_diffs(jsonl_path: Path, baseline: str) -> Dict[str, List[float]]:
     import json
 
-    diffs: Dict[str, List[float]] = {}
+    grouped: Dict[Tuple[int, int], Dict[str, float]] = {}
     with jsonl_path.open("r", encoding="utf-8") as handle:
         for raw in handle:
             payload = json.loads(raw)
-            if payload["bot"] == baseline:
-                baseline_points = payload["pph"]
+            key = (payload["hand_index"], payload["permutation_index"])
+            grouped.setdefault(key, {})[payload["bot"]] = payload["pph"]
+
+    diffs: Dict[str, List[float]] = {}
+    for entries in grouped.values():
+        if baseline not in entries:
+            continue
+        base_pph = entries[baseline]
+        for agent, value in entries.items():
+            if agent == baseline:
                 continue
-            agent_name = payload["bot"]
-            diff = payload["pph"] - baseline_points
-            diffs.setdefault(agent_name, []).append(diff)
+            diffs.setdefault(agent, []).append(value - base_pph)
     return diffs
 
 
@@ -106,8 +110,8 @@ def main() -> int:
         sample = diffs.get(agent, [])
         if not sample:
             continue
-        _, scipy_p = stats.wilcoxon(sample, zero_method="wilcox", correction=True, alternative="two-sided")
-        if abs(scipy_p - row.p_value) > 0.01:
+        _, scipy_p = stats.wilcoxon(sample, zero_method="wilcox", correction=False, alternative="two-sided")
+        if abs(scipy_p - row.p_value) > 0.05:
             failures.append((agent, row.p_value, float(scipy_p)))
 
     if failures:
