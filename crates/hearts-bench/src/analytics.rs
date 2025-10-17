@@ -285,9 +285,13 @@ impl ComparisonAccumulator {
                 j += 1;
             }
             let rank = (i + j + 2) as f64 / 2.0;
-            for k in i..=j {
-                ranks.push((rank, paired[k].1));
-            }
+            ranks.extend(
+                paired
+                    .iter()
+                    .take(j + 1)
+                    .skip(i)
+                    .map(|(_, sign)| (rank, *sign)),
+            );
             if j > i {
                 tie_sizes.push(j - i + 1);
             }
@@ -325,7 +329,7 @@ impl ComparisonAccumulator {
         let z = ((w - mean_w).abs() - 0.5) / variance_w.sqrt();
         let normal = Normal::new(0.0, 1.0).unwrap();
         let p = 2.0 * (1.0 - normal.cdf(z));
-        (p.min(1.0).max(0.0), n)
+        (p.clamp(0.0, 1.0), n)
     }
 }
 
@@ -548,4 +552,38 @@ fn confidence_interval(points: &[f64]) -> (f64, f64) {
     let std_error = (variance / points.len() as f64).sqrt();
     let margin = CONFIDENCE_Z * std_error;
     (mean - margin, mean + margin)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wilcoxon_symmetric_data_returns_p_one() {
+        let mut acc = ComparisonAccumulator::new();
+        for diff in [2.0, -2.0, 3.5, -3.5, 4.25, -4.25] {
+            acc.record(diff);
+        }
+        let (p_value, sample_size) = acc.wilcoxon_signed_rank();
+        assert_eq!(sample_size, 6);
+        assert!(
+            (p_value - 1.0).abs() < 1e-9,
+            "expected p≈1.0 for perfectly symmetric data"
+        );
+    }
+
+    #[test]
+    fn confidence_interval_handles_degenerate_cases() {
+        let (low, high) = confidence_interval(&[]);
+        assert_eq!((low, high), (0.0, 0.0));
+
+        let (low, high) = confidence_interval(&[42.0]);
+        assert_eq!((low, high), (42.0, 42.0));
+
+        let (low, high) = confidence_interval(&[10.0, 20.0, 30.0, 40.0]);
+        let mean = 25.0;
+        let width = high - low;
+        assert!(mean - low > 0.0 && high - mean > 0.0);
+        assert!(width > 0.0);
+    }
 }

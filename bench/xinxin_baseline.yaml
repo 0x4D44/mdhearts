@@ -1,0 +1,35 @@
+run_id: "stage0_xinxin"
+deals:
+  seed: 20251016
+  hands: 128
+  permutations: 14
+agents:
+  - name: "baseline_normal"
+    kind: "heuristic"
+    params:
+      difficulty: "normal"
+  - name: "baseline_hard"
+    kind: "heuristic"
+    params:
+      difficulty: "hard"
+  - name: "xinxin_ext"
+    kind: "external"
+    params:
+      command: "./tools/xinxin_runner"
+      args: ["--mode", "auto"]
+      timeout_ms: 1500
+      fallback: "heuristic_normal"
+  - name: "baseline_easy"
+    kind: "heuristic"
+    params:
+      difficulty: "easy"
+outputs:
+  jsonl: "bench/out/{run_id}/deals.jsonl"
+  summary_md: "bench/out/{run_id}/summary.md"
+  plots_dir: "bench/out/{run_id}/plots"
+metrics:
+  baseline: "baseline_normal"
+  latency_budget_ms: 1200
+logging:
+  enable_structured: true
+  tracing_level: "info"

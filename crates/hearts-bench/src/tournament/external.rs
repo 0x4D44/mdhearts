@@ -3,6 +3,8 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use hearts_bot::bot::BotDifficulty;
+#[cfg(test)]
+use hearts_bot::bot::UnseenTracker;
 use hearts_bot::policy::{HeuristicPolicy, Policy, PolicyContext};
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
@@ -11,6 +13,10 @@ use hearts_core::model::rank::Rank;
 use hearts_core::model::round::RoundState;
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
+#[cfg(test)]
+use hearts_core::model::{hand::Hand as TestHand, passing::PassingDirection, round::RoundPhase};
+#[cfg(test)]
+use hearts_core::model::{passing::PassingState, round::RoundState as TestRoundState};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use thiserror::Error;
@@ -96,18 +102,18 @@ impl ExternalPolicy {
         }
 
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        if let Some(timeout) = self.options.timeout_ms {
-            if elapsed_ms > timeout as f64 {
-                event!(
-                    target: "hearts_bench::external",
-                    Level::WARN,
-                    agent = %self.name,
-                    action,
-                    elapsed_ms,
-                    timeout_ms = timeout,
-                    "external invocation exceeded timeout"
-                );
-            }
+        if let Some(timeout) = self.options.timeout_ms
+            && elapsed_ms > timeout as f64
+        {
+            event!(
+                target: "hearts_bench::external",
+                Level::WARN,
+                agent = %self.name,
+                action,
+                elapsed_ms,
+                timeout_ms = timeout,
+                "external invocation exceeded timeout"
+            );
         }
 
         let response: Response = serde_json::from_slice(&output.stdout)
@@ -141,6 +147,7 @@ impl ExternalPolicy {
 
     fn build_pass_request(ctx: &PolicyContext) -> PassRequest {
         PassRequest {
+            action: "pass",
             seat: seat_label(ctx.seat).to_string(),
             hand: map_cards(ctx.hand),
             scores: score_array(ctx.scores),
@@ -151,6 +158,7 @@ impl ExternalPolicy {
     fn build_play_request(ctx: &PolicyContext, legal_moves: &[Card]) -> PlayRequest {
         let current_trick = ctx.round.current_trick();
         PlayRequest {
+            action: "play",
             seat: seat_label(ctx.seat).to_string(),
             hand: map_cards(ctx.hand),
             scores: score_array(ctx.scores),
@@ -247,6 +255,7 @@ enum ExternalInvokeError {
 
 #[derive(Serialize)]
 struct PassRequest {
+    action: &'static str,
     seat: String,
     hand: Vec<String>,
     scores: [u32; 4],
@@ -260,6 +269,7 @@ struct PassResponse {
 
 #[derive(Serialize)]
 struct PlayRequest {
+    action: &'static str,
     seat: String,
     hand: Vec<String>,
     scores: [u32; 4],
@@ -366,4 +376,75 @@ fn compute_legal_moves(seat: PlayerPosition, hand: &Hand, round: &RoundState) ->
             probe.play_card(seat, *card).is_ok()
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::iter::FromIterator;
+
+    #[test]
+    fn fallback_invoked_when_command_missing() {
+        let params = serde_yaml::Mapping::from_iter([
+            (
+                serde_yaml::Value::String("command".into()),
+                serde_yaml::Value::String("__hearts_bench_missing__".into()),
+            ),
+            (
+                serde_yaml::Value::String("fallback".into()),
+                serde_yaml::Value::String("heuristic_easy".into()),
+            ),
+        ]);
+        let options = ExternalOptions::from_params(
+            "xinxin",
+            &serde_yaml::Value::Mapping(params),
+        )
+        .expect("parse options");
+        let mut policy = ExternalPolicy::new("xinxin".into(), options);
+
+        let mut hands: [TestHand; 4] = std::array::from_fn(|_| TestHand::new());
+        hands[PlayerPosition::North.index()] = TestHand::with_cards(vec![
+            Card::new(Rank::Two, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Clubs),
+            Card::new(Rank::Five, Suit::Diamonds),
+        ]);
+        let round = TestRoundState::from_hands(
+            hands,
+            PlayerPosition::North,
+            PassingDirection::Left,
+            RoundPhase::Passing(PassingState::new(PassingDirection::Left)),
+        );
+        let scores = ScoreBoard::new();
+        let tracker = UnseenTracker::new();
+        let ctx = PolicyContext {
+            seat: PlayerPosition::North,
+            hand: round.hand(PlayerPosition::North),
+            round: &round,
+            scores: &scores,
+            passing_direction: round.passing_direction(),
+            tracker: &tracker,
+        };
+        let pass = policy.choose_pass(&ctx);
+        assert_eq!(pass.len(), 3);
+
+        let play_round = TestRoundState::from_hands(
+            [ctx.hand.clone(), TestHand::new(), TestHand::new(), TestHand::new()],
+            PlayerPosition::North,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+        );
+        let play_scores = ScoreBoard::new();
+        let play_tracker = UnseenTracker::new();
+        let play_ctx = PolicyContext {
+            seat: PlayerPosition::North,
+            hand: play_round.hand(PlayerPosition::North),
+            round: &play_round,
+            scores: &play_scores,
+            passing_direction: play_round.passing_direction(),
+            tracker: &play_tracker,
+        };
+        let card = policy.choose_play(&play_ctx);
+        assert!(play_ctx.hand.contains(card));
+    }
 }

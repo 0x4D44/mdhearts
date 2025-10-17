@@ -1,11 +1,12 @@
 use super::{Policy, PolicyContext};
-use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner};
+use crate::bot::{BotContext, BotDifficulty, BotStyle, PassPlanner, PlayPlanner, determine_style};
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
 use hearts_core::model::round::RoundState;
 use hearts_core::model::suit::Suit;
+use tracing::{Level, event};
 
 /// Adapter that wraps existing PassPlanner/PlayPlanner to implement the Policy trait
 pub struct HeuristicPolicy {
@@ -47,10 +48,15 @@ impl Policy for HeuristicPolicy {
         // For EasyLegacy, just return first 3 cards
         if matches!(self.difficulty, BotDifficulty::EasyLegacy) && ctx.hand.len() >= 3 {
             let cards = ctx.hand.cards();
-            return [cards[0], cards[1], cards[2]];
+            let selection = [cards[0], cards[1], cards[2]];
+            log_pass_decision(ctx, self.difficulty, &selection, "easy_first_three");
+            return selection;
         }
 
-        PassPlanner::choose(ctx.hand, &bot_ctx).expect("PassPlanner returns valid pass")
+        let selection =
+            PassPlanner::choose(ctx.hand, &bot_ctx).expect("PassPlanner returns valid pass");
+        log_pass_decision(ctx, self.difficulty, &selection, "heuristic_pass");
+        selection
     }
 
     fn choose_play(&mut self, ctx: &PolicyContext) -> Card {
@@ -81,15 +87,34 @@ impl Policy for HeuristicPolicy {
 
         // For EasyLegacy, just return first legal card
         if matches!(self.difficulty, BotDifficulty::EasyLegacy) {
-            return legal_moves
+            let chosen = legal_moves
                 .first()
                 .copied()
                 .expect("At least one legal move exists");
+            log_play_decision(
+                ctx,
+                self.difficulty,
+                BotStyle::Cautious,
+                &legal_moves,
+                chosen,
+                "easy_first_legal",
+            );
+            return chosen;
         }
 
-        PlayPlanner::choose(&legal_moves, &bot_ctx)
+        let style = determine_style(&bot_ctx);
+        let chosen = PlayPlanner::choose(&legal_moves, &bot_ctx)
             .or_else(|| legal_moves.first().copied())
-            .expect("PlayPlanner returns valid card")
+            .expect("PlayPlanner returns valid card");
+        log_play_decision(
+            ctx,
+            self.difficulty,
+            style,
+            &legal_moves,
+            chosen,
+            "heuristic_play",
+        );
+        chosen
     }
 }
 
@@ -102,6 +127,72 @@ fn compute_legal_moves(seat: PlayerPosition, hand: &Hand, round: &RoundState) ->
             probe.play_card(seat, card).is_ok()
         })
         .collect()
+}
+
+fn log_pass_decision(
+    ctx: &PolicyContext,
+    difficulty: BotDifficulty,
+    selection: &[Card; 3],
+    reason: &str,
+) {
+    if !tracing::enabled!(Level::INFO) {
+        return;
+    }
+
+    let cards = selection
+        .iter()
+        .map(|card| format!("{:?}", card))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    event!(
+        target: "hearts_bot::pass",
+        Level::INFO,
+        seat = ?ctx.seat,
+        difficulty = ?difficulty,
+        hand_size = ctx.hand.len(),
+        unseen = ctx.tracker.unseen_count(),
+        reason,
+        cards = %cards
+    );
+}
+
+fn log_play_decision(
+    ctx: &PolicyContext,
+    difficulty: BotDifficulty,
+    style: BotStyle,
+    legal_moves: &[Card],
+    chosen: Card,
+    reason: &str,
+) {
+    if !tracing::enabled!(Level::INFO) {
+        return;
+    }
+
+    let choice = format!("{chosen:?}");
+    let legal_preview = if legal_moves.len() <= 6 {
+        legal_moves
+            .iter()
+            .map(|card| format!("{:?}", card))
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        format!("{} moves", legal_moves.len())
+    };
+
+    event!(
+        target: "hearts_bot::play",
+        Level::INFO,
+        seat = ?ctx.seat,
+        difficulty = ?difficulty,
+        style = ?style,
+        legal_count = legal_moves.len(),
+        legal_moves = %legal_preview,
+        chosen = %choice,
+        hearts_broken = ctx.round.hearts_broken(),
+        trick_cards = ctx.round.current_trick().plays().len(),
+        reason,
+    );
 }
 
 #[cfg(test)]

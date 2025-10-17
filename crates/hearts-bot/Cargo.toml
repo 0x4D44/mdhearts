@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 hearts-core = { path = "../hearts-core" }
+tracing = "0.1"

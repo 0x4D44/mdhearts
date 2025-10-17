@@ -136,10 +136,8 @@ impl TournamentRunner {
 }
 
 fn ensure_parent(path: Option<&Path>) -> Result<(), RunnerError> {
-    if let Some(dir) = path {
-        if !dir.as_os_str().is_empty() {
-            fs::create_dir_all(dir)?;
-        }
+    if let Some(dir) = path.filter(|dir| !dir.as_os_str().is_empty()) {
+        fs::create_dir_all(dir)?;
     }
     Ok(())
 }
@@ -373,30 +371,23 @@ fn seat_label(position: PlayerPosition) -> &'static str {
 }
 
 fn detect_moon_shooter(penalties: &[u8; 4]) -> Option<PlayerPosition> {
+    let zero_count = penalties.iter().filter(|&&v| v == 0).count();
+    let twenty_six_count = penalties.iter().filter(|&&v| v == 26).count();
+
     // Standard shoot-the-moon: shooter 0, others 26
-    if let Some((idx, _)) = penalties
-        .iter()
-        .enumerate()
-        .find(|(_, p)| **p == 0 && penalties.iter().filter(|&&v| v == 0).count() == 1)
+    if zero_count == 1
+        && twenty_six_count == 3
+        && let Some((idx, _)) = penalties.iter().enumerate().find(|(_, p)| **p == 0)
     {
-        if penalties.iter().filter(|&&p| p == 26).count() == 3 {
-            if let Some(pos) = PlayerPosition::from_index(idx) {
-                return Some(pos);
-            }
-        }
+        return PlayerPosition::from_index(idx);
     }
 
     // Alternative variant: shooter 26, others 0 (if penalties inverted)
-    if let Some((idx, _)) = penalties
-        .iter()
-        .enumerate()
-        .find(|(_, p)| **p == 26 && penalties.iter().filter(|&&v| v == 26).count() == 1)
+    if twenty_six_count == 1
+        && zero_count == 3
+        && let Some((idx, _)) = penalties.iter().enumerate().find(|(_, p)| **p == 26)
     {
-        if penalties.iter().filter(|&&p| p == 0).count() == 3 {
-            if let Some(pos) = PlayerPosition::from_index(idx) {
-                return Some(pos);
-            }
-        }
+        return PlayerPosition::from_index(idx);
     }
 
     None

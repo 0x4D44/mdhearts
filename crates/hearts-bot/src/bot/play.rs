@@ -190,10 +190,11 @@ fn base_score(
         score += (card.rank.value() as i32) * ctx.params.play_clean_trick_rank_mult;
     }
 
-    if let Some(lead) = lead_suit {
-        if card.suit != lead && !ctx.round.current_trick().plays().is_empty() {
-            score += 200;
-        }
+    if let Some(lead) = lead_suit
+        && card.suit != lead
+        && !ctx.round.current_trick().plays().is_empty()
+    {
+        score += 200;
     }
 
     match style {

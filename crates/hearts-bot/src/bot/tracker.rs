@@ -83,6 +83,12 @@ impl UnseenTracker {
     }
 }
 
+impl Default for UnseenTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn full_deck_cards() -> impl Iterator<Item = Card> {
     Suit::ALL.into_iter().flat_map(|suit| {
         Rank::ORDERED
