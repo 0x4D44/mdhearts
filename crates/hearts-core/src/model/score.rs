@@ -40,18 +40,20 @@ impl ScoreBoard {
 
     pub fn apply_hand(&mut self, penalties: [u8; 4]) {
         let total: u32 = penalties.iter().map(|&p| p as u32).sum();
-        if total == 26
-            && let Some(shooter) = PlayerPosition::LOOP
+        #[allow(clippy::collapsible_if)]
+        if total == 26 {
+            if let Some(shooter) = PlayerPosition::LOOP
                 .iter()
                 .copied()
                 .find(|seat| penalties[seat.index()] == 26)
-        {
-            for seat in PlayerPosition::LOOP.iter().copied() {
-                if seat != shooter {
-                    self.add_penalty(seat, 26);
+            {
+                for seat in PlayerPosition::LOOP.iter().copied() {
+                    if seat != shooter {
+                        self.add_penalty(seat, 26);
+                    }
                 }
+                return;
             }
-            return;
         }
 
         for seat in PlayerPosition::LOOP.iter().copied() {
