@@ -206,6 +206,10 @@ pub struct LoggingConfig {
     pub enable_structured: bool,
     #[serde(default = "default_tracing_level")]
     pub tracing_level: String,
+    #[serde(default)]
+    pub pass_details: bool,
+    #[serde(default)]
+    pub moon_details: bool,
 }
 
 impl Default for LoggingConfig {
@@ -213,6 +217,8 @@ impl Default for LoggingConfig {
         Self {
             enable_structured: false,
             tracing_level: default_tracing_level(),
+            pass_details: false,
+            moon_details: false,
         }
     }
 }

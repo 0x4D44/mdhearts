@@ -38,6 +38,14 @@ struct Cli {
     /// Exit after validating the configuration (no tournament is run).
     #[arg(long)]
     validate_only: bool,
+
+    /// Enable detailed pass telemetry regardless of config (forces MDH_PASS_DETAILS=1).
+    #[arg(long)]
+    log_pass_details: bool,
+
+    /// Enable moon objective telemetry regardless of config (forces MDH_MOON_DETAILS=1).
+    #[arg(long)]
+    log_moon_details: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -58,6 +66,14 @@ fn main() -> anyhow::Result<()> {
 
     if let Some(permutations) = cli.permutations {
         config.deals.permutations = permutations;
+    }
+
+    if cli.log_pass_details {
+        config.logging.pass_details = true;
+    }
+
+    if cli.log_moon_details {
+        config.logging.moon_details = true;
     }
 
     config.validate()?;
@@ -95,6 +111,30 @@ fn main() -> anyhow::Result<()> {
     }
     if let Some(telemetry_path) = summary.telemetry_path.as_ref() {
         println!("Telemetry log: {}", telemetry_path.display());
+    }
+    if let Some(outputs) = summary.telemetry_outputs.as_ref() {
+        println!("Telemetry summary (JSON): {}", outputs.json_path.display());
+        println!(
+            "Telemetry summary (Markdown): {}",
+            outputs.markdown_path.display()
+        );
+        if let Some(avg_margin) = outputs.summary.pass.avg_best_margin {
+            println!(
+                "  Pass decisions: {} events, avg best-vs-next margin {:.2}",
+                outputs.summary.pass.count, avg_margin
+            );
+        } else {
+            println!(
+                "  Pass decisions: {} events captured",
+                outputs.summary.pass.count
+            );
+        }
+        if !outputs.summary.play.objective_counts.is_empty() {
+            println!(
+                "  Play objectives: {:?}",
+                outputs.summary.play.objective_counts
+            );
+        }
     }
 
     Ok(())

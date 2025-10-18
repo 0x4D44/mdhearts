@@ -21,6 +21,14 @@ Additional references:
 - `MDH_BOT_DIFFICULTY` (`easy`, `normal`, `hard`): controls AI play style. `normal` enables the new heuristic planner; `easy` retains the legacy logic.
 - `MDH_DEBUG_LOGS=1`: emits detailed AI decision output to DebugView for diagnostics.
 
+## Testing
+- **Windows (MSVC toolchain)**: `cargo test --workspace`
+- **Non-Windows hosts (e.g., WSL/Linux)**: skip the Win32 launcher crate, which depends on COM marshalling support unavailable outside Windows:
+  ```bash
+  cargo test --workspace --exclude hearts-app
+  ```
+  All core logic (rules engine, telemetry, bots, benchmarks) continues to compile and run cross-platform.
+
 
 ## Release Notes
 ### 1.0.1

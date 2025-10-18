@@ -1,0 +1,22 @@
+| Run | Hand | Perm | Seat | Probability | Total Score | Moon Shooter | Variant | Seat Points |
+| --- | ---: | ---: | --- | --- | --- | --- | --- | ---: |
+| pass_v045_directional | 32 | 2 | west | 0.680 | 55.5 | east | inverted | 0 |
+| pass_v045_directional | 140 | 0 | west | 0.763 | 54.4 | west | inverted | 26 |
+| pass_v045_directional | 140 | 1 | west | 0.763 | 54.4 | west | inverted | 26 |
+| pass_v045_directional | 216 | 2 | west | 0.693 | 49.7 | west | inverted | 26 |
+| pass_v045_directional | 380 | 0 | south | 0.693 | 48.3 | south | inverted | 26 |
+| pass_v045_directional | 380 | 1 | south | 0.693 | 48.3 | south | inverted | 26 |
+| pass_v045_directional | 448 | 0 | north | 0.693 | 53.1 | north | inverted | 26 |
+| pass_v045_directional | 448 | 1 | north | 0.693 | 53.1 | north | inverted | 26 |
+| pass_v045_directional | 459 | 2 | north | 0.640 | 56.3 | north | inverted | 26 |
+| pass_v045_directional | 499 | 2 | west | 0.730 | 51.7 | north | inverted | 0 |
+| pass_v045_directional | 526 | 2 | north | 0.640 | 50.0 | west | inverted | 0 |
+| pass_v045_directional | 551 | 2 | west | 0.794 | 64.8 | west | inverted | 26 |
+| pass_v045_directional | 681 | 3 | north | 0.730 | 45.1 | north | inverted | 26 |
+| pass_v045_directional | 738 | 2 | east | 0.640 | 57.0 | east | inverted | 26 |
+| pass_v045_directional | 761 | 2 | west | 0.763 | 43.4 | west | inverted | 26 |
+| pass_v045_directional | 765 | 3 | south | 0.680 | 45.4 | south | inverted | 26 |
+| pass_v045_directional | 767 | 0 | north | 0.640 | 51.8 | south | inverted | 0 |
+| pass_v045_directional | 767 | 1 | north | 0.640 | 51.8 | south | inverted | 0 |
+| pass_v045_directional | 890 | 0 | west | 0.640 | 65.0 | west | inverted | 26 |
+| pass_v045_directional | 890 | 1 | west | 0.640 | 65.0 | west | inverted | 26 |

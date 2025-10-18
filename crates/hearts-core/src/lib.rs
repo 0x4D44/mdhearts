@@ -1,6 +1,9 @@
 #![deny(warnings)]
+pub mod belief;
 pub mod game;
 pub mod model;
+pub mod moon;
+pub mod pass;
 
 pub struct AppInfo;
 

@@ -4,6 +4,8 @@ use std::time::Instant;
 
 use hearts_bot::bot::BotDifficulty;
 #[cfg(test)]
+use hearts_bot::bot::BotFeatures;
+#[cfg(test)]
 use hearts_bot::bot::UnseenTracker;
 use hearts_bot::policy::{HeuristicPolicy, Policy, PolicyContext};
 use hearts_core::model::card::Card;
@@ -395,11 +397,8 @@ mod tests {
                 serde_yaml::Value::String("heuristic_easy".into()),
             ),
         ]);
-        let options = ExternalOptions::from_params(
-            "xinxin",
-            &serde_yaml::Value::Mapping(params),
-        )
-        .expect("parse options");
+        let options = ExternalOptions::from_params("xinxin", &serde_yaml::Value::Mapping(params))
+            .expect("parse options");
         let mut policy = ExternalPolicy::new("xinxin".into(), options);
 
         let mut hands: [TestHand; 4] = std::array::from_fn(|_| TestHand::new());
@@ -424,12 +423,19 @@ mod tests {
             scores: &scores,
             passing_direction: round.passing_direction(),
             tracker: &tracker,
+            belief: None,
+            features: BotFeatures::default(),
         };
         let pass = policy.choose_pass(&ctx);
         assert_eq!(pass.len(), 3);
 
         let play_round = TestRoundState::from_hands(
-            [ctx.hand.clone(), TestHand::new(), TestHand::new(), TestHand::new()],
+            [
+                ctx.hand.clone(),
+                TestHand::new(),
+                TestHand::new(),
+                TestHand::new(),
+            ],
             PlayerPosition::North,
             PassingDirection::Hold,
             RoundPhase::Playing,
@@ -443,6 +449,8 @@ mod tests {
             scores: &play_scores,
             passing_direction: play_round.passing_direction(),
             tracker: &play_tracker,
+            belief: None,
+            features: BotFeatures::default(),
         };
         let card = policy.choose_play(&play_ctx);
         assert!(play_ctx.hand.contains(card));

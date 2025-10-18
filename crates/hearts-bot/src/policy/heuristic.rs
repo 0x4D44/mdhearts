@@ -1,5 +1,8 @@
 use super::{Policy, PolicyContext};
-use crate::bot::{BotContext, BotDifficulty, BotStyle, PassPlanner, PlayPlanner, determine_style};
+use crate::bot::{
+    BeliefView, BotContext, BotDifficulty, BotFeatures, BotStyle, Objective, PassPlanner,
+    PlayPlanner, determine_style,
+};
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::player::PlayerPosition;
@@ -35,12 +38,16 @@ impl HeuristicPolicy {
 impl Policy for HeuristicPolicy {
     fn choose_pass(&mut self, ctx: &PolicyContext) -> [Card; 3] {
         let params = crate::bot::BotParams::default();
+        let features = ctx.features;
+        let belief_view = belief_view_from_ctx(ctx, features);
         let bot_ctx = BotContext::new(
             ctx.seat,
             ctx.round,
             ctx.scores,
             ctx.passing_direction,
             ctx.tracker,
+            belief_view,
+            features,
             self.difficulty,
             &params,
         );
@@ -61,18 +68,45 @@ impl Policy for HeuristicPolicy {
 
     fn choose_play(&mut self, ctx: &PolicyContext) -> Card {
         let params = crate::bot::BotParams::default();
+        let features = ctx.features;
+        let belief_view = belief_view_from_ctx(ctx, features);
         let bot_ctx = BotContext::new(
             ctx.seat,
             ctx.round,
             ctx.scores,
             ctx.passing_direction,
             ctx.tracker,
+            belief_view,
+            features,
             self.difficulty,
             &params,
         );
 
         // Compute legal moves
         let legal_moves = compute_legal_moves(ctx.seat, ctx.hand, ctx.round);
+        let objective = bot_ctx.objective_hint();
+        if legal_moves.is_empty() {
+            if let Some(card) = ctx
+                .round
+                .hand(ctx.seat)
+                .iter()
+                .copied()
+                .next()
+                .or_else(|| ctx.hand.iter().copied().next())
+            {
+                log_play_decision(
+                    ctx,
+                    self.difficulty,
+                    BotStyle::Cautious,
+                    objective,
+                    &[],
+                    card,
+                    "fallback_empty_legal",
+                );
+                return card;
+            }
+            panic!("heuristic policy expected at least one legal card");
+        }
 
         // Check if this is the first trick and we're the leader
         let enforce_two =
@@ -95,6 +129,7 @@ impl Policy for HeuristicPolicy {
                 ctx,
                 self.difficulty,
                 BotStyle::Cautious,
+                objective,
                 &legal_moves,
                 chosen,
                 "easy_first_legal",
@@ -110,12 +145,24 @@ impl Policy for HeuristicPolicy {
             ctx,
             self.difficulty,
             style,
+            objective,
             &legal_moves,
             chosen,
             "heuristic_play",
         );
         chosen
     }
+}
+
+fn belief_view_from_ctx<'a>(
+    ctx: &PolicyContext<'a>,
+    features: BotFeatures,
+) -> Option<BeliefView<'a>> {
+    if !features.belief_enabled() {
+        return None;
+    }
+    ctx.belief
+        .map(|belief| BeliefView::new(belief, features.void_threshold()))
 }
 
 /// Compute legal moves for a given hand and round state
@@ -139,6 +186,10 @@ fn log_pass_decision(
         return;
     }
 
+    if !moon_logging_enabled() {
+        return;
+    }
+
     let cards = selection
         .iter()
         .map(|card| format!("{:?}", card))
@@ -157,10 +208,17 @@ fn log_pass_decision(
     );
 }
 
+fn moon_logging_enabled() -> bool {
+    std::env::var("MDH_MOON_DETAILS")
+        .map(|raw| matches!(raw.trim(), "1" | "true" | "TRUE" | "on" | "ON"))
+        .unwrap_or(false)
+}
+
 fn log_play_decision(
     ctx: &PolicyContext,
     difficulty: BotDifficulty,
     style: BotStyle,
+    objective: Objective,
     legal_moves: &[Card],
     chosen: Card,
     reason: &str,
@@ -186,6 +244,7 @@ fn log_play_decision(
         seat = ?ctx.seat,
         difficulty = ?difficulty,
         style = ?style,
+        objective = ?objective,
         legal_count = legal_moves.len(),
         legal_moves = %legal_preview,
         chosen = %choice,
@@ -246,6 +305,8 @@ mod tests {
             scores: &scores,
             passing_direction: PassingDirection::Left,
             tracker: &tracker,
+            belief: None,
+            features: BotFeatures::default(),
         };
 
         let mut policy = HeuristicPolicy::easy();
@@ -277,6 +338,8 @@ mod tests {
             scores: &scores,
             passing_direction: PassingDirection::Left,
             tracker: &tracker,
+            belief: None,
+            features: BotFeatures::default(),
         };
 
         let mut policy = HeuristicPolicy::normal();
@@ -286,5 +349,24 @@ mod tests {
         assert!(result.contains(&Card::new(Rank::Ace, Suit::Hearts)));
         assert!(result.contains(&Card::new(Rank::King, Suit::Hearts)));
         assert!(result.contains(&Card::new(Rank::Queen, Suit::Spades)));
+    }
+
+    #[test]
+    fn moon_logging_disabled_without_env() {
+        unsafe {
+            std::env::remove_var("MDH_MOON_DETAILS");
+        }
+        assert!(!super::moon_logging_enabled());
+    }
+
+    #[test]
+    fn moon_logging_enabled_with_env_flag() {
+        unsafe {
+            std::env::set_var("MDH_MOON_DETAILS", "on");
+        }
+        assert!(super::moon_logging_enabled());
+        unsafe {
+            std::env::remove_var("MDH_MOON_DETAILS");
+        }
     }
 }

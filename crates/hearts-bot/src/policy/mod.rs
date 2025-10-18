@@ -2,7 +2,8 @@ mod heuristic;
 
 pub use heuristic::HeuristicPolicy;
 
-use crate::bot::UnseenTracker;
+use crate::bot::{BotFeatures, UnseenTracker};
+use hearts_core::belief::Belief;
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::passing::PassingDirection;
@@ -18,6 +19,8 @@ pub struct PolicyContext<'a> {
     pub scores: &'a ScoreBoard,
     pub passing_direction: PassingDirection,
     pub tracker: &'a UnseenTracker,
+    pub belief: Option<&'a Belief>,
+    pub features: BotFeatures,
 }
 
 /// Unified interface for AI decision-making (heuristic and learned policies)

@@ -1,6 +1,7 @@
-use crate::bot::UnseenTracker;
+use crate::bot::{BotFeatures, UnseenTracker};
 use crate::policy::PolicyContext;
 use crate::rl::observation::{Observation, ObservationBuilder};
+use hearts_core::belief::Belief;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::passing::PassingDirection;
@@ -41,6 +42,7 @@ pub struct HeartsEnv {
     config: EnvConfig,
     obs_builder: ObservationBuilder,
     tracker: UnseenTracker,
+    bot_features: BotFeatures,
 }
 
 /// Single step result
@@ -83,6 +85,7 @@ impl HeartsEnv {
         let match_state = MatchState::with_seed(PlayerPosition::South, seed);
         let mut tracker = UnseenTracker::new();
         tracker.reset_for_round(match_state.round());
+        let bot_features = BotFeatures::from_env();
 
         Self {
             match_state,
@@ -91,6 +94,7 @@ impl HeartsEnv {
             config,
             obs_builder: ObservationBuilder::new(),
             tracker,
+            bot_features,
         }
     }
 
@@ -264,13 +268,25 @@ impl HeartsEnv {
     }
 
     fn build_observation(&self) -> Observation {
+        let round = self.match_state.round();
+        let hand = round.hand(self.current_seat);
+        let mut belief_holder: Option<Belief> = None;
+        let belief_ref = if self.bot_features.belief_enabled() {
+            belief_holder = Some(Belief::from_state(round, self.current_seat));
+            belief_holder.as_ref()
+        } else {
+            None
+        };
+
         let ctx = PolicyContext {
             seat: self.current_seat,
-            hand: self.match_state.round().hand(self.current_seat),
-            round: self.match_state.round(),
+            hand,
+            round,
             scores: self.match_state.scores(),
             passing_direction: self.match_state.passing_direction(),
             tracker: &self.tracker,
+            belief: belief_ref,
+            features: self.bot_features,
         };
 
         self.obs_builder.build(&ctx)

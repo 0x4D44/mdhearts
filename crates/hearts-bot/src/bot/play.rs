@@ -1,10 +1,12 @@
 use super::{
-    BotContext, BotStyle, card_sort_key, count_cards_in_suit, determine_style, snapshot_scores,
+    BotContext, BotStyle, Objective, card_sort_key, count_cards_in_suit, determine_style,
+    snapshot_scores,
 };
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::{PlayOutcome, RoundState};
 use hearts_core::model::suit::Suit;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 pub struct PlayPlanner;
@@ -18,13 +20,28 @@ impl PlayPlanner {
         let style = determine_style(ctx);
         let snapshot = snapshot_scores(ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
+        let objective = ctx.objective_hint();
+        let mut candidates: Cow<'_, [Card]> = Cow::Borrowed(legal);
+        if ctx.round.is_first_trick() && lead_suit == Some(Suit::Clubs) {
+            let only_hearts = ctx.hand().iter().all(|card| card.suit.is_heart());
+            if !only_hearts {
+                let filtered: Vec<Card> = candidates
+                    .iter()
+                    .copied()
+                    .filter(|card| !card.is_queen_of_spades() && !card.suit.is_heart())
+                    .collect();
+                if !filtered.is_empty() {
+                    candidates = Cow::Owned(filtered);
+                }
+            }
+        }
 
         // Compute void inference - use the tracker's knowledge!
-        let voids = ctx.tracker.infer_voids(ctx.seat, ctx.round);
+        let voids = ctx.void_matrix();
 
         let mut best: Option<(Card, i32)> = None;
 
-        for &card in legal {
+        for &card in candidates.as_ref() {
             let (winner, penalties) = simulate_trick(card, ctx, style, &voids);
             let will_capture = winner == ctx.seat;
             let mut score = base_score(
@@ -36,6 +53,7 @@ impl PlayPlanner {
                 lead_suit,
                 style,
                 &snapshot,
+                objective,
             );
 
             // Void creation bonus.
@@ -106,9 +124,10 @@ impl PlayPlanner {
 pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> i32 {
     let snapshot = snapshot_scores(ctx.scores);
     let lead_suit = ctx.round.current_trick().lead_suit();
-    let voids = ctx.tracker.infer_voids(ctx.seat, ctx.round);
+    let voids = ctx.void_matrix();
     let (winner, penalties) = simulate_trick(card, ctx, style, &voids);
     let will_capture = winner == ctx.seat;
+    let objective = ctx.objective_hint();
     let mut score = base_score(
         ctx,
         card,
@@ -118,6 +137,7 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
         lead_suit,
         style,
         &snapshot,
+        objective,
     );
 
     let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
@@ -173,6 +193,7 @@ fn base_score(
     lead_suit: Option<Suit>,
     style: BotStyle,
     snapshot: &super::ScoreSnapshot,
+    objective: Objective,
 ) -> i32 {
     let penalties_i32 = penalties as i32;
     let mut score: i32 = 0;
@@ -215,6 +236,28 @@ fn base_score(
             }
         }
         BotStyle::Cautious => {}
+    }
+
+    if matches!(objective, Objective::BlockShooter) {
+        if will_capture {
+            score += 5500;
+            score += penalties_i32 * 1400;
+            if let Some(lead) = lead_suit {
+                if lead == Suit::Hearts {
+                    score += 1500;
+                }
+            } else if card.suit == Suit::Hearts {
+                score += 1200;
+            }
+            if card.is_queen_of_spades() {
+                score += 2000;
+            }
+        } else {
+            score -= 2800;
+            if penalties > 0 {
+                score -= 2500;
+            }
+        }
     }
 
     score
@@ -264,6 +307,12 @@ fn choose_followup_card(
     voids: &[[bool; 4]; 4],
 ) -> Card {
     let legal = legal_moves_for(round, seat);
+    if legal.is_empty() {
+        if let Some(card) = round.hand(seat).iter().copied().next() {
+            return card;
+        }
+        panic!("simulation expected at least one legal card");
+    }
     let lead_suit = round.current_trick().lead_suit();
 
     if let Some(lead) = lead_suit {
@@ -315,6 +364,7 @@ fn compare_penalty_dump(a: Card, b: Card) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BotFeatures;
     use crate::bot::tracker::UnseenTracker;
     use crate::bot::{BotContext, BotDifficulty, BotParams};
     use hearts_core::model::card::Card;
@@ -325,6 +375,7 @@ mod tests {
     use hearts_core::model::round::{RoundPhase, RoundState};
     use hearts_core::model::score::ScoreBoard;
     use hearts_core::model::suit::Suit;
+    use hearts_core::moon::MoonEstimate;
 
     fn build_round(
         starting: PlayerPosition,
@@ -387,9 +438,223 @@ mod tests {
             scores,
             PassingDirection::Hold,
             tracker,
+            None,
+            BotFeatures::default(),
             difficulty,
             params,
         )
+    }
+
+    fn block_objective_hand() -> Vec<Card> {
+        vec![
+            Card::new(Rank::Ace, Suit::Hearts),
+            Card::new(Rank::King, Suit::Hearts),
+            Card::new(Rank::Queen, Suit::Hearts),
+            Card::new(Rank::Jack, Suit::Hearts),
+            Card::new(Rank::Ten, Suit::Hearts),
+            Card::new(Rank::Nine, Suit::Hearts),
+            Card::new(Rank::Eight, Suit::Hearts),
+            Card::new(Rank::Seven, Suit::Hearts),
+            Card::new(Rank::Six, Suit::Hearts),
+            Card::new(Rank::Five, Suit::Hearts),
+            Card::new(Rank::Four, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Clubs),
+            Card::new(Rank::Two, Suit::Clubs),
+        ]
+    }
+
+    fn cautious_objective_hand() -> Vec<Card> {
+        vec![
+            Card::new(Rank::Queen, Suit::Hearts),
+            Card::new(Rank::Seven, Suit::Hearts),
+            Card::new(Rank::Ace, Suit::Clubs),
+            Card::new(Rank::King, Suit::Clubs),
+            Card::new(Rank::Jack, Suit::Clubs),
+            Card::new(Rank::Ten, Suit::Clubs),
+            Card::new(Rank::Nine, Suit::Spades),
+            Card::new(Rank::Eight, Suit::Diamonds),
+            Card::new(Rank::Six, Suit::Clubs),
+            Card::new(Rank::Five, Suit::Diamonds),
+            Card::new(Rank::Four, Suit::Spades),
+            Card::new(Rank::Three, Suit::Clubs),
+            Card::new(Rank::Two, Suit::Clubs),
+        ]
+    }
+
+    #[test]
+    fn block_objective_increases_capture_score() {
+        let seat = PlayerPosition::South;
+        let heart = Card::new(Rank::Queen, Suit::Hearts);
+
+        let mut params = BotParams::default();
+        params.play_take_trick_penalty = -600;
+        params.play_take_points_mult = -80;
+        params.play_avoid_trick_reward = 0;
+        params.play_dump_points_mult = 0;
+        params.play_void_creation_bonus = 0;
+        params.play_break_hearts_penalty = 0;
+        params.play_lead_rank_mult = 0;
+
+        let round_block = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Two, Suit::Spades)],
+                vec![Card::new(Rank::Three, Suit::Diamonds)],
+                block_objective_hand(),
+                vec![Card::new(Rank::Four, Suit::Clubs)],
+            ],
+            &[],
+            false,
+        );
+        let scores_block = build_scores([20, 18, 21, 25]);
+        let mut tracker_block = UnseenTracker::new();
+        tracker_block.reset_for_round(&round_block);
+        let mut ctx_block = make_ctx(
+            seat,
+            &round_block,
+            &scores_block,
+            &tracker_block,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        ctx_block.moon_estimate = MoonEstimate {
+            probability: 0.85,
+            raw_score: 2.4,
+            objective: Objective::BlockShooter,
+        };
+
+        let round_cautious = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Five, Suit::Spades)],
+                vec![Card::new(Rank::Six, Suit::Diamonds)],
+                cautious_objective_hand(),
+                vec![Card::new(Rank::Seven, Suit::Clubs)],
+            ],
+            &[],
+            false,
+        );
+        let scores_cautious = build_scores([12, 14, 10, 16]);
+        let mut tracker_cautious = UnseenTracker::new();
+        tracker_cautious.reset_for_round(&round_cautious);
+        let mut ctx_cautious = make_ctx(
+            seat,
+            &round_cautious,
+            &scores_cautious,
+            &tracker_cautious,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        ctx_cautious.moon_estimate = MoonEstimate {
+            probability: 0.1,
+            raw_score: -1.0,
+            objective: Objective::MyPointsPerHand,
+        };
+
+        let score_block = super::score_candidate_for_tests(heart, &ctx_block, BotStyle::Cautious);
+        let score_cautious =
+            super::score_candidate_for_tests(heart, &ctx_cautious, BotStyle::Cautious);
+
+        assert!(
+            score_block > score_cautious,
+            "expected block objective ({score_block}) to outscore cautious objective ({score_cautious}) for capturing heart"
+        );
+    }
+
+    #[test]
+    fn block_objective_prefers_capturing_move() {
+        let seat = PlayerPosition::South;
+        let heart = Card::new(Rank::Queen, Suit::Hearts);
+        let dump = Card::new(Rank::Two, Suit::Clubs);
+
+        let mut params = BotParams::default();
+        params.play_take_trick_penalty = -600;
+        params.play_take_points_mult = -80;
+        params.play_avoid_trick_reward = 0;
+        params.play_dump_points_mult = 0;
+        params.play_void_creation_bonus = 0;
+        params.play_break_hearts_penalty = 0;
+        params.play_lead_rank_mult = 0;
+
+        let round_block = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Ten, Suit::Spades)],
+                vec![Card::new(Rank::Three, Suit::Diamonds)],
+                block_objective_hand(),
+                vec![Card::new(Rank::Four, Suit::Clubs)],
+            ],
+            &[],
+            false,
+        );
+        let scores_block = build_scores([18, 19, 23, 24]);
+        let mut tracker_block = UnseenTracker::new();
+        tracker_block.reset_for_round(&round_block);
+        let mut ctx_block = make_ctx(
+            seat,
+            &round_block,
+            &scores_block,
+            &tracker_block,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        ctx_block.moon_estimate = MoonEstimate {
+            probability: 0.85,
+            raw_score: 2.4,
+            objective: Objective::BlockShooter,
+        };
+
+        let legal = vec![heart, dump];
+        let heart_score = super::score_candidate_for_tests(heart, &ctx_block, BotStyle::Cautious);
+        let dump_score = super::score_candidate_for_tests(dump, &ctx_block, BotStyle::Cautious);
+        assert!(
+            heart_score > dump_score,
+            "block objective scoring heart={} dump={}",
+            heart_score,
+            dump_score
+        );
+
+        let chosen_block = PlayPlanner::choose(&legal, &ctx_block).unwrap();
+        assert_eq!(
+            chosen_block, heart,
+            "block shooter objective should choose to capture with {:?}",
+            heart
+        );
+
+        let round_cautious = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Four, Suit::Spades)],
+                vec![Card::new(Rank::Five, Suit::Diamonds)],
+                cautious_objective_hand(),
+                vec![Card::new(Rank::Six, Suit::Clubs)],
+            ],
+            &[],
+            false,
+        );
+        let scores_cautious = build_scores([10, 12, 8, 16]);
+        let mut tracker_cautious = UnseenTracker::new();
+        tracker_cautious.reset_for_round(&round_cautious);
+        let mut ctx_cautious = make_ctx(
+            seat,
+            &round_cautious,
+            &scores_cautious,
+            &tracker_cautious,
+            BotDifficulty::NormalHeuristic,
+            &params,
+        );
+        ctx_cautious.moon_estimate = MoonEstimate {
+            probability: 0.05,
+            raw_score: -1.5,
+            objective: Objective::MyPointsPerHand,
+        };
+
+        let chosen_cautious = PlayPlanner::choose(&legal, &ctx_cautious).unwrap();
+        assert_eq!(
+            chosen_cautious, dump,
+            "points objective should prefer dumping {:?}",
+            dump
+        );
     }
 
     #[test]

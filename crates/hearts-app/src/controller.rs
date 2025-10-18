@@ -1,9 +1,14 @@
-use crate::bot::{BotDifficulty, UnseenTracker};
+use crate::bot::{BotDifficulty, BotFeatures, UnseenTracker};
 use crate::policy::{EmbeddedPolicy, HeuristicPolicy, Policy, PolicyContext};
+use hearts_core::belief::soft::SoftLikelihoodModel;
+use hearts_core::belief::telemetry::BeliefMetrics;
+use hearts_core::belief::{Belief, BeliefUpdateCtx};
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase};
+use hearts_core::model::suit::Suit;
+use tracing::{Level, event};
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 use windows::core::PCWSTR;
 
@@ -35,8 +40,11 @@ pub struct GameController {
     last_trick: Option<TrickSummary>,
     ai_mode: AiMode,
     bot_difficulty: BotDifficulty, // Still used when ai_mode is Heuristic
+    bot_features: BotFeatures,
     bc_policy: Option<EmbeddedPolicy>,
     unseen_tracker: UnseenTracker,
+    soft_model: SoftLikelihoodModel,
+    beliefs: Option<[Belief; 4]>,
 }
 
 impl GameController {
@@ -60,6 +68,106 @@ impl GameController {
             OutputDebugStringW(PCWSTR(wide.as_ptr()));
         }
     }
+
+    fn init_beliefs(round: &hearts_core::model::round::RoundState) -> [Belief; 4] {
+        PlayerPosition::LOOP.map(|seat| Belief::from_state(round, seat))
+    }
+
+    fn rebuild_beliefs_if_enabled(&mut self) {
+        if self.bot_features.belief_enabled() {
+            self.beliefs = Some(Self::init_beliefs(self.match_state.round()));
+            self.log_belief_state("rebuild");
+        } else {
+            self.beliefs = None;
+        }
+    }
+
+    fn update_beliefs_after_play(
+        &mut self,
+        seat: PlayerPosition,
+        card: Card,
+        ctx: BeliefUpdateCtx,
+    ) {
+        if let Some(beliefs) = self.beliefs.as_mut() {
+            for belief in beliefs.iter_mut() {
+                belief.on_card_played_with_soft(seat, card, &ctx, Some(&self.soft_model));
+            }
+            let metrics = BeliefMetrics::from_belief(&beliefs[seat.index()]);
+            self.emit_belief_event(seat, Some(card), &metrics, "play_update");
+        }
+    }
+
+    fn emit_belief_event(
+        &self,
+        seat: PlayerPosition,
+        card: Option<Card>,
+        metrics: &BeliefMetrics,
+        reason: &str,
+    ) {
+        if !tracing::enabled!(Level::DEBUG) {
+            return;
+        }
+
+        let suit_entropy = metrics.entropy_per_suit[seat.index()];
+
+        match card {
+            Some(card) => event!(
+                target: "mdhearts::belief",
+                Level::DEBUG,
+                reason,
+                trick_index = metrics.trick_index,
+                seat = ?seat,
+                card = %card,
+                entropy_total = metrics.entropy_per_seat[seat.index()],
+                entropy_clubs = suit_entropy[Suit::Clubs as usize],
+                entropy_diamonds = suit_entropy[Suit::Diamonds as usize],
+                entropy_spades = suit_entropy[Suit::Spades as usize],
+                entropy_hearts = suit_entropy[Suit::Hearts as usize]
+            ),
+            None => event!(
+                target: "mdhearts::belief",
+                Level::DEBUG,
+                reason,
+                trick_index = metrics.trick_index,
+                seat = ?seat,
+                card = "init",
+                entropy_total = metrics.entropy_per_seat[seat.index()],
+                entropy_clubs = suit_entropy[Suit::Clubs as usize],
+                entropy_diamonds = suit_entropy[Suit::Diamonds as usize],
+                entropy_spades = suit_entropy[Suit::Spades as usize],
+                entropy_hearts = suit_entropy[Suit::Hearts as usize]
+            ),
+        }
+    }
+
+    fn log_belief_state(&self, reason: &str) {
+        if let Some(beliefs) = &self.beliefs {
+            for seat in PlayerPosition::LOOP {
+                let metrics = BeliefMetrics::from_belief(&beliefs[seat.index()]);
+                self.emit_belief_event(seat, None, &metrics, reason);
+            }
+        }
+    }
+
+    fn policy_context<'a>(
+        &'a self,
+        seat: PlayerPosition,
+        hand: &'a hearts_core::model::hand::Hand,
+        tracker: &'a UnseenTracker,
+    ) -> PolicyContext<'a> {
+        let belief_ref = self.beliefs.as_ref().map(|beliefs| &beliefs[seat.index()]);
+
+        PolicyContext {
+            seat,
+            hand,
+            round: self.match_state.round(),
+            scores: self.match_state.scores(),
+            passing_direction: self.match_state.passing_direction(),
+            tracker,
+            belief: belief_ref,
+            features: self.bot_features,
+        }
+    }
     pub fn new_with_seed(seed: Option<u64>, starting: PlayerPosition) -> Self {
         Self::new_with_seed_and_mode(seed, starting, AiMode::from_env())
     }
@@ -77,11 +185,19 @@ impl GameController {
 
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
+        let soft_model = SoftLikelihoodModel::default();
 
         // Extract bot_difficulty for backwards compat
         let bot_difficulty = match ai_mode {
             AiMode::Heuristic(diff) => diff,
             AiMode::BehavioralCloning => BotDifficulty::FutureHard, // Fallback if BC fails
+        };
+
+        let bot_features = BotFeatures::from_env();
+        let beliefs = if bot_features.belief_enabled() {
+            Some(Self::init_beliefs(match_state.round()))
+        } else {
+            None
         };
 
         // Load BC policy if in BC mode
@@ -91,14 +207,20 @@ impl GameController {
             None
         };
 
-        Self {
+        let mut controller = Self {
             match_state,
             last_trick: None,
             ai_mode,
             bot_difficulty,
+            bot_features,
             bc_policy,
             unseen_tracker,
-        }
+            soft_model,
+            beliefs,
+        };
+
+        controller.log_belief_state("init");
+        controller
     }
 
     /// Load embedded BC policy weights
@@ -130,8 +252,10 @@ impl GameController {
     fn configure_for_test(&mut self) {
         self.bot_difficulty = BotDifficulty::NormalHeuristic;
         self.ai_mode = AiMode::Heuristic(BotDifficulty::NormalHeuristic);
+        self.bot_features = BotFeatures::default();
         self.unseen_tracker
             .reset_for_round(self.match_state.round());
+        self.rebuild_beliefs_if_enabled();
     }
     pub fn status_text(&self) -> String {
         let round = self.match_state.round();
@@ -168,6 +292,14 @@ impl GameController {
                 .map(|p| (p.position, p.card))
                 .collect()
         };
+        let (trick_index, lead_suit) = {
+            let round = self.match_state.round();
+            (
+                round.tricks_completed() as u8,
+                round.current_trick().lead_suit(),
+            )
+        };
+        let update_ctx = BeliefUpdateCtx::new(trick_index, lead_suit);
         let out = {
             let round = self.match_state.round_mut();
             round.play_card(seat, card)
@@ -176,6 +308,7 @@ impl GameController {
         let out = match out {
             Ok(value) => {
                 self.unseen_tracker.note_card_played(seat, card);
+                self.update_beliefs_after_play(seat, card, update_ctx);
                 value
             }
             Err(err) => return Err(err),
@@ -205,12 +338,19 @@ impl GameController {
         let result = self.match_state.round_mut().submit_pass(seat, cards);
         if result.is_ok() {
             self.unseen_tracker.note_pass_selection(seat, &cards);
+            self.rebuild_beliefs_if_enabled();
         }
         result
     }
 
     pub fn resolve_passes(&mut self) -> Result<(), hearts_core::model::passing::PassingError> {
-        self.match_state.round_mut().resolve_passes()
+        let result = self.match_state.round_mut().resolve_passes();
+        if result.is_ok() {
+            self.unseen_tracker
+                .reset_for_round(self.match_state.round());
+            self.rebuild_beliefs_if_enabled();
+        }
+        result
     }
 
     pub fn standings(&self) -> [u32; 4] {
@@ -254,6 +394,14 @@ impl GameController {
             .unwrap_or(trick.leader())
     }
 
+    pub fn bot_features(&self) -> BotFeatures {
+        self.bot_features
+    }
+
+    pub fn has_beliefs(&self) -> bool {
+        self.beliefs.is_some()
+    }
+
     pub fn take_last_trick_summary(&mut self) -> Option<TrickSummary> {
         self.last_trick.take()
     }
@@ -278,14 +426,7 @@ impl GameController {
 
         // Create policy context
         let hand = self.match_state.round().hand(seat);
-        let ctx = PolicyContext {
-            seat,
-            hand,
-            round: self.match_state.round(),
-            scores: self.match_state.scores(),
-            passing_direction: self.match_state.passing_direction(),
-            tracker: &self.unseen_tracker,
-        };
+        let ctx = self.policy_context(seat, hand, &self.unseen_tracker);
 
         // Choose card based on AI mode
         let card = match self.ai_mode {
@@ -342,14 +483,7 @@ impl GameController {
             return None;
         }
 
-        let ctx = PolicyContext {
-            seat,
-            hand,
-            round: self.match_state.round(),
-            scores: self.match_state.scores(),
-            passing_direction: self.match_state.passing_direction(),
-            tracker: &self.unseen_tracker,
-        };
+        let ctx = self.policy_context(seat, hand, &self.unseen_tracker);
 
         // Choose pass based on AI mode
         // Note: We can't use &mut self here, so if BC policy needs mut, we'd need to refactor.
@@ -446,6 +580,7 @@ mod tests {
     use hearts_core::model::player::PlayerPosition;
     use hearts_core::model::rank::Rank;
     use hearts_core::model::suit::Suit;
+    use std::env;
 
     #[test]
     fn easy_legacy_pass_returns_first_three() {
@@ -458,6 +593,37 @@ mod tests {
         let expected = [hand[0], hand[1], hand[2]];
         let actual = controller.simple_pass_for(seat).unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn belief_flag_initialises_beliefs() {
+        let _guard = EnvGuard::new("MDH_ENABLE_BELIEF", "1");
+        let controller = GameController::new_with_seed(Some(7), PlayerPosition::North);
+        assert!(controller.bot_features().belief_enabled());
+        assert!(controller.has_beliefs());
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn new(key: &'static str, value: &str) -> Self {
+            let prev = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(ref value) = self.prev {
+                env::set_var(self.key, value);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
     }
 
     #[test]

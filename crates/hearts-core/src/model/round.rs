@@ -259,12 +259,14 @@ impl RoundState {
                 let hand = &self.hands[seat.index()];
                 let can_follow = hand.iter().any(|c| c.suit == Suit::Clubs);
                 if !can_follow {
-                    let is_qs = card.is_queen_of_spades();
-                    if card.suit.is_heart() || is_qs {
-                        let only_hearts = hand.iter().all(|c| c.suit.is_heart());
-                        if !(only_hearts && card.suit.is_heart()) {
-                            return Err(PlayError::NoPointsOnFirstTrick);
-                        }
+                    let has_safe_alternative = hand
+                        .iter()
+                        .any(|c| !c.suit.is_heart() && !c.is_queen_of_spades());
+                    if card.is_queen_of_spades() {
+                        return Err(PlayError::NoPointsOnFirstTrick);
+                    }
+                    if card.suit.is_heart() && has_safe_alternative {
+                        return Err(PlayError::NoPointsOnFirstTrick);
                     }
                 }
             }
@@ -331,6 +333,7 @@ mod tests {
     use super::{PassingDirection, PlayError, PlayOutcome, RoundPhase, RoundState};
     use crate::model::card::Card;
     use crate::model::deck::Deck;
+    use crate::model::hand::Hand;
     use crate::model::player::PlayerPosition;
     use crate::model::rank::Rank;
     use crate::model::suit::Suit;
@@ -544,5 +547,89 @@ mod tests {
                 ));
             }
         }
+    }
+
+    fn setup_first_trick_round(east_cards: Vec<Card>) -> RoundState {
+        let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
+        hands[PlayerPosition::North.index()] =
+            Hand::with_cards(vec![Card::new(Rank::Three, Suit::Clubs)]);
+        hands[PlayerPosition::East.index()] = Hand::with_cards(east_cards);
+        hands[PlayerPosition::South.index()] =
+            Hand::with_cards(vec![Card::new(Rank::Two, Suit::Clubs)]);
+        hands[PlayerPosition::West.index()] =
+            Hand::with_cards(vec![Card::new(Rank::Five, Suit::Clubs)]);
+        RoundState::from_hands(
+            hands,
+            PlayerPosition::South,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+        )
+    }
+
+    fn advance_first_trick(round: &mut RoundState) {
+        round
+            .play_card(PlayerPosition::South, Card::new(Rank::Two, Suit::Clubs))
+            .unwrap();
+        round
+            .play_card(PlayerPosition::West, Card::new(Rank::Five, Suit::Clubs))
+            .unwrap();
+        round
+            .play_card(PlayerPosition::North, Card::new(Rank::Three, Suit::Clubs))
+            .unwrap();
+    }
+
+    #[test]
+    fn first_trick_rejects_penalty_when_safe_alternative_exists() {
+        let east_cards = vec![
+            Card::new(Rank::Seven, Suit::Hearts),
+            Card::new(Rank::Four, Suit::Diamonds),
+        ];
+        let mut round = setup_first_trick_round(east_cards);
+        advance_first_trick(&mut round);
+
+        match round.play_card(PlayerPosition::East, Card::new(Rank::Seven, Suit::Hearts)) {
+            Err(PlayError::NoPointsOnFirstTrick) => {}
+            other => panic!("expected NoPointsOnFirstTrick, got {other:?}"),
+        }
+
+        assert!(matches!(
+            round.play_card(PlayerPosition::East, Card::new(Rank::Four, Suit::Diamonds)),
+            Ok(PlayOutcome::TrickCompleted { .. })
+        ));
+    }
+
+    #[test]
+    fn first_trick_allows_hearts_when_only_hearts_available() {
+        let east_cards = vec![
+            Card::new(Rank::Seven, Suit::Hearts),
+            Card::new(Rank::Nine, Suit::Hearts),
+        ];
+        let mut round = setup_first_trick_round(east_cards);
+        advance_first_trick(&mut round);
+
+        assert!(matches!(
+            round.play_card(PlayerPosition::East, Card::new(Rank::Seven, Suit::Hearts)),
+            Ok(PlayOutcome::TrickCompleted { .. })
+        ));
+    }
+
+    #[test]
+    fn first_trick_rejects_queen_of_spades_even_with_no_safe_alternative() {
+        let east_cards = vec![
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Nine, Suit::Hearts),
+        ];
+        let mut round = setup_first_trick_round(east_cards);
+        advance_first_trick(&mut round);
+
+        match round.play_card(PlayerPosition::East, Card::new(Rank::Queen, Suit::Spades)) {
+            Err(PlayError::NoPointsOnFirstTrick) => {}
+            other => panic!("expected NoPointsOnFirstTrick, got {other:?}"),
+        }
+
+        assert!(matches!(
+            round.play_card(PlayerPosition::East, Card::new(Rank::Nine, Suit::Hearts)),
+            Ok(PlayOutcome::TrickCompleted { .. })
+        ));
     }
 }

@@ -11,6 +11,7 @@
 //! to ensure compatibility between observation encoding and model weights.
 
 use super::{Policy, PolicyContext};
+use crate::bot::BotFeatures;
 use crate::rl::observation::{ObservationBuilder, SCHEMA_HASH, SCHEMA_VERSION};
 use crate::weights::loader::WeightManifest;
 use crate::weights::{MODEL_SCHEMA_HASH, MODEL_SCHEMA_VERSION, layer1, layer2, layer3};
@@ -518,6 +519,8 @@ mod tests {
             seat,
             tracker: &tracker,
             passing_direction: PassingDirection::Hold,
+            belief: None,
+            features: BotFeatures::default(),
         };
 
         let chosen = policy.choose_play(&ctx);
@@ -550,6 +553,8 @@ mod tests {
             seat: PlayerPosition::South,
             tracker: &tracker,
             passing_direction: PassingDirection::Left,
+            belief: None,
+            features: BotFeatures::default(),
         };
 
         let chosen_pass = policy.choose_pass(&ctx);
@@ -740,6 +745,8 @@ mod tests {
             seat,
             tracker: &tracker,
             passing_direction: PassingDirection::Hold,
+            belief: None,
+            features: BotFeatures::default(),
         };
 
         let (card, value, log_prob) = policy.forward_with_critic(&ctx);

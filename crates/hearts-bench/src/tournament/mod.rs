@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 
 use crate::analytics::{AnalyticsCollector, AnalyticsError};
 use external::ExternalPolicy;
-use hearts_bot::bot::{BotDifficulty, UnseenTracker};
+use hearts_bot::bot::{BotDifficulty, BotFeatures, UnseenTracker};
 use hearts_bot::policy::{HeuristicPolicy, Policy, PolicyContext};
+use hearts_core::belief::Belief;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::RoundPhase;
@@ -19,6 +20,9 @@ use thiserror::Error;
 use tracing::{Level, event};
 
 use crate::config::{AgentConfig, AgentKind, BenchmarkConfig, ResolvedOutputs};
+use crate::telemetry::{
+    TelemetryError, TelemetryOutputs, append_highlights_to_markdown, write_summary_outputs,
+};
 
 use permutations::SeatPermutations;
 
@@ -31,6 +35,7 @@ pub struct TournamentRunner {
     agents: Vec<AgentBlueprint>,
     seat_permutations: SeatPermutations,
     logging_enabled: bool,
+    bot_features: BotFeatures,
 }
 
 /// Summary details returned after a run.
@@ -42,6 +47,7 @@ pub struct RunSummary {
     pub summary_path: PathBuf,
     pub plot_path: Option<PathBuf>,
     pub telemetry_path: Option<PathBuf>,
+    pub telemetry_outputs: Option<TelemetryOutputs>,
 }
 
 impl TournamentRunner {
@@ -70,6 +76,7 @@ impl TournamentRunner {
             outputs,
             agents,
             seat_permutations,
+            bot_features: BotFeatures::from_env(),
         })
     }
 
@@ -116,6 +123,29 @@ impl TournamentRunner {
             }
         };
 
+        let telemetry_dir = self
+            .outputs
+            .summary_md
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        let telemetry_path = if self.logging_enabled {
+            Some(telemetry_dir.join("telemetry.jsonl"))
+        } else {
+            None
+        };
+
+        let telemetry_outputs = if let Some(path) = telemetry_path.as_ref() {
+            write_summary_outputs(path, &telemetry_dir)?
+        } else {
+            None
+        };
+
+        if let Some(outputs) = telemetry_outputs.as_ref() {
+            append_highlights_to_markdown(&self.outputs.summary_md, outputs)?;
+        }
+
         Ok(RunSummary {
             hands_played: self.config.deals.hands,
             permutations: permutations.len(),
@@ -123,14 +153,8 @@ impl TournamentRunner {
             jsonl_path: self.outputs.jsonl.clone(),
             summary_path: self.outputs.summary_md.clone(),
             plot_path,
-            telemetry_path: if self.logging_enabled {
-                self.outputs
-                    .summary_md
-                    .parent()
-                    .map(|p| p.join("telemetry.jsonl"))
-            } else {
-                None
-            },
+            telemetry_path,
+            telemetry_outputs,
         })
     }
 }
@@ -203,6 +227,12 @@ impl TournamentRunner {
                 for seat in &mut seats {
                     let cards = {
                         let round = match_state.round();
+                        let belief_holder = if self.bot_features.belief_enabled() {
+                            Some(Belief::from_state(round, seat.seat))
+                        } else {
+                            None
+                        };
+                        let belief_ref = belief_holder.as_ref();
                         let ctx = PolicyContext {
                             seat: seat.seat,
                             hand: round.hand(seat.seat),
@@ -210,6 +240,8 @@ impl TournamentRunner {
                             scores: match_state.scores(),
                             passing_direction: match_state.passing_direction(),
                             tracker: &seat.tracker,
+                            belief: belief_ref,
+                            features: self.bot_features,
                         };
                         let start = Instant::now();
                         let cards = seat.policy.choose_pass(&ctx);
@@ -272,6 +304,12 @@ impl TournamentRunner {
                 let scores = match_state.scores();
                 let passing_direction = match_state.passing_direction();
                 let seat_state = &mut seats[seat_index];
+                let belief_holder = if self.bot_features.belief_enabled() {
+                    Some(Belief::from_state(round, expected_seat))
+                } else {
+                    None
+                };
+                let belief_ref = belief_holder.as_ref();
                 let ctx = PolicyContext {
                     seat: expected_seat,
                     hand: round.hand(expected_seat),
@@ -279,6 +317,8 @@ impl TournamentRunner {
                     scores,
                     passing_direction,
                     tracker: &seat_state.tracker,
+                    belief: belief_ref,
+                    features: self.bot_features,
                 };
                 let start = Instant::now();
                 let card = seat_state.policy.choose_play(&ctx);
@@ -304,10 +344,18 @@ impl TournamentRunner {
             seats[seat_index]
                 .tracker
                 .note_card_played(expected_seat, card);
-            match_state
-                .round_mut()
-                .play_card(expected_seat, card)
-                .map_err(|err| RunnerError::game(format!("invalid card play: {:?}", err)))?;
+            let play_result = {
+                let round = match_state.round_mut();
+                round.play_card(expected_seat, card)
+            };
+            if let Err(err) = play_result {
+                let trick = match_state.round().current_trick();
+                let trick_state = format!("leader={:?}, plays={:?}", trick.leader(), trick.plays());
+                return Err(RunnerError::game(format!(
+                    "invalid card play: {:?} (seat: {:?}, card: {:?}, trick: {})",
+                    err, expected_seat, card, trick_state
+                )));
+            }
         }
 
         let penalties = match_state.round_penalties();
@@ -508,6 +556,8 @@ pub enum RunnerError {
     InvalidPermutation { index: usize, agent_index: usize },
     #[error("analytics error: {0}")]
     Analytics(#[from] AnalyticsError),
+    #[error("telemetry summarisation failed: {0}")]
+    Telemetry(#[from] TelemetryError),
 }
 
 impl RunnerError {
@@ -816,6 +866,8 @@ mod tests {
             scores: &scores,
             passing_direction: round.passing_direction(),
             tracker: &tracker,
+            belief: None,
+            features: BotFeatures::default(),
         };
         let pass = policy.choose_pass(&ctx);
         assert_eq!(pass.len(), 3);

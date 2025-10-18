@@ -3,9 +3,10 @@
 
 use super::stats::compute_comparison;
 use super::types::*;
-use crate::bot::UnseenTracker;
+use crate::bot::{BotFeatures, UnseenTracker};
 use crate::cli::AiType;
 use crate::policy::{EmbeddedPolicy, HeuristicPolicy, Policy, PolicyContext};
+use hearts_core::belief::Belief;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::RoundPhase;
@@ -37,6 +38,7 @@ impl std::error::Error for EvalError {}
 /// Run evaluation with mixed AI configuration
 pub fn run_mixed_eval(config: MixedEvalConfig) -> Result<MixedEvalResults, EvalError> {
     let start_time = Instant::now();
+    let bot_features = BotFeatures::from_env();
 
     // 1. Validate configuration
     validate_config(&config)?;
@@ -236,6 +238,13 @@ fn run_single_game(
                 let cards = {
                     let round = match_state.round();
                     let hand = round.hand(physical_seat);
+                    let mut belief_holder: Option<Belief> = None;
+                    let belief_ref = if bot_features.belief_enabled() {
+                        belief_holder = Some(Belief::from_state(round, physical_seat));
+                        belief_holder.as_ref()
+                    } else {
+                        None
+                    };
                     let ctx = PolicyContext {
                         seat: physical_seat,
                         hand,
@@ -243,6 +252,8 @@ fn run_single_game(
                         scores: match_state.scores(),
                         passing_direction: match_state.passing_direction(),
                         tracker: &trackers[physical_seat.index()],
+                        belief: belief_ref,
+                        features: bot_features,
                     };
                     policies[policy_idx].choose_pass(&ctx)
                 };
@@ -279,6 +290,14 @@ fn run_single_game(
             let policy_idx = seat_mapping[expected_seat.index()];
             let hand = round.hand(expected_seat);
 
+            let mut belief_holder: Option<Belief> = None;
+            let belief_ref = if bot_features.belief_enabled() {
+                belief_holder = Some(Belief::from_state(round, expected_seat));
+                belief_holder.as_ref()
+            } else {
+                None
+            };
+
             let ctx = PolicyContext {
                 seat: expected_seat,
                 hand,
@@ -286,6 +305,8 @@ fn run_single_game(
                 scores: match_state.scores(),
                 passing_direction: match_state.passing_direction(),
                 tracker: &trackers[expected_seat.index()],
+                belief: belief_ref,
+                features: bot_features,
             };
 
             let card = policies[policy_idx].choose_play(&ctx);

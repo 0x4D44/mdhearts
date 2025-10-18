@@ -26,6 +26,12 @@ pub fn init_logging(
     unsafe {
         std::env::set_var("MDH_DEBUG_LOGS", "1");
         std::env::set_var("MDH_BENCH_RUN_ID", run_id);
+        if logging.pass_details {
+            std::env::set_var("MDH_PASS_DETAILS", "1");
+        }
+        if logging.moon_details {
+            std::env::set_var("MDH_MOON_DETAILS", "1");
+        }
     }
 
     let telemetry_dir = outputs

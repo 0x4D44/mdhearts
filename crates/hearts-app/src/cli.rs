@@ -560,9 +560,10 @@ fn run_eval(
     weights_path: Option<PathBuf>,
     collect_data_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
-    use crate::bot::UnseenTracker;
+    use crate::bot::{BotFeatures, UnseenTracker};
     use crate::policy::{EmbeddedPolicy, HeuristicPolicy, Policy, PolicyContext};
     use crate::rl::{Experience, ExperienceCollector};
+    use hearts_core::belief::Belief;
     use hearts_core::model::round::RoundPhase;
     use serde_json::json;
 
@@ -615,6 +616,8 @@ fn run_eval(
         None
     };
 
+    let bot_features = BotFeatures::from_env();
+
     for game_idx in 0..num_games {
         let seed = game_idx as u64;
         let mut match_state = MatchState::with_seed(PlayerPosition::South, seed);
@@ -633,6 +636,14 @@ fn run_eval(
                     let scores = match_state.scores();
                     let passing_dir = match_state.passing_direction();
 
+                    let mut belief_holder: Option<Belief> = None;
+                    let belief_ref = if bot_features.belief_enabled() {
+                        belief_holder = Some(Belief::from_state(match_state.round(), seat));
+                        belief_holder.as_ref()
+                    } else {
+                        None
+                    };
+
                     let ctx = PolicyContext {
                         hand,
                         round: match_state.round(),
@@ -640,6 +651,8 @@ fn run_eval(
                         seat,
                         tracker: &tracker,
                         passing_direction: passing_dir,
+                        belief: belief_ref,
+                        features: bot_features,
                     };
 
                     let pass_cards = policy.choose_pass(&ctx);
@@ -665,6 +678,14 @@ fn run_eval(
                 let scores = match_state.scores();
                 let passing_dir = match_state.passing_direction();
 
+                let mut belief_holder: Option<Belief> = None;
+                let belief_ref = if bot_features.belief_enabled() {
+                    belief_holder = Some(Belief::from_state(match_state.round(), current_player));
+                    belief_holder.as_ref()
+                } else {
+                    None
+                };
+
                 let ctx = PolicyContext {
                     hand,
                     round: match_state.round(),
@@ -672,6 +693,8 @@ fn run_eval(
                     seat: current_player,
                     tracker: &tracker,
                     passing_direction: passing_dir,
+                    belief: belief_ref,
+                    features: bot_features,
                 };
 
                 // Build observation if collecting data
