@@ -1,0 +1,35 @@
+[
+  {
+    "label": "stage2_pass_moon_v045_guardfix16",
+    "events": 2221,
+    "success": 2192,
+    "failure_other": 19,
+    "failure_self": 10,
+    "success_rate": 0.9869428185502026,
+    "moon_occurrences": 50,
+    "moon_rate_per_hand": 0.01220703125,
+    "avg_probability": 0.5471314313657538,
+    "bins": {
+      "[0.4,0.5)": {
+        "total": 713,
+        "success": 702,
+        "success_rate": 0.9845722300140253
+      },
+      "[0.5,0.6)": {
+        "total": 1207,
+        "success": 1194,
+        "success_rate": 0.9892294946147473
+      },
+      "[0.6,0.7)": {
+        "total": 249,
+        "success": 245,
+        "success_rate": 0.9839357429718876
+      },
+      "[0.7,0.8)": {
+        "total": 52,
+        "success": 51,
+        "success_rate": 0.9807692307692307
+      }
+    }
+  }
+]

@@ -1,0 +1,35 @@
+[
+  {
+    "label": "pass_v045_guardfix11b",
+    "events": 1847,
+    "success": 1808,
+    "failure_other": 22,
+    "failure_self": 17,
+    "success_rate": 0.9788846778559827,
+    "moon_occurrences": 84,
+    "moon_rate_per_hand": 0.0205078125,
+    "avg_probability": 0.5481253077226131,
+    "bins": {
+      "[0.4,0.5)": {
+        "total": 581,
+        "success": 570,
+        "success_rate": 0.9810671256454389
+      },
+      "[0.5,0.6)": {
+        "total": 1010,
+        "success": 991,
+        "success_rate": 0.9811881188118812
+      },
+      "[0.6,0.7)": {
+        "total": 213,
+        "success": 206,
+        "success_rate": 0.9671361502347418
+      },
+      "[0.7,0.8)": {
+        "total": 43,
+        "success": 41,
+        "success_rate": 0.9534883720930233
+      }
+    }
+  }
+]

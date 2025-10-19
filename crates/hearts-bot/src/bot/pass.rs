@@ -544,8 +544,11 @@ mod tests {
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
         assert!(picks.contains(&Card::new(Rank::Queen, Suit::Spades)));
-        assert!(picks.contains(&Card::new(Rank::Ace, Suit::Hearts)));
         assert!(picks.contains(&Card::new(Rank::King, Suit::Spades)));
+        assert!(
+            !picks.contains(&Card::new(Rank::Ace, Suit::Hearts)),
+            "expected A♥ to be retained, picks={picks:?}"
+        );
     }
 
     #[test]
@@ -581,8 +584,11 @@ mod tests {
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
         assert!(picks.contains(&Card::new(Rank::Queen, Suit::Spades)));
-        assert!(picks.contains(&Card::new(Rank::Ace, Suit::Hearts)));
         assert!(picks.contains(&Card::new(Rank::King, Suit::Spades)));
+        assert!(
+            !picks.contains(&Card::new(Rank::Ace, Suit::Hearts)),
+            "expected A♥ to be retained, picks={picks:?}"
+        );
     }
     #[test]
     fn pass_tracker_respects_seen_queen() {
