@@ -282,6 +282,189 @@ fn stage2_hand_582_rejects_premium_without_support() {
 }
 
 #[test]
+fn stage2_hand_26_rejects_soft_anchor_liability() {
+    let input = stage2_input(26, PlayerPosition::North);
+    let combos = enumerate_pass_triples(&input);
+    if combos.is_empty() {
+        let forced = force_guarded_pass(&input).expect("expected forced candidate for hand 26");
+        assert!(
+            forced
+                .cards
+                .iter()
+                .filter(|card| card.suit == Suit::Hearts)
+                .count()
+                >= 2,
+            "forced path should ship double-heart coverage: {:?}",
+            forced.cards
+        );
+        assert!(
+            !forced
+                .cards
+                .iter()
+                .any(|card| *card == Card::new(Rank::King, Suit::Clubs)),
+            "forced path should not rely on soft K♣ anchor: {:?}",
+            forced.cards
+        );
+    } else {
+        for candidate in combos {
+            assert!(
+                candidate
+                    .cards
+                    .iter()
+                    .filter(|card| card.suit == Suit::Hearts)
+                    .count()
+                    >= 2,
+                "hand 26 should ship double-heart support, got {:?}",
+                candidate.cards
+            );
+            assert!(
+                !candidate
+                    .cards
+                    .iter()
+                    .any(|card| *card == Card::new(Rank::King, Suit::Clubs)),
+                "hand 26 should not rely on soft K♣ anchor: {:?}",
+                candidate.cards
+            );
+        }
+    }
+}
+
+#[test]
+fn stage2_hand_212_blocks_queen_ten_mix() {
+    let input = stage2_input(212, PlayerPosition::North);
+    let combos = enumerate_pass_triples(&input);
+    assert!(
+        combos.is_empty(),
+        "hand 212 should reject Q♠ + J♥ mixes outright"
+    );
+    let forced = force_guarded_pass(&input).expect("forced guard should synthesize a pass");
+    assert!(
+        forced.cards.iter().all(|card| card.suit != Suit::Hearts),
+        "hand 212 forced fallback should avoid shipping unsupported hearts: {:?}",
+        forced.cards
+    );
+    assert!(
+        forced
+            .cards
+            .iter()
+            .filter(|card| card.suit == Suit::Spades && card.rank >= Rank::Queen)
+            .count()
+            >= 1,
+        "hand 212 forced fallback should anchor on a premium spade: {:?}",
+        forced.cards
+    );
+}
+
+#[test]
+fn stage2_hand_599_passes_both_low_hearts() {
+    let input = stage2_input(599, PlayerPosition::North);
+    let combos = enumerate_pass_triples(&input);
+    assert!(
+        combos.iter().all(|candidate| {
+            candidate
+                .cards
+                .iter()
+                .filter(|card| card.suit == Suit::Hearts)
+                .count()
+                == 2
+        }),
+        "hand 599 should pass both low hearts for coverage"
+    );
+}
+
+#[test]
+fn stage2_hand_928_forces_strong_spade_anchor() {
+    let input = stage2_input(928, PlayerPosition::North);
+    let forced = force_guarded_pass(&input).expect("forced guard should synthesize a pass");
+    assert!(
+        forced
+            .cards
+            .iter()
+            .any(|card| *card == Card::new(Rank::Nine, Suit::Hearts)),
+        "hand 928 forced pass should include the 9♥ anchor: {:?}",
+        forced.cards
+    );
+    assert!(
+        forced
+            .cards
+            .iter()
+            .filter(|card| card.suit == Suit::Spades && card.rank >= Rank::King)
+            .count()
+            >= 2,
+        "hand 928 forced pass should pair heart support with double premium spades: {:?}",
+        forced.cards
+    );
+}
+
+#[test]
+fn stage2_hand_420_retains_low_heart_control() {
+    let input = stage2_input(420, PlayerPosition::North);
+    let combos = enumerate_pass_triples(&input);
+    assert!(
+        combos.is_empty(),
+        "enumerator should refuse to ship the lone low heart"
+    );
+    let forced = force_guarded_pass(&input).expect("forced guard should synthesize a pass");
+    assert!(
+        forced.cards.iter().all(|card| card.suit != Suit::Hearts),
+        "forced pass should keep the last heart at home: {:?}",
+        forced.cards
+    );
+    assert!(
+        forced
+            .cards
+            .iter()
+            .any(|card| { card.suit == Suit::Spades && card.rank >= Rank::King }),
+        "forced pass should include a strong spade liability: {:?}",
+        forced.cards
+    );
+}
+
+#[test]
+fn stage2_hand_96_pairs_queen_with_spade_anchor() {
+    let input = stage2_input(96, PlayerPosition::North);
+    let combos = enumerate_pass_triples(&input);
+    for cand in combos {
+        let passes_qspade = cand.cards.iter().any(|card| card.is_queen_of_spades());
+        let passed_hearts: Vec<_> = cand
+            .cards
+            .iter()
+            .filter(|card| card.suit == Suit::Hearts)
+            .collect();
+        if passes_qspade && passed_hearts.len() == 1 {
+            assert!(
+                cand.cards.iter().any(|card| {
+                    card.suit == Suit::Spades
+                        && card.rank >= Rank::King
+                        && !card.is_queen_of_spades()
+                }),
+                "Q♠ passes must include an extra spade liability anchor: {:?}",
+                cand.cards
+            );
+        }
+    }
+}
+
+#[test]
+fn stage2_hand_941_forced_builds_spade_void() {
+    let input = stage2_input(941, PlayerPosition::North);
+    let forced = force_guarded_pass(&input).expect("forced guard should synthesize a pass");
+    assert!(
+        forced.cards.iter().all(|card| card.suit != Suit::Hearts),
+        "forced pass should keep the lone low heart: {:?}",
+        forced.cards
+    );
+    assert!(
+        forced
+            .cards
+            .iter()
+            .any(|card| { card.suit == Suit::Spades && card.rank >= Rank::King }),
+        "forced pass should include a spade liability anchor: {:?}",
+        forced.cards
+    );
+}
+
+#[test]
 fn stage2_hand_594_forces_mid_support_for_queen() {
     let input = stage2_input(594, PlayerPosition::North);
     let forced = force_guarded_pass(&input).expect("expected forced candidate");
@@ -604,29 +787,25 @@ fn stage2_hand_461_north_avoids_double_premium_dump() {
 #[test]
 fn stage2_hand_767_forced_prefers_liability_mix() {
     let input = stage2_input(767, PlayerPosition::North);
-    if let Some(forced) = force_guarded_pass(&input) {
+    let enumerated = enumerate_pass_triples(&input);
+    if enumerated.is_empty() {
         assert!(
-            forced.cards.iter().any(|card| card.suit != Suit::Hearts),
-            "forced pass should not be all hearts: {:?}",
-            forced.cards
-        );
-        let ten_plus = forced
-            .cards
-            .iter()
-            .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
-            .count();
-        assert!(
-            ten_plus >= 1,
-            "forced pass should include at least one Ten+ heart to provide coverage: {:?}",
-            forced.cards
+            force_guarded_pass(&input).is_none(),
+            "forced guard should remain unavailable when enumerator cannot build liability mix"
         );
     } else {
-        let enumerated = enumerate_pass_triples(&input);
+        for cand in enumerated {
+            assert!(
+                cand.cards.iter().any(|card| {
+                    card.suit != Suit::Hearts && (card.is_queen_of_spades() || card.rank >= Rank::King)
+                }),
+                "enumerator output should include an off-suit liability: {:?}",
+                cand.cards
+            );
+        }
         assert!(
-            enumerated
-                .iter()
-                .any(|candidate| candidate.cards.iter().any(|card| card.suit != Suit::Hearts)),
-            "enumerator should surface at least one liability mix when forced guard is unavailable"
+            force_guarded_pass(&input).is_none(),
+            "forced guard should stay empty once enumerator supplies liability mixes"
         );
     }
 }
@@ -1563,6 +1742,85 @@ fn debug_stage2_hand_767_north() {
 
 #[test]
 #[ignore]
+fn debug_stage2_hand_757_north() {
+    let input = stage2_input(757, PlayerPosition::North);
+    println!("hand 757 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_119_north() {
+    let input = stage2_input(119, PlayerPosition::North);
+    println!("hand 119 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_310_north() {
+    let input = stage2_input(310, PlayerPosition::North);
+    println!("hand 310 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_problem_hands() {
+    let hands = [119, 310, 367, 462, 464, 481, 597, 607, 852, 865, 887];
+    for &hand in &hands {
+        let input = stage2_input(hand, PlayerPosition::North);
+        println!("=== hand {} north ===", hand);
+        for card in input.hand.iter() {
+            println!("  {:?}", card);
+        }
+        let combos = enumerate_pass_triples(&input);
+        println!("enumerated {} combos:", combos.len());
+        for cand in combos.iter() {
+            println!("  {:?} score={:.2}", cand.cards, cand.score);
+        }
+        match force_guarded_pass(&input) {
+            Some(candidate) => println!("forced: {:?}\n", candidate.cards),
+            None => println!("forced: None\n"),
+        }
+    }
+}
+
+#[test]
+#[ignore]
 fn debug_stage2_hand_941_east() {
     let input = stage2_input(941, PlayerPosition::East);
     println!("hand 941 east:");
@@ -1631,6 +1889,25 @@ fn debug_stage2_hand_699_north() {
     for cand in combos.iter() {
         println!("  {:?} score={:.2}", cand.cards, cand.score);
     }
+    let mut strong_spades: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| {
+            card.is_queen_of_spades() || (card.suit == Suit::Spades && card.rank >= Rank::King)
+        })
+        .collect();
+    strong_spades.sort_by(|a, b| b.rank.cmp(&a.rank));
+    strong_spades.dedup();
+    println!("strong spades: {:?}", strong_spades);
+    let mut hearts: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts)
+        .collect();
+    hearts.sort_by(|a, b| a.rank.cmp(&b.rank));
+    println!("sorted hearts: {:?}", hearts);
     match force_guarded_pass(&input) {
         Some(candidate) => println!("forced: {:?}", candidate.cards),
         None => println!("forced: None"),
@@ -1783,6 +2060,158 @@ fn debug_stage2_hand_320_east() {
 fn debug_stage2_hand_64_west() {
     let input = stage2_input(64, PlayerPosition::West);
     println!("hand 64 west:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_75_west() {
+    let input = stage2_input(75, PlayerPosition::West);
+    println!("hand 75 west:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_26_north() {
+    let input = stage2_input(26, PlayerPosition::North);
+    println!("hand 26 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_96_north() {
+    let input = stage2_input(96, PlayerPosition::North);
+    println!("hand 96 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_212_north() {
+    let input = stage2_input(212, PlayerPosition::North);
+    println!("hand 212 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_420_north() {
+    let input = stage2_input(420, PlayerPosition::North);
+    println!("hand 420 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_599_north() {
+    let input = stage2_input(599, PlayerPosition::North);
+    println!("hand 599 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_928_north() {
+    let input = stage2_input(928, PlayerPosition::North);
+    println!("hand 928 north:");
+    for card in input.hand.iter() {
+        println!("  {:?}", card);
+    }
+    let combos = enumerate_pass_triples(&input);
+    println!("enumerated {} combos:", combos.len());
+    for cand in combos.iter() {
+        println!("  {:?} score={:.2}", cand.cards, cand.score);
+    }
+    match force_guarded_pass(&input) {
+        Some(candidate) => println!("forced: {:?}", candidate.cards),
+        None => println!("forced: None"),
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_stage2_hand_941_north() {
+    let input = stage2_input(941, PlayerPosition::North);
+    println!("hand 941 north:");
     for card in input.hand.iter() {
         println!("  {:?}", card);
     }

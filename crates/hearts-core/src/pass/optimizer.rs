@@ -1146,6 +1146,9 @@ fn build_liability_combo(input: &PassScoreInput<'_>) -> Option<[Card; 3]> {
             (cards[1], score_single_card(input, cards[1])),
             (cards[2], score_single_card(input, cards[2])),
         ];
+        if !contains_liability_combo(&breakdown) {
+            continue;
+        }
         if violates_ten_plus_safety(input, &breakdown) {
             continue;
         }
@@ -1258,7 +1261,10 @@ fn build_ten_plus_liability_combo(input: &PassScoreInput<'_>) -> Option<[Card; 3
         .copied()
         .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
         .collect();
-    if ten_plus_hearts.is_empty() {
+    if ten_plus_hearts.len() < 2 {
+        return None;
+    }
+    if !ten_plus_hearts.iter().any(|card| card.rank < Rank::King) {
         return None;
     }
     ten_plus_hearts.sort_by(|a, b| a.rank.cmp(&b.rank));
@@ -1322,7 +1328,7 @@ fn build_single_heart_liability_combo(input: &PassScoreInput<'_>) -> Option<[Car
         .copied()
         .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
         .collect();
-    if ten_plus_hearts.is_empty() {
+    if ten_plus_hearts.len() < 2 {
         return None;
     }
     ten_plus_hearts.sort_by(|a, b| a.rank.cmp(&b.rank));
@@ -1371,6 +1377,171 @@ fn build_single_heart_liability_combo(input: &PassScoreInput<'_>) -> Option<[Car
                 continue;
             }
             return Some(combo);
+        }
+    }
+
+    None
+}
+
+fn build_low_heart_with_spade_liabilities(input: &PassScoreInput<'_>) -> Option<[Card; 3]> {
+    let mut candidate_hearts: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts && card.rank < Rank::Queen)
+        .collect();
+    if candidate_hearts.is_empty() {
+        return None;
+    }
+    candidate_hearts.sort_by(|a, b| a.rank.cmp(&b.rank));
+
+    let mut spade_liabilities: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| {
+            card.is_queen_of_spades() || (card.suit == Suit::Spades && card.rank >= Rank::King)
+        })
+        .collect();
+    if spade_liabilities.len() < 2 {
+        return None;
+    }
+    spade_liabilities.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    let heart = candidate_hearts[0];
+    let first_spade = spade_liabilities[0];
+    let second_spade = spade_liabilities[1];
+    if heart == first_spade || heart == second_spade {
+        return None;
+    }
+    Some([heart, first_spade, second_spade])
+}
+
+fn build_ten_plus_support_combo(input: &PassScoreInput<'_>) -> Option<[Card; 3]> {
+    let mut ten_plus_hearts: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
+        .collect();
+    if ten_plus_hearts.len() < 2 {
+        return None;
+    }
+    ten_plus_hearts.sort_by(|a, b| a.rank.cmp(&b.rank));
+
+    let mut liability_off: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| is_offsuit_liability(card))
+        .collect();
+    if liability_off.is_empty() {
+        return None;
+    }
+    liability_off.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    let mut support_hearts: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts && card.rank < Rank::Ten)
+        .collect();
+    if support_hearts.is_empty() && liability_off.len() < 2 {
+        return None;
+    }
+    support_hearts.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    let primary_heart = ten_plus_hearts[0];
+    let primary_liability = liability_off[0];
+    if support_hearts
+        .iter()
+        .any(|card| *card == primary_heart || *card == primary_liability)
+    {
+        support_hearts.retain(|card| *card != primary_heart && *card != primary_liability);
+    }
+    if support_hearts.is_empty() {
+        if liability_off.len() >= 2 {
+            let secondary_liability = liability_off[1];
+            if secondary_liability == primary_heart {
+                return None;
+            }
+            return Some([primary_heart, primary_liability, secondary_liability]);
+        }
+        return None;
+    }
+    let support = support_hearts[0];
+    if support == primary_heart || support == primary_liability {
+        return None;
+    }
+    Some([primary_heart, primary_liability, support])
+}
+
+fn build_spade_liability_void_combo(input: &PassScoreInput<'_>) -> Option<[Card; 3]> {
+    use std::cmp::Ordering;
+
+    let mut spade_liabilities: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| {
+            card.is_queen_of_spades() || (card.suit == Suit::Spades && card.rank >= Rank::King)
+        })
+        .collect();
+    if spade_liabilities.is_empty() {
+        return None;
+    }
+    spade_liabilities.sort_by(|a, b| b.rank.cmp(&a.rank));
+    spade_liabilities.dedup();
+
+    let primary = spade_liabilities[0];
+    let mut extras: Vec<(Card, PassScoreBreakdown)> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| *card != primary && card.suit != Suit::Hearts)
+        .map(|card| {
+            let breakdown = score_single_card(input, card);
+            (card, breakdown)
+        })
+        .collect();
+    if extras.len() < 2 {
+        return None;
+    }
+    extras.sort_by(|a, b| b.1.total.partial_cmp(&a.1.total).unwrap_or(Ordering::Equal));
+    extras.dedup_by(|a, b| a.0 == b.0);
+
+    let limit = extras.len().min(6);
+    for i in 0..limit {
+        for j in (i + 1)..limit {
+            let cards = [primary, extras[i].0, extras[j].0];
+            if cards.iter().collect::<std::collections::HashSet<_>>().len() < 3 {
+                continue;
+            }
+            let breakdown = [
+                (cards[0], score_single_card(input, cards[0])),
+                (cards[1], score_single_card(input, cards[1])),
+                (cards[2], score_single_card(input, cards[2])),
+            ];
+            if !contains_liability_combo(&breakdown) {
+                continue;
+            }
+            if violates_ten_plus_safety(input, &breakdown) {
+                continue;
+            }
+            if violates_support_guard(input, &breakdown) {
+                continue;
+            }
+            if violates_all_offsuit_guard(input, &breakdown) {
+                continue;
+            }
+            if missing_ten_plus_support_cards(input, &cards) {
+                continue;
+            }
+            let eval = evaluate_combo(input, &breakdown);
+            if eval.moon_penalty >= HARD_REJECTION_PENALTY {
+                continue;
+            }
+            return Some(cards);
         }
     }
 
@@ -2295,6 +2466,98 @@ pub fn force_guarded_pass(input: &PassScoreInput<'_>) -> Option<PassCandidate> {
     }
 
     if best.is_none() {
+        if let Some(combo_cards) = build_low_heart_with_spade_liabilities(input) {
+            let breakdown = [
+                (combo_cards[0], score_single_card(input, combo_cards[0])),
+                (combo_cards[1], score_single_card(input, combo_cards[1])),
+                (combo_cards[2], score_single_card(input, combo_cards[2])),
+            ];
+            if !violates_ten_plus_safety(input, &breakdown)
+                && !violates_support_guard(input, &breakdown)
+                && !violates_all_offsuit_guard(input, &breakdown)
+                && !missing_ten_plus_support_cards(input, &combo_cards)
+            {
+                let eval = evaluate_combo(input, &breakdown);
+                if eval.moon_penalty < HARD_REJECTION_PENALTY {
+                    let candidate = PassCandidate {
+                        cards: combo_cards,
+                        score: eval.total,
+                        void_score: eval.void_sum,
+                        liability_score: eval.liability_sum,
+                        moon_score: eval.moon_sum,
+                        synergy: eval.synergy,
+                        direction_bonus: eval.direction_bonus,
+                        moon_liability_penalty: eval.moon_penalty,
+                    };
+                    best = Some((candidate, eval));
+                }
+            }
+        }
+    }
+
+    if best.is_none() {
+        if let Some(combo_cards) = build_ten_plus_support_combo(input) {
+            let breakdown = [
+                (combo_cards[0], score_single_card(input, combo_cards[0])),
+                (combo_cards[1], score_single_card(input, combo_cards[1])),
+                (combo_cards[2], score_single_card(input, combo_cards[2])),
+            ];
+            if !violates_ten_plus_safety(input, &breakdown)
+                && !violates_support_guard(input, &breakdown)
+                && !violates_all_offsuit_guard(input, &breakdown)
+                && !missing_ten_plus_support_cards(input, &combo_cards)
+            {
+                let eval = evaluate_combo(input, &breakdown);
+                if eval.moon_penalty < HARD_REJECTION_PENALTY
+                    || combo_cards.iter().any(|card| card.suit != Suit::Hearts)
+                {
+                    let candidate = PassCandidate {
+                        cards: combo_cards,
+                        score: eval.total,
+                        void_score: eval.void_sum,
+                        liability_score: eval.liability_sum,
+                        moon_score: eval.moon_sum,
+                        synergy: eval.synergy,
+                        direction_bonus: eval.direction_bonus,
+                        moon_liability_penalty: eval.moon_penalty,
+                    };
+                    best = Some((candidate, eval));
+                }
+            }
+        }
+    }
+
+    if best.is_none() {
+        if let Some(combo_cards) = build_spade_liability_void_combo(input) {
+            let breakdown = [
+                (combo_cards[0], score_single_card(input, combo_cards[0])),
+                (combo_cards[1], score_single_card(input, combo_cards[1])),
+                (combo_cards[2], score_single_card(input, combo_cards[2])),
+            ];
+            if !violates_ten_plus_safety(input, &breakdown)
+                && !violates_support_guard(input, &breakdown)
+                && !violates_all_offsuit_guard(input, &breakdown)
+                && !missing_ten_plus_support_cards(input, &combo_cards)
+            {
+                let eval = evaluate_combo(input, &breakdown);
+                if eval.moon_penalty < HARD_REJECTION_PENALTY {
+                    let candidate = PassCandidate {
+                        cards: combo_cards,
+                        score: eval.total,
+                        void_score: eval.void_sum,
+                        liability_score: eval.liability_sum,
+                        moon_score: eval.moon_sum,
+                        synergy: eval.synergy,
+                        direction_bonus: eval.direction_bonus,
+                        moon_liability_penalty: eval.moon_penalty,
+                    };
+                    best = Some((candidate, eval));
+                }
+            }
+        }
+    }
+
+    if best.is_none() {
         if let Some(combo_cards) = build_supportive_heart_combo(input) {
             let breakdown = [
                 (combo_cards[0], score_single_card(input, combo_cards[0])),
@@ -2340,6 +2603,11 @@ pub fn force_guarded_pass(input: &PassScoreInput<'_>) -> Option<PassCandidate> {
             if let Some((demoted, _)) = demote_queen_candidate(input, candidate.clone()) {
                 candidate = demoted;
             }
+        }
+        if candidate.cards.iter().any(|card| {
+            card.suit == Suit::Hearts && (card.rank == Rank::Ace || card.rank == Rank::King)
+        }) {
+            return None;
         }
         Some(candidate)
     } else {
@@ -3039,6 +3307,7 @@ fn violates_support_guard(
     let passes_q = combo
         .iter()
         .any(|(card, _)| card.suit == Suit::Hearts && card.rank == Rank::Queen);
+    let pass_has_qspade = combo.iter().any(|(card, _)| card.is_queen_of_spades());
     let passes_j = combo
         .iter()
         .any(|(card, _)| card.suit == Suit::Hearts && card.rank == Rank::Jack);
@@ -3091,6 +3360,45 @@ fn violates_support_guard(
                 && combo.iter().all(|(passed, _)| passed != *card)
         })
         .count();
+    let hearts_in_combo = combo
+        .iter()
+        .filter(|(card, _)| card.suit == Suit::Hearts)
+        .count();
+    let total_hearts_in_hand = input
+        .hand
+        .iter()
+        .filter(|card| card.suit == Suit::Hearts)
+        .count();
+    let all_hearts_low = input
+        .hand
+        .iter()
+        .filter(|card| card.suit == Suit::Hearts)
+        .all(|card| card.rank < Rank::Ten);
+    let remaining_hearts = input
+        .hand
+        .iter()
+        .filter(|card| card.suit == Suit::Hearts && combo.iter().all(|(passed, _)| passed != *card))
+        .count();
+    let spade_liability_available = input
+        .hand
+        .iter()
+        .any(|card| {
+            card.suit == Suit::Spades
+                && card.rank >= Rank::King
+                && !combo.iter().any(|(passed, _)| passed == card)
+        });
+    let spade_liability_in_combo = combo.iter().any(|(card, _)| {
+        card.is_queen_of_spades() || (card.suit == Suit::Spades && card.rank >= Rank::King)
+    });
+    let non_spade_liability_in_combo = combo.iter().any(|(card, _)| {
+        card.suit != Suit::Hearts && card.suit != Suit::Spades && card.rank >= Rank::King
+    });
+    let low_heart_passed = combo
+        .iter()
+        .any(|(card, _)| card.suit == Suit::Hearts && card.rank < Rank::Ten);
+    let has_aux_spade_liability = combo.iter().any(|(card, _)| {
+        card.suit == Suit::Spades && card.rank >= Rank::King && !card.is_queen_of_spades()
+    });
     let support_high_excl_jack = if passes_j {
         support_high.saturating_sub(1)
     } else {
@@ -3107,6 +3415,18 @@ fn violates_support_guard(
         .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Queen)
         .filter(|card| combo.iter().all(|(passed, _)| passed != *card))
         .count();
+
+    if total_hearts_in_hand == 1 && hearts_in_combo == 1 && low_heart_passed {
+        return true;
+    }
+
+    if pass_has_qspade
+        && hearts_in_combo >= 1
+        && !has_aux_spade_liability
+        && spade_liability_available
+    {
+        return true;
+    }
 
     if passed_ten_plus >= 3
         && liability_anchor_count == 0
@@ -3172,6 +3492,13 @@ fn violates_support_guard(
 
     if passes_j {
         let has_high_support_anchor = support_high_excl_jack > 0;
+        if hearts_in_combo == 1
+            && non_spade_liability_in_combo
+            && !spade_liability_in_combo
+            && remaining_hearts >= 1
+        {
+            return true;
+        }
         if !has_high_support_anchor && liability_anchor_count == 0 {
             return true;
         }
@@ -3200,6 +3527,19 @@ fn violates_support_guard(
                 return true;
             }
         }
+    }
+
+    if hearts_in_combo == 1
+        && non_spade_liability_in_combo
+        && !spade_liability_in_combo
+        && remaining_hearts >= 2
+        && spade_liability_available
+    {
+        return true;
+    }
+    if hearts_in_combo == 1 && total_hearts_in_hand <= 2 && remaining_hearts >= 1 && all_hearts_low
+    {
+        return true;
     }
 
     let passed_premium = combo
@@ -3317,7 +3657,13 @@ fn violates_ten_plus_safety(
         && passed_support_total == 0
         && (remaining_support_total > 0 || remaining_ten_plus <= 1)
     {
-        return true;
+        let combo_has_low_heart = combo
+            .iter()
+            .any(|(card, _)| card.suit == Suit::Hearts && card.rank < Rank::Ten);
+        let combo_has_liability_off = combo.iter().any(|(card, _)| is_offsuit_liability(card));
+        if !(hearts_passed >= 2 && combo_has_low_heart && combo_has_liability_off) {
+            return true;
+        }
     }
     if (passes_single_ten || passes_single_jack)
         && remaining_ten_plus >= 2
