@@ -1,0 +1,35 @@
+[
+  {
+    "label": "guardfix",
+    "events": 2208,
+    "success": 2149,
+    "failure_other": 46,
+    "failure_self": 13,
+    "success_rate": 0.9732789855072463,
+    "moon_occurrences": 97,
+    "moon_rate_per_hand": 0.023681640625,
+    "avg_probability": 0.5471396398177182,
+    "bins": {
+      "[0.4,0.5)": {
+        "total": 707,
+        "success": 695,
+        "success_rate": 0.983026874115983
+      },
+      "[0.5,0.6)": {
+        "total": 1203,
+        "success": 1166,
+        "success_rate": 0.969243557772236
+      },
+      "[0.6,0.7)": {
+        "total": 246,
+        "success": 239,
+        "success_rate": 0.9715447154471545
+      },
+      "[0.7,0.8)": {
+        "total": 52,
+        "success": 49,
+        "success_rate": 0.9423076923076923
+      }
+    }
+  }
+]

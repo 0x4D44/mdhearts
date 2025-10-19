@@ -82,7 +82,7 @@ fn tournament_smoke_test_produces_stable_jsonl_hash() {
 
     let actual = hex::encode(digest);
     assert_eq!(
-        actual, "f1a11c9636a83c3e23e530283ba23447dadec3fec400a4ea954ee8be01240934",
+        actual, "c12312ffece58c3a93557945fb368194d818a80038254679815b6d25ba56f373",
         "JSONL output hash changed; update expected value if intentional"
     );
 

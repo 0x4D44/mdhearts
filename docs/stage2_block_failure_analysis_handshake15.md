@@ -1,25 +1,30 @@
 # Stage 2 Block Failure Analysis — handshake15 (2025-10-18)
 
-Running `stage2_pass_moon` with the latest king/ace overrides (1,024 hands × 4 permutations) produced **97.5 %** success (2,081 / 2,135). Six inverted-moon failures remain (four unique hands).
+Run `stage2_pass_moon_v045_handshake15` (1,024 hands × 4 permutations) reflects the queen-heart guard and low-heart substitution updates. Block-shooter passes succeeded **97.22 %** of the time (2,065 / 2,124). The ≥ 0.60 failure list has expanded slightly (12 inverted moons) as the optimizer now prefers all-heart trios, exposing remaining moon-liability tuning gaps rather than off-suit fallbacks.
 
 | Hand | Perm | Seat | Direction | Moon Prob | Penalty | Passed Cards | Shooter |
 | ---: | ---: | --- | --- | ---: | ---: | --- | --- |
-| 459 | 2 | north | Left | 0.640 | -291.0 | A♥, 8♠, 5♦ | north |
-| 498 | 3 | east | Left | 0.640 | -398.8 | 4♥, J♥, K♥ | north |
-| 582 | 3 | east | Left | 0.654 | -354.6 | A♥, 10♠, 2♦ | north |
-| 610 | 0 | north | Left | 0.640 | -299.0 | A♥, 10♠, 2♣ | south |
-| 610 | 1 | north | Left | 0.640 | -299.0 | A♥, 10♠, 2♣ | south |
-| 941 | 3 | east | Left | 0.763 | -541.3 | 2♥, 10♥, K♥ | north |
+| 153 | 3 | south | Left | 0.640 | -18 489.3 | 10♥, K♥, A♥ | north |
+| 432 | 2 | east | Left | 0.730 | -24 724.8 | Q♥, K♥, A♥ | south |
+| 461 | 2 | north | Left | 0.640 | -14 188.6 | 10♥, Q♥, K♥ | east |
+| 498 | 3 | east | Left | 0.640 | -12 602.3 | J♥, Q♥, K♥ | north |
+| 567 | 2 | west | Left | 0.794 | -24 751.9 | Q♥, K♥, A♥ | north |
+| 681 | 2 | north | Left | 0.730 | -27 822.0 | Q♥, K♥, A♥ | east |
+| 757 | 3 | north | Left | 0.680 | 0.0 | A♥, K♥, A♣ | east |
+| 890 | 0 | west | Left | 0.640 | -224.2 | J♠, 7♦, 6♣ | south |
+| 890 | 1 | west | Left | 0.640 | -224.2 | J♠, 7♦, 6♣ | south |
+| 890 | 2 | west | Left | 0.640 | -224.2 | J♠, 7♦, 6♣ | north |
+| 912 | 0 | north | Left | 0.640 | -348.9 | 10♥, J♥, A♥ | south |
+| 912 | 1 | north | Left | 0.640 | -348.9 | 10♥, J♥, A♥ | south |
 
 ## Observations
 
-- **Ace leakage:** Three of the failures ship A♥ with off-suit or low support (hands 459, 582, 610). Despite the stronger penalties, the optimizer still chooses these combos because alternatives expose Q♠ or keep large heart clusters that the estimator distrusts.
-- **Remaining K♥ case:** Hand 941 remains the only king-centric miss; keeping K♥ raises the total above several alternative liabilities, signalling the need for a hard override when only one premium heart leaves and belief on the left is still high.
-- **Belief dependency:** All cases involve left-seat moon probabilities ≥ 0.64 (hand 941 at 0.763). Instrumenting belief heart-mass diagnostics would clarify whether the estimator is overweighting the left neighbour’s premium holdings.
+- **Premium guard holding.** All failures except the 890 cluster now pass three hearts; queen/ace dumps without Ten+ support are gone. Hand 757 still mixes A♣ with A♥/K♥ because the substitution logic cannot introduce a third Ten+ heart when only two exist.
+- **New exposure (Hand 890).** West occasionally sends a spade/diamond/club trio with minimal penalty. The guard does not intervene because no premium hearts are included, suggesting we need a supplementary rule for high-urgency off-suit passes when strong hearts remain.
+- **High-penalty cases unchanged.** Hands 153/432/461/498/567/681/912 continue to incur massive moon penalties; further tuning should investigate whether any of these still need deterministic overrides versus additional weighting.
 
-## Next Adjustments
+## Next actions
 
-1. **Ace retention rule:** Force A♥ to stay unless two Ten+ hearts accompany it or the pass sheds another premium; this directly targets hands 459/582/610.
-2. **K♥ override:** Require at least two Ten+ hearts when K♥ departs during high-belief passes (hand 941), otherwise keep the king.
-3. **Fixture coverage:** Add regression fixtures mirroring all six failures so the next round of tuning demonstrates the intended overrides.
-4. **Telemetry enrichment:** Emit per-seat heart mass and premium probability snapshots for high-urgency passes to validate estimator assumptions before iterating again.
+1. Add regression fixtures for hands 567, 757, and 890 to cement the current behaviour and target future tuning.
+2. Extend `moon_liability_penalty` to punish off-suit dumps (hand 890) when Ten+ hearts remain unpassed.
+3. Experiment with explicit overrides for the final premium clusters (153/432/461/498/681/912), potentially splitting high hearts across opponents once urgency crosses 0.70.

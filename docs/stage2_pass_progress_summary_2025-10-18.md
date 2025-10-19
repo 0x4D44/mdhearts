@@ -1,12 +1,12 @@
 # Stage 2 Passing Progress Summary — 2025-10-18
 
 ## Recent Progress
-- **Belief-weighted penalties:** The pass optimizer now scales liability using `left_shooter_pressure`, applying larger hits when premium hearts move toward a high-risk left neighbour. Coverage, remainder, and new directional boosters are tied to shooter projections.
-- **Edge-case guards:** Added explicit penalties for triple-premium dumps, Ace-only left passes, mid-heart-only handoffs, and king/ace low-support or off-suit mixes. Regression tests cover each scenario (`left_pass_multiple_premiums_penalised`, `left_pass_mid_hearts_penalised`, `left_pass_ace_only_penalised`, `penalty_triggers_when_passing_single_premium`, `left_pass_king_low_support_penalised`, `left_pass_king_with_support_penalised`, `left_pass_king_offsuit_penalised_when_low_hearts_available`, `left_pass_ace_with_low_hearts_penalised`, `left_pass_single_premium_penalised_under_pressure`).
-- **Benchmark results:** Latest run `stage2_pass_moon` (**handshake23**) delivered **97.0 %** block success (2 042 / 2 105) with the same failure set (75×2, 153, 242×2, 432, 461, 498, 511×2, 681, 757, 767×2, 912×2). Premium guards hold, but Q♠/club fallbacks still dominate the residual list.
-- **Documentation sync:** Added `docs/benchmarks/stage2_block_failures_handshake23.md`, `docs/benchmarks/stage2_pass_moon_v045_handshake23.md`, `docs/stage2_block_failure_analysis_handshake23.md`, and refreshed the CSV/JSON aggregates.
+- **Premium left-pass guard:** `enumerate_pass_triples` now enforces a hard guard that replaces illegal left passes with Ten+ heart alternatives, covering Ace/King and Q♠ cases. Replacement logic enumerates all viable Ten+ substitutions before scoring.
+- **Regression coverage:** Added dedicated fixtures for hands 75/153/242/432/461/498/511/681/757/767/912 (`crates/hearts-core/tests/pass_hard_guard.rs`) to assert that the optimizer either keeps premium hearts home or ships three Ten+ hearts when moon urgency is high.
+- **Benchmark results:** Latest run `stage2_pass_moon_v045_handshake17` delivered **97.24 %** block success (1 938 / 1 993). Nine inverted moons remain; six premium-heart clusters plus the heart+club anchor and two off-suit dumps carrying large penalties (see `docs/stage2_block_failure_analysis_handshake17.md`).
+- **Artifacts updated:** Generated `docs/benchmarks/stage2_block_failures_handshake17.md`, refreshed aggregate summaries (`docs/benchmarks/stage2_pass_moon_runs.csv` / `.json`), and captured new telemetry under `bench/out/stage2_pass_moon_v045_handshake17/`.
 
 ## Next Steps
-1. Filter A♥/K♥ single-support passes out of the candidate set and supply compliant substitutes to avoid the Q♠ dump fallback (hands 153/432/498/767/912).
-2. Add regression fixtures for hands 153/432/461/498/681/767/912 and ensure telemetry captures belief heart-mass for these scenarios.
-3. Investigate alternative pass generation when premium options are rejected so the optimizer retains viable heart-sharing candidates instead of pure off-suit dumps.
+1. Prototype targeted overrides for the remaining failures (153/432/461/498/567/681/757/890/912) so the optimizer splits premium hearts or injects Ten+ support where penalties alone are insufficient.
+2. Capture belief telemetry for the residual cases to validate urgency thresholds before the next retune.
+3. Prepare a Windows acceptance sweep (`cargo test --workspace`) and plan an A/B benchmark (pass_v2 vs pass_v1) once these overrides land.

@@ -34,12 +34,13 @@ def gather_failures(events: List[BlockEvent], threshold: float) -> List[BlockEve
 
 def render_markdown(failures: List[BlockEvent]) -> str:
     lines = [
-        "| Run | Hand | Perm | Seat | Probability | Total Score | Moon Shooter | Variant | Seat Points |",
-        "| --- | ---: | ---: | --- | --- | --- | --- | --- | ---: |",
+        "| Run | Hand | Perm | Seat | Probability | Total Score | Moon Shooter | Variant | Seat Points | Passed Cards |",
+        "| --- | ---: | ---: | --- | --- | --- | --- | --- | ---: | --- |",
     ]
     for event in failures:
+        cards = event.cards or ""
         lines.append(
-            "| {label} | {hand} | {perm} | {seat} | {prob:.3f} | {total:.1f} | {shooter} | {variant} | {points} |".format(
+            "| {label} | {hand} | {perm} | {seat} | {prob:.3f} | {total:.1f} | {shooter} | {variant} | {points} | {cards} |".format(
                 label=event.label,
                 hand=event.hand_index,
                 perm=event.permutation_index,
@@ -49,10 +50,11 @@ def render_markdown(failures: List[BlockEvent]) -> str:
                 shooter=event.moon_shooter or "<unknown>",
                 variant=event.moon_variant or "<unknown>",
                 points=event.seat_points if event.seat_points is not None else 0,
+                cards=cards.replace("Card { ", "").replace(" }", ""),
             )
         )
     if len(lines) == 2:
-        lines.append("| — | — | — | — | — | — | — | — | — |")
+        lines.append("| — | — | — | — | — | — | — | — | — | — |")
     return "\n".join(lines) + "\n"
 
 
@@ -89,7 +91,8 @@ def main() -> None:
         print(
             f"{event.label} hand={event.hand_index} perm={event.permutation_index} "
             f"seat={event.seat} prob={event.probability:.3f} total={event.total_score:.1f} "
-            f"shooter={event.moon_shooter or '<unknown>'} variant={event.moon_variant or '<unknown>'}"
+            f"shooter={event.moon_shooter or '<unknown>'} variant={event.moon_variant or '<unknown>'} "
+            f"cards={event.cards or '<unknown>'}"
         )
 
     if args.markdown:

@@ -44,6 +44,7 @@ class BlockEvent:
     moon_shooter: Optional[str]
     moon_variant: Optional[str]
     seat_points: Optional[int]
+    cards: Optional[str]
 
 
 def parse_run_argument(raw: str) -> Tuple[str, Path]:
@@ -140,6 +141,7 @@ def load_block_events(
                         moon_shooter=deal.moon_shooter if deal else None,
                         moon_variant=deal.moon_variant if deal else None,
                         seat_points=seat_points,
+                        cards=info.get("cards"),
                     )
                 )
     return events

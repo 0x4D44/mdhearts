@@ -9,6 +9,7 @@ use hearts_core::model::suit::Suit;
 use hearts_core::moon::MoonEstimate;
 use hearts_core::pass::{
     DirectionProfile, PassCandidate, PassScoreInput, PassWeights, enumerate_pass_triples,
+    force_guarded_pass,
 };
 use tracing::{Level, event};
 
@@ -89,6 +90,18 @@ fn choose_pass_v2(hand: &Hand, ctx: &BotContext<'_>) -> Option<[Card; 3]> {
     if let Some(best) = candidates.first() {
         log_pass_decision(ctx, best, &candidates, moon_estimate);
         return Some(best.cards);
+    }
+
+    if let Some(forced) = force_guarded_pass(&score_input) {
+        tracing::warn!(
+            target: "hearts_bot::pass_decision",
+            seat = ?ctx.seat,
+            direction = ?ctx.passing_direction,
+            reason = "guarded_override",
+            message = "forcing guarded pass candidate"
+        );
+        log_pass_decision(ctx, &forced, std::slice::from_ref(&forced), moon_estimate);
+        return Some(forced.cards);
     }
 
     tracing::warn!(

@@ -69,6 +69,7 @@ pub fn enumerate_pass_triples_with_config(
     let pool = build_pool(&singles, config);
 
     let mut candidates = Vec::new();
+    let mut low_priority = Vec::new();
     for i in 0..pool.len() {
         for j in (i + 1)..pool.len() {
             for k in (j + 1)..pool.len() {
@@ -86,10 +87,37 @@ pub fn enumerate_pass_triples_with_config(
                         continue;
                     }
                     if eval.total < 0.5 && !contains_liability_combo(&adjusted) {
+                        let candidate_cards = [adjusted[0].0, adjusted[1].0, adjusted[2].0];
+                        if low_priority
+                            .iter()
+                            .any(|existing: &PassCandidate| existing.cards == candidate_cards)
+                            || candidates
+                                .iter()
+                                .any(|existing: &PassCandidate| existing.cards == candidate_cards)
+                        {
+                            continue;
+                        }
+                        low_priority.push(PassCandidate {
+                            cards: [adjusted[0].0, adjusted[1].0, adjusted[2].0],
+                            score: eval.total,
+                            void_score: eval.void_sum,
+                            liability_score: eval.liability_sum,
+                            moon_score: eval.moon_sum,
+                            synergy: eval.synergy,
+                            direction_bonus: eval.direction_bonus,
+                            moon_liability_penalty: eval.moon_penalty,
+                        });
+                        continue;
+                    }
+                    let candidate_cards = [adjusted[0].0, adjusted[1].0, adjusted[2].0];
+                    if candidates
+                        .iter()
+                        .any(|existing: &PassCandidate| existing.cards == candidate_cards)
+                    {
                         continue;
                     }
                     candidates.push(PassCandidate {
-                        cards: [adjusted[0].0, adjusted[1].0, adjusted[2].0],
+                        cards: candidate_cards,
                         score: eval.total,
                         void_score: eval.void_sum,
                         liability_score: eval.liability_sum,
@@ -106,6 +134,10 @@ pub fn enumerate_pass_triples_with_config(
     candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
     if candidates.len() > config.max_candidates {
         candidates.truncate(config.max_candidates);
+    }
+    if candidates.is_empty() && !low_priority.is_empty() {
+        low_priority.sort_by(|a, b| b.score.total_cmp(&a.score));
+        candidates.extend(low_priority.into_iter().take(config.max_candidates));
     }
     candidates
 }
@@ -127,36 +159,90 @@ fn enforce_premium_support_rule(
     let pass_has_king = combo
         .iter()
         .any(|(card, _)| card.suit == Suit::Hearts && card.rank == Rank::King);
-    if !pass_has_ace && !pass_has_king {
-        return PremiumSupportResolution::Valid;
-    }
+    let pass_has_qspade = combo.iter().any(|(card, _)| card.is_queen_of_spades());
+    let pass_has_qheart = combo
+        .iter()
+        .any(|(card, _)| card.suit == Suit::Hearts && card.rank == Rank::Queen);
+    let base_guard = pass_has_ace || pass_has_king || pass_has_qspade;
     let passed_ten_plus = combo
         .iter()
         .filter(|(card, _)| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
         .count();
+    let total_ten_plus_in_hand = input
+        .hand
+        .iter()
+        .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
+        .count();
+
+    if pass_has_ace && passed_ten_plus < 3 {
+        let ace_alternatives = build_ace_guard_replacements(input, combo, total_ten_plus_in_hand);
+        if !ace_alternatives.is_empty() {
+            return PremiumSupportResolution::Replacements(score_replacement_combos(
+                input,
+                ace_alternatives,
+            ));
+        }
+    }
+
     if passed_ten_plus >= 3 {
+        let premium_alternatives = build_premium_split_replacements(input, combo);
+        if !premium_alternatives.is_empty() {
+            return PremiumSupportResolution::Replacements(score_replacement_combos(
+                input,
+                premium_alternatives,
+            ));
+        }
         return PremiumSupportResolution::Valid;
     }
 
-    let required = 3usize.saturating_sub(passed_ten_plus);
-    let available: Vec<Card> = input
+    let raw_required = 3usize.saturating_sub(passed_ten_plus);
+    let mut available_any: Vec<(Card, PassScoreBreakdown, bool)> = input
         .hand
         .iter()
-        .filter(|card| {
-            card.suit == Suit::Hearts
-                && card.rank >= Rank::Ten
-                && !combo.iter().any(|(existing, _)| existing == *card)
+        .filter_map(|card| {
+            if card.suit != Suit::Hearts {
+                return None;
+            }
+            if combo.iter().any(|(existing, _)| existing == card) {
+                return None;
+            }
+            let breakdown = score_single_card(input, *card);
+            let is_ten_plus = card.rank >= Rank::Ten;
+            Some((*card, breakdown, is_ten_plus))
         })
-        .cloned()
         .collect();
-    if available.len() < required {
+
+    let available_ten_plus = available_any.iter().filter(|(_, _, ten)| *ten).count();
+    let pass_has_no_hearts = combo.iter().all(|(card, _)| card.suit != Suit::Hearts);
+    let pass_has_only_low_hearts = combo.iter().any(|(card, _)| card.suit == Suit::Hearts)
+        && combo
+            .iter()
+            .all(|(card, _)| card.suit != Suit::Hearts || card.rank < Rank::Ten);
+    let requires_guard = base_guard
+        || (pass_has_qheart && available_ten_plus > 0)
+        || (pass_has_only_low_hearts && available_ten_plus > 0)
+        || (pass_has_no_hearts && available_any.len() >= 2);
+    if !requires_guard {
+        return PremiumSupportResolution::Valid;
+    }
+    if available_any.is_empty() {
         return PremiumSupportResolution::Discard;
     }
-
+    available_any.sort_by(|a, b| {
+        let rank_order = b.0.rank.cmp(&a.0.rank);
+        if rank_order != Ordering::Equal {
+            return rank_order;
+        }
+        b.1.total.partial_cmp(&a.1.total).unwrap_or(Ordering::Equal)
+    });
+    let required = raw_required.min(available_any.len());
+    if required == 0 {
+        return PremiumSupportResolution::Valid;
+    }
     let mut replaceable: Vec<usize> = combo
         .iter()
         .enumerate()
-        .filter(|(_, (card, _))| !(card.suit == Suit::Hearts && card.rank >= Rank::Ten))
+        .filter(|(_, (card, _))| card.suit != Suit::Hearts || card.rank < Rank::Ten)
         .map(|(idx, _)| idx)
         .collect();
     if replaceable.len() < required {
@@ -170,34 +256,538 @@ fn enforce_premium_support_rule(
             .unwrap_or(Ordering::Equal)
     });
 
-    let mut adjusted = combo.clone();
+    let target_slots: Vec<usize> = replaceable.into_iter().take(required).collect();
+    if target_slots.len() < required {
+        return PremiumSupportResolution::Discard;
+    }
+
+    let base_heart_count = combo
+        .iter()
+        .filter(|(card, _)| card.suit == Suit::Hearts)
+        .count();
+    let target_hearts = (base_heart_count + available_any.len()).min(3);
+    if target_hearts <= base_heart_count && base_heart_count < 3 {
+        // No way to add additional hearts to reach the guard threshold.
+        return PremiumSupportResolution::Discard;
+    }
+    let target_ten_plus = (passed_ten_plus + available_ten_plus).min(3);
+
+    let heart_index_combos = choose_index_combinations(available_any.len(), target_slots.len());
     let mut replacements = Vec::new();
-    let mut hearts_iter = available.into_iter().rev();
-    for slot in replaceable {
-        if let Some(card) = hearts_iter.next() {
-            adjusted[slot] = (card, score_single_card(input, card));
+    for heart_indices in heart_index_combos {
+        if heart_indices.len() != required {
+            continue;
         }
-        let count = adjusted
+        let mut adjusted = combo.clone();
+        for (slot_idx, heart_idx) in target_slots.iter().zip(heart_indices.iter()) {
+            if let Some(entry) = available_any.get(*heart_idx) {
+                adjusted[*slot_idx] = (entry.0, entry.1);
+            }
+        }
+        let final_hearts = adjusted
+            .iter()
+            .filter(|(card, _)| card.suit == Suit::Hearts)
+            .count();
+        let ten_plus_count = adjusted
             .iter()
             .filter(|(card, _)| card.suit == Suit::Hearts && card.rank >= Rank::Ten)
             .count();
-        if count >= 3 {
-            replacements.push(adjusted);
-            break;
+        if final_hearts < target_hearts {
+            continue;
         }
+        if ten_plus_count < target_ten_plus {
+            continue;
+        }
+        if replacements
+            .iter()
+            .any(|existing: &[(Card, PassScoreBreakdown); 3]| {
+                existing
+                    .iter()
+                    .map(|(card, _)| card)
+                    .eq(adjusted.iter().map(|(card, _)| card))
+            })
+        {
+            continue;
+        }
+        replacements.push(adjusted);
     }
 
     if replacements.is_empty() {
-        PremiumSupportResolution::Discard
-    } else {
-        PremiumSupportResolution::Replacements(replacements)
+        if available_any.len() < required {
+            return PremiumSupportResolution::Discard;
+        }
+        let mut forced = combo.clone();
+        for (slot_idx, heart_entry) in target_slots.iter().zip(available_any.iter()) {
+            forced[*slot_idx] = (heart_entry.0, heart_entry.1);
+        }
+        replacements.push(forced);
     }
+
+    PremiumSupportResolution::Replacements(replacements)
+}
+
+fn score_replacement_combos(
+    input: &PassScoreInput<'_>,
+    combos: Vec<[Card; 3]>,
+) -> Vec<[(Card, PassScoreBreakdown); 3]> {
+    combos
+        .into_iter()
+        .map(|cards| {
+            [
+                (cards[0], score_single_card(input, cards[0])),
+                (cards[1], score_single_card(input, cards[1])),
+                (cards[2], score_single_card(input, cards[2])),
+            ]
+        })
+        .collect()
+}
+
+fn build_ace_guard_replacements(
+    input: &PassScoreInput<'_>,
+    combo: &[(Card, PassScoreBreakdown); 3],
+    total_ten_plus_in_hand: usize,
+) -> Vec<[Card; 3]> {
+    if !matches!(input.direction, PassingDirection::Left) {
+        return Vec::new();
+    }
+    let urgency = input.moon_estimate.defensive_urgency();
+    if urgency < 0.6 {
+        return Vec::new();
+    }
+
+    let combo_signature = combo_signature_from_pairs(combo);
+    let contains_ace = combo
+        .iter()
+        .any(|(card, _)| card.suit == Suit::Hearts && card.rank == Rank::Ace);
+    if !contains_ace {
+        return Vec::new();
+    }
+
+    let premium_partners = combo.iter().any(|(card, _)| {
+        card.suit == Suit::Hearts && (card.rank == Rank::King || card.rank == Rank::Queen)
+    });
+    let support_in_hand = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| {
+            card.suit == Suit::Hearts
+                && card.rank >= Rank::Ten
+                && card.rank < Rank::Queen
+                && *card != Card::new(Rank::Ace, Suit::Hearts)
+        })
+        .count();
+
+    if !premium_partners && total_ten_plus_in_hand >= 3 && support_in_hand >= 2 {
+        return Vec::new();
+    }
+
+    let mut heart_candidates: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts && card.rank != Rank::Ace)
+        .collect();
+
+    if heart_candidates.len() < 2 {
+        return Vec::new();
+    }
+
+    heart_candidates.sort_by(|a, b| b.rank.cmp(&a.rank));
+    heart_candidates.dedup();
+
+    let mut combos = Vec::new();
+    if heart_candidates.len() >= 3 {
+        let limit = heart_candidates.len().min(5);
+        'outer: for i in 0..limit {
+            for j in (i + 1)..limit {
+                for k in (j + 1)..limit {
+                    let candidate = [
+                        heart_candidates[i],
+                        heart_candidates[j],
+                        heart_candidates[k],
+                    ];
+                    if combo_signature_cards(&candidate) == combo_signature {
+                        continue;
+                    }
+                    push_unique_cards(&mut combos, candidate);
+                    if combos.len() >= 6 {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+    } else {
+        let mut off_candidates: Vec<(Card, PassScoreBreakdown)> = input
+            .hand
+            .iter()
+            .copied()
+            .filter(|card| card.suit != Suit::Hearts)
+            .map(|card| {
+                let breakdown = score_single_card(input, card);
+                (card, breakdown)
+            })
+            .collect();
+        if off_candidates.is_empty() {
+            return combos;
+        }
+
+        off_candidates.sort_by(|a, b| b.1.total.partial_cmp(&a.1.total).unwrap_or(Ordering::Equal));
+        off_candidates.dedup_by(|a, b| a.0 == b.0);
+
+        let off_limit = off_candidates.len().min(3);
+        for idx in 0..off_limit {
+            let candidate = [
+                heart_candidates[0],
+                heart_candidates[1],
+                off_candidates[idx].0,
+            ];
+            if combo_signature_cards(&candidate) == combo_signature {
+                continue;
+            }
+            push_unique_cards(&mut combos, candidate);
+        }
+    }
+
+    combos
+}
+
+fn build_premium_split_replacements(
+    input: &PassScoreInput<'_>,
+    combo: &[(Card, PassScoreBreakdown); 3],
+) -> Vec<[Card; 3]> {
+    if !matches!(input.direction, PassingDirection::Left) {
+        return Vec::new();
+    }
+    let urgency = input.moon_estimate.defensive_urgency();
+    if urgency < 0.6 {
+        return Vec::new();
+    }
+
+    let premium_indices: Vec<usize> = combo
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, (card, _))| {
+            if card.suit == Suit::Hearts && card.rank >= Rank::Queen {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if premium_indices.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut support_candidates: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts && card.rank < Rank::Queen)
+        .collect();
+    support_candidates.retain(|card| !combo.iter().any(|(existing, _)| existing == card));
+    if support_candidates.is_empty() {
+        return Vec::new();
+    }
+
+    support_candidates.sort_by(|a, b| b.rank.cmp(&a.rank));
+    support_candidates.dedup();
+
+    let mut combos = Vec::new();
+    let combo_signature = combo_signature_from_pairs(combo);
+    let support_limit = support_candidates.len().min(4);
+
+    let mut premium_slots = premium_indices.clone();
+    premium_slots.sort_by(|&a, &b| combo[b].0.rank.cmp(&combo[a].0.rank));
+
+    'outer: for &slot in &premium_slots {
+        for support_idx in 0..support_limit {
+            let support_card = support_candidates[support_idx];
+            let mut cards = [combo[0].0, combo[1].0, combo[2].0];
+            cards[slot] = support_card;
+
+            if combo_signature_cards(&cards) == combo_signature {
+                continue;
+            }
+
+            let premium_remaining = cards
+                .iter()
+                .filter(|card| card.suit == Suit::Hearts && card.rank >= Rank::Queen)
+                .count();
+            if premium_remaining == 0 {
+                continue;
+            }
+
+            let heart_count = cards
+                .iter()
+                .filter(|card| card.suit == Suit::Hearts)
+                .count();
+            if heart_count < 2 {
+                continue;
+            }
+
+            push_unique_cards(&mut combos, cards);
+            if combos.len() >= 6 {
+                break 'outer;
+            }
+        }
+    }
+
+    combos
+}
+
+fn combo_signature_from_pairs(combo: &[(Card, PassScoreBreakdown); 3]) -> [u8; 3] {
+    let cards = [combo[0].0, combo[1].0, combo[2].0];
+    combo_signature_cards(&cards)
+}
+
+fn combo_signature_cards(cards: &[Card; 3]) -> [u8; 3] {
+    let mut ids = [cards[0].to_id(), cards[1].to_id(), cards[2].to_id()];
+    ids.sort();
+    ids
+}
+
+fn push_unique_cards(storage: &mut Vec<[Card; 3]>, candidate: [Card; 3]) {
+    let signature = combo_signature_cards(&candidate);
+    if storage
+        .iter()
+        .any(|existing| combo_signature_cards(existing) == signature)
+    {
+        return;
+    }
+    storage.push(candidate);
+}
+
+fn contains_combo(list: &[[Card; 3]], candidate: &[Card; 3]) -> bool {
+    let signature = combo_signature_cards(candidate);
+    list.iter()
+        .any(|existing| combo_signature_cards(existing) == signature)
+}
+
+fn synthesize_guarded_combos(input: &PassScoreInput<'_>) -> Vec<[Card; 3]> {
+    let mut combos = Vec::new();
+    let mut hearts: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts)
+        .collect();
+    if hearts.is_empty() {
+        return combos;
+    }
+    hearts.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    let total_ten_plus = hearts.iter().filter(|card| card.rank >= Rank::Ten).count();
+    let mut hearts_without_ace: Vec<Card> = hearts
+        .iter()
+        .copied()
+        .filter(|card| card.rank != Rank::Ace)
+        .collect();
+    hearts_without_ace.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    let insufficient_support = total_ten_plus < 3;
+    let mut safe_hearts: Vec<Card> = if insufficient_support {
+        hearts_without_ace
+            .iter()
+            .copied()
+            .filter(|card| card.rank < Rank::King)
+            .collect()
+    } else {
+        hearts_without_ace.clone()
+    };
+    safe_hearts.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    if safe_hearts.len() >= 3 {
+        let limit = safe_hearts.len().min(5);
+        'outer: for i in 0..limit {
+            for j in (i + 1)..limit {
+                for k in (j + 1)..limit {
+                    let candidate = [safe_hearts[i], safe_hearts[j], safe_hearts[k]];
+                    push_unique_cards(&mut combos, candidate);
+                    if combos.len() >= 6 {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+    }
+
+    if combos.is_empty() && hearts_without_ace.len() >= 3 {
+        let limit = hearts_without_ace.len().min(4);
+        'outer_all: for i in 0..limit {
+            for j in (i + 1)..limit {
+                for k in (j + 1)..limit {
+                    let candidate = [
+                        hearts_without_ace[i],
+                        hearts_without_ace[j],
+                        hearts_without_ace[k],
+                    ];
+                    push_unique_cards(&mut combos, candidate);
+                    if combos.len() >= 6 {
+                        break 'outer_all;
+                    }
+                }
+            }
+        }
+    }
+
+    if combos.is_empty() && total_ten_plus >= 2 && hearts.len() >= 3 {
+        push_unique_cards(&mut combos, [hearts[0], hearts[1], hearts[2]]);
+    }
+
+    if combos.is_empty() {
+        let mut off_cards: Vec<Card> = input
+            .hand
+            .iter()
+            .copied()
+            .filter(|card| card.suit != Suit::Hearts)
+            .collect();
+        off_cards.sort_by(|a, b| {
+            let score_a = score_single_card(input, *a).total;
+            let score_b = score_single_card(input, *b).total;
+            score_b
+                .total_cmp(&score_a)
+                .then_with(|| b.rank.cmp(&a.rank))
+        });
+        off_cards.dedup();
+
+        if safe_hearts.len() >= 2 && !off_cards.is_empty() {
+            for off in off_cards.iter().take(3) {
+                push_unique_cards(&mut combos, [safe_hearts[0], safe_hearts[1], *off]);
+            }
+        } else if hearts.len() >= 1 && off_cards.len() >= 2 {
+            push_unique_cards(&mut combos, [hearts[0], off_cards[0], off_cards[1]]);
+        }
+    }
+
+    combos
 }
 
 enum PremiumSupportResolution {
     Valid,
     Replacements(Vec<[(Card, PassScoreBreakdown); 3]>),
     Discard,
+}
+
+pub fn force_guarded_pass(input: &PassScoreInput<'_>) -> Option<PassCandidate> {
+    if input.hand.len() < 3 {
+        return None;
+    }
+
+    let mut hearts: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit == Suit::Hearts)
+        .collect();
+    if hearts.is_empty() {
+        return None;
+    }
+    hearts.sort_by(|a, b| b.rank.cmp(&a.rank));
+
+    let mut others: Vec<Card> = input
+        .hand
+        .iter()
+        .copied()
+        .filter(|card| card.suit != Suit::Hearts)
+        .collect();
+    others.sort_by(|a, b| {
+        let score_a = score_single_card(input, *a).total;
+        let score_b = score_single_card(input, *b).total;
+        score_b
+            .total_cmp(&score_a)
+            .then_with(|| b.rank.cmp(&a.rank))
+    });
+
+    let mut raw_candidates: Vec<[Card; 3]> = Vec::new();
+    if hearts.len() >= 3 {
+        raw_candidates.push([hearts[0], hearts[1], hearts[2]]);
+    }
+    if hearts.len() >= 2 && !others.is_empty() {
+        raw_candidates.push([hearts[0], hearts[1], others[0]]);
+    }
+    if hearts.len() >= 1 && others.len() >= 2 {
+        raw_candidates.push([hearts[0], others[0], others[1]]);
+    }
+
+    raw_candidates.retain(|combo| {
+        let mut unique = std::collections::HashSet::new();
+        combo.iter().all(|card| unique.insert(card.clone()))
+    });
+
+    let mut synthesized = synthesize_guarded_combos(input);
+    for combo in synthesized.drain(..) {
+        if !contains_combo(&raw_candidates, &combo) {
+            raw_candidates.push(combo);
+        }
+    }
+
+    if raw_candidates.is_empty() {
+        return None;
+    }
+
+    let mut best: Option<(PassCandidate, ComboEval)> = None;
+    for combo_cards in raw_candidates {
+        let breakdown = [
+            (combo_cards[0], score_single_card(input, combo_cards[0])),
+            (combo_cards[1], score_single_card(input, combo_cards[1])),
+            (combo_cards[2], score_single_card(input, combo_cards[2])),
+        ];
+        let eval = evaluate_combo(input, &breakdown);
+        if eval.moon_penalty >= HARD_REJECTION_PENALTY {
+            continue;
+        }
+        let candidate = PassCandidate {
+            cards: combo_cards,
+            score: eval.total,
+            void_score: eval.void_sum,
+            liability_score: eval.liability_sum,
+            moon_score: eval.moon_sum,
+            synergy: eval.synergy,
+            direction_bonus: eval.direction_bonus,
+            moon_liability_penalty: eval.moon_penalty,
+        };
+        match &best {
+            None => best = Some((candidate, eval)),
+            Some((current, _)) => {
+                if candidate.score > current.score {
+                    best = Some((candidate, eval));
+                }
+            }
+        }
+    }
+
+    best.map(|(candidate, _)| candidate)
+}
+
+fn choose_index_combinations(len: usize, choose: usize) -> Vec<Vec<usize>> {
+    if choose == 0 {
+        return vec![Vec::new()];
+    }
+    if choose > len {
+        return Vec::new();
+    }
+    fn backtrack(
+        start: usize,
+        len: usize,
+        choose: usize,
+        current: &mut Vec<usize>,
+        output: &mut Vec<Vec<usize>>,
+    ) {
+        if current.len() == choose {
+            output.push(current.clone());
+            return;
+        }
+        for idx in start..len {
+            current.push(idx);
+            backtrack(idx + 1, len, choose, current, output);
+            current.pop();
+        }
+    }
+
+    let mut output = Vec::new();
+    backtrack(0, len, choose, &mut Vec::new(), &mut output);
+    output
 }
 
 struct ComboEval {
@@ -663,6 +1253,33 @@ fn moon_liability_penalty(
                     * remaining_scale
                     * shooter_bias
                     * urgency_bias
+                    * seat_scale
+                    * direction_scale;
+            }
+
+            let remaining_high_heart_count = remaining_high_hearts.len();
+            if passed_heart_count == 0 && (remaining_mid_hearts + remaining_high_heart_count) >= 2 {
+                let heart_mass = (remaining_mid_hearts + remaining_high_heart_count) as f32;
+                let urgency_bias = 0.7 + 0.3 * urgency_scale;
+                let shooter_bias = 1.0 + 1.1 * (shooter_scale - 1.0).max(0.0);
+                penalty += input.weights.liability_base
+                    * 48.0
+                    * heart_mass
+                    * urgency_bias
+                    * shooter_bias
+                    * seat_scale
+                    * direction_scale;
+            }
+
+            if passed_off_suit > 0 && remaining_mid_hearts >= 2 && passed_mid_hearts == 0 {
+                let urgency_bias = 0.75 + 0.25 * urgency_scale;
+                let remainder_bias = 1.6 + 0.45 * (remaining_mid_hearts as f32).min(4.0);
+                let off_suit_bias = 1.2 + 0.8 * (passed_off_suit as f32);
+                penalty += input.weights.liability_base
+                    * 18.0
+                    * urgency_bias
+                    * remainder_bias
+                    * off_suit_bias
                     * seat_scale
                     * direction_scale;
             }
