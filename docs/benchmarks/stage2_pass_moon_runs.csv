@@ -1,0 +1,8 @@
+label,events,success,failure_other,failure_self,success_rate,moon_occurrences,moon_rate_per_hand,avg_probability
+stage2_pass_moon_v045_handshake19,1974,1915,47,12,0.970111,104,0.025391,0.547715
+stage2_pass_moon_v045_guardfix13,2076,2004,43,29,0.965318,103,0.025146,0.547377
+stage2_pass_moon_v045_guardfix14,2134,2108,21,5,0.987816,40,0.009766,0.546486
+stage2_pass_moon_v045_guardfix15,2059,2029,21,9,0.985430,52,0.012695,0.547492
+stage2_pass_moon_v045_guardfix16,2221,2192,19,10,0.986943,50,0.012207,0.547131
+stage2_pass_moon_v045_guardfix17,2177,2149,18,10,0.987138,48,0.011719,0.547131
+stage2_pass_moon_v045_guardfix18,bench/out/stage2_pass_moon_v045_guardfix18/telemetry.jsonl,15030,0.138656,75.141062,0.267015,188717,0.083580

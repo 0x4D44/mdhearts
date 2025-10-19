@@ -20,6 +20,9 @@ build/
 *.pt
 *.pth
 
+# Benchmark outputs
+bench/out/
+
 # Training artifacts
 runs/
 checkpoints/
