@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MESSAGEBOX_STYLE, MessageBoxW,
+    MB_ICONINFORMATION, MB_OK, MESSAGEBOX_STYLE, MessageBoxW, MB_ICONERROR,
 };
 
 pub enum CliOutcome {
@@ -142,9 +142,16 @@ fn parse_seat(input: &str) -> Result<PlayerPosition, CliError> {
     }
 }
 
+#[cfg(windows)]
 pub fn show_error_box(message: &str) {
     eprintln!("{message}");
-    show_info_box("mdhearts CLI", message);
+    show_box("mdhearts CLI", message, MB_ICONERROR | MB_OK);
+}
+
+#[cfg(not(windows))]
+pub fn show_error_box(message: &str) {
+    eprintln!("{message}");
+    println!("mdhearts CLI: {}", message);
 }
 
 #[cfg(windows)]

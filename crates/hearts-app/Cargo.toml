@@ -5,6 +5,7 @@ edition = "2024"
 
 [features]
 default = []
+winui-host = []
 
 [dependencies]
 hearts-core = { path = "../hearts-core" }
