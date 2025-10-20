@@ -1,5 +1,6 @@
-﻿// Win32 resources for MD Hearts
+// Win32 resources for MD Hearts
 #include <windows.h>
+#include <winres.h>
 
 #define IDI_APPICON  501
 

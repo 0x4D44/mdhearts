@@ -3,7 +3,9 @@ use hearts_core::game::serialization::MatchSnapshot;
 use hearts_core::model::player::PlayerPosition;
 use std::fs;
 use std::path::PathBuf;
+#[cfg(windows)]
 use windows::Win32::Foundation::HWND;
+#[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
     MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MESSAGEBOX_STYLE, MessageBoxW,
 };
@@ -142,13 +144,20 @@ fn parse_seat(input: &str) -> Result<PlayerPosition, CliError> {
 
 pub fn show_error_box(message: &str) {
     eprintln!("{message}");
-    show_box("mdhearts CLI", message, MB_ICONERROR | MB_OK);
+    show_info_box("mdhearts CLI", message);
 }
 
+#[cfg(windows)]
 fn show_info_box(title: &str, message: &str) {
     show_box(title, message, MB_ICONINFORMATION | MB_OK);
 }
 
+#[cfg(not(windows))]
+fn show_info_box(title: &str, message: &str) {
+    println!("{}: {}", title, message);
+}
+
+#[cfg(windows)]
 fn show_box(title: &str, message: &str, flags: MESSAGEBOX_STYLE) {
     let title_wide = encode_wide(title);
     let message_wide = encode_wide(message);
@@ -162,6 +171,7 @@ fn show_box(title: &str, message: &str, flags: MESSAGEBOX_STYLE) {
     }
 }
 
+#[cfg(windows)]
 fn encode_wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }

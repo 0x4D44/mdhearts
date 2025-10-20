@@ -5,7 +5,9 @@ use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
 use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase};
 use hearts_core::model::suit::Suit;
+#[cfg(windows)]
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
+#[cfg(windows)]
 use windows::core::PCWSTR;
 
 pub struct GameController {
@@ -30,10 +32,17 @@ impl GameController {
         if !debug_enabled() {
             return;
         }
-        let mut wide: Vec<u16> = msg.encode_utf16().collect();
-        wide.push(0);
-        unsafe {
-            OutputDebugStringW(PCWSTR(wide.as_ptr()));
+        #[cfg(windows)]
+        {
+            let mut wide: Vec<u16> = msg.encode_utf16().collect();
+            wide.push(0);
+            unsafe {
+                OutputDebugStringW(PCWSTR(wide.as_ptr()));
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            eprintln!("{msg}");
         }
     }
     pub fn new_with_seed(seed: Option<u64>, starting: PlayerPosition) -> Self {
