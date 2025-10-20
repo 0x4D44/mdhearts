@@ -7,6 +7,15 @@ use hearts_core::model::round::{PlayOutcome, RoundState};
 use hearts_core::model::suit::Suit;
 use std::cmp::Ordering;
 
+fn debug_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("MDH_DEBUG_LOGS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+            .unwrap_or(false)
+    })
+}
+
 pub struct PlayPlanner;
 
 impl PlayPlanner {
@@ -78,6 +87,18 @@ impl PlayPlanner {
             score += cards_played * 8;
             if ctx.tracker.is_unseen(card) {
                 score += 20;
+            }
+
+            if debug_enabled() {
+                eprintln!(
+                    "mdhearts: cand {:?} {:?} lead={:?} will_cap={} pen={} score={}",
+                    card,
+                    style,
+                    lead_suit,
+                    will_capture,
+                    penalties,
+                    score
+                );
             }
 
             match best {
@@ -208,6 +229,24 @@ fn base_score(
         BotStyle::Cautious => {}
     }
 
+    // Endgame nuance
+    let my_score = ctx.scores.score(ctx.seat);
+    let cards_left = ctx.hand().len() as i32;
+    // If someone else is near 100 and we can feed them, mildly prefer it in all styles.
+    if snapshot.max_player != ctx.seat && snapshot.max_score >= 90 {
+        if !will_capture && penalties > 0 && winner == snapshot.max_player {
+            score += penalties_i32 * (400 + (20 * (10 - cards_left.max(1))))
+        }
+    }
+    // If we are near 100, avoid captures even more.
+    if my_score >= 85 {
+        if will_capture {
+            score -= 1_200 + penalties_i32 * 900;
+        } else {
+            score += penalties_i32 * 200;
+        }
+    }
+
     score
 }
 
@@ -221,7 +260,7 @@ fn simulate_trick(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> (PlayerP
 
     while !matches!(outcome, PlayOutcome::TrickCompleted { .. }) {
         let next_seat = next_to_play(&sim);
-        let response = choose_followup_card(&sim, next_seat, style);
+        let response = choose_followup_card(&sim, next_seat, style, Some(ctx.tracker), ctx.seat);
         outcome = match sim.play_card(next_seat, response) {
             Ok(result) => result,
             Err(_) => break,
@@ -243,11 +282,18 @@ fn next_to_play(round: &RoundState) -> PlayerPosition {
         .unwrap_or(trick.leader())
 }
 
-fn choose_followup_card(round: &RoundState, seat: PlayerPosition, _style: BotStyle) -> Card {
+fn choose_followup_card(
+    round: &RoundState,
+    seat: PlayerPosition,
+    _style: BotStyle,
+    tracker: Option<&crate::bot::tracker::UnseenTracker>,
+    origin: PlayerPosition,
+) -> Card {
     let legal = legal_moves_for(round, seat);
     let lead_suit = round.current_trick().lead_suit();
 
     if let Some(lead) = lead_suit {
+        // If we can follow suit, play the lowest of lead suit.
         if let Some(card) = legal
             .iter()
             .copied()
@@ -255,6 +301,36 @@ fn choose_followup_card(round: &RoundState, seat: PlayerPosition, _style: BotSty
             .min_by_key(|card| card.rank.value())
         {
             return card;
+        }
+        // Can't follow: dump strategy.
+        // Bias towards dumping hearts if broken; otherwise queen of spades, then max penalty.
+        let hearts_void = tracker.map(|t| t.is_void(seat, Suit::Hearts)).unwrap_or(false);
+        let provisional = provisional_winner(round);
+        let giving_to_origin = provisional == Some(origin);
+        // Avoid giving points to origin (the player we are simulating for) to prevent self-dump skew
+        if giving_to_origin {
+            // choose lowest non-penalty if possible
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .filter(|c| c.penalty_value() == 0)
+                .min_by_key(|c| c.rank.value())
+            {
+                return card;
+            }
+        }
+        if round.hearts_broken() && !hearts_void {
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .filter(|c| c.suit == Suit::Hearts)
+                .max_by_key(|c| c.rank.value())
+            {
+                return card;
+            }
+        }
+        if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
+            return qs;
         }
     }
 
@@ -283,6 +359,17 @@ fn compare_penalty_dump(a: Card, b: Card) -> Ordering {
         (penalty * 100 + rank, rank)
     };
     weight(a).cmp(&weight(b))
+}
+
+fn provisional_winner(round: &RoundState) -> Option<PlayerPosition> {
+    let trick = round.current_trick();
+    let lead = trick.lead_suit()?;
+    trick
+        .plays()
+        .iter()
+        .filter(|p| p.card.suit == lead)
+        .max_by_key(|p| p.card.rank.value())
+        .map(|p| p.position)
 }
 
 #[cfg(test)]
@@ -441,6 +528,73 @@ mod tests {
         let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
         assert_ne!(choice, Card::new(Rank::King, Suit::Hearts));
         assert!(choice.suit == Suit::Hearts);
+    }
+
+    #[test]
+    fn followup_void_prefers_hearts_when_broken() {
+        // Setup: North leads King of Clubs, East plays Ace of Clubs (provisional winner East).
+        // South cannot follow clubs and has hearts available, hearts are broken.
+        // Expect: choose_followup_card for South dumps highest heart.
+        let starting = PlayerPosition::North;
+        let hearts = vec![
+            Card::new(Rank::Ten, Suit::Hearts),
+            Card::new(Rank::Seven, Suit::Hearts),
+        ];
+        let hands = [
+            vec![Card::new(Rank::Two, Suit::Spades)],         // North
+            vec![Card::new(Rank::Two, Suit::Diamonds)],        // East
+            {
+                let mut v = hearts.clone();
+                v.push(Card::new(Rank::Five, Suit::Diamonds));
+                v
+            }, // South (no clubs)
+            vec![Card::new(Rank::Three, Suit::Spades)],        // West
+        ];
+        let plays = [
+            (PlayerPosition::North, Card::new(Rank::King, Suit::Clubs)),
+            (PlayerPosition::East, Card::new(Rank::Ace, Suit::Clubs)),
+        ];
+        let round = build_round(starting, hands, &plays, true);
+        let choice = super::choose_followup_card(
+            &round,
+            PlayerPosition::South,
+            BotStyle::Cautious,
+            None,
+            PlayerPosition::West,
+        );
+        assert_eq!(choice.suit, Suit::Hearts);
+        assert_eq!(choice.rank, Rank::Ten);
+    }
+
+    #[test]
+    fn followup_avoids_self_dump_when_origin_winning() {
+        // Setup similar to previous, but origin is the provisional winner (East).
+        // Expect: follower (South) avoids dumping hearts/QS and plays lowest non-penalty (diamond).
+        let starting = PlayerPosition::North;
+        let hands = [
+            vec![Card::new(Rank::Two, Suit::Spades)],         // North
+            vec![Card::new(Rank::Two, Suit::Diamonds)],        // East
+            vec![
+                Card::new(Rank::Queen, Suit::Spades),
+                Card::new(Rank::Nine, Suit::Hearts),
+                Card::new(Rank::Three, Suit::Diamonds),
+            ], // South (no clubs)
+            vec![Card::new(Rank::Three, Suit::Spades)],        // West
+        ];
+        let plays = [
+            (PlayerPosition::North, Card::new(Rank::King, Suit::Clubs)),
+            (PlayerPosition::East, Card::new(Rank::Ace, Suit::Clubs)),
+        ];
+        let round = build_round(starting, hands, &plays, true);
+        let choice = super::choose_followup_card(
+            &round,
+            PlayerPosition::South,
+            BotStyle::Cautious,
+            None,
+            PlayerPosition::East,
+        );
+        assert_eq!(choice.suit, Suit::Diamonds);
+        assert_eq!(choice.rank, Rank::Three);
     }
 
     #[test]

@@ -4,7 +4,7 @@ mod tracker;
 
 pub use pass::PassPlanner;
 pub use play::PlayPlanner;
-pub use tracker::UnseenTracker;
+pub use tracker::{MoonState, UnseenTracker};
 
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
@@ -104,6 +104,11 @@ pub(crate) fn determine_style(ctx: &BotContext<'_>) -> BotStyle {
     let snapshot = snapshot_scores(ctx.scores);
     let my_score = ctx.scores.score(ctx.seat);
     let hand = ctx.hand();
+
+    // Persisted moon attempt
+    if ctx.tracker.moon_state(ctx.seat) == MoonState::Committed {
+        return BotStyle::AggressiveMoon;
+    }
 
     if should_try_shoot_moon(hand, my_score, snapshot.min_score, ctx.cards_played()) {
         return BotStyle::AggressiveMoon;

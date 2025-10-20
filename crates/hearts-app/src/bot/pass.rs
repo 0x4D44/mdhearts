@@ -8,6 +8,15 @@ use hearts_core::model::suit::Suit;
 
 pub struct PassPlanner;
 
+fn debug_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("MDH_DEBUG_LOGS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+            .unwrap_or(false)
+    })
+}
+
 impl PassPlanner {
     pub fn choose(hand: &Hand, ctx: &BotContext<'_>) -> Option<[Card; 3]> {
         if hand.len() < 3 {
@@ -44,6 +53,12 @@ impl PassPlanner {
                 .cmp(score_a)
                 .then_with(|| card_sort_key(*card_a).cmp(&card_sort_key(*card_b)))
         });
+
+        if debug_enabled() {
+            for (card, score) in scored.iter().take(6) {
+                eprintln!("mdhearts: pass cand {} score={}", card, score);
+            }
+        }
 
         let picks = [scored[0].0, scored[1].0, scored[2].0];
         Some(picks)

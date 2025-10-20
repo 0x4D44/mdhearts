@@ -1,4 +1,5 @@
 use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner, UnseenTracker};
+use crate::bot::MoonState;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -124,22 +125,78 @@ impl GameController {
 
         let out = match out {
             Ok(value) => {
+                // Track card reveal
                 self.unseen_tracker.note_card_played(seat, card);
+                // If this was a follow where suit was not followed, we can deduce a void.
+                if let Some(lead_suit) = pre_plays.first().map(|p| p.1.suit) {
+                    if card.suit != lead_suit {
+                        self.unseen_tracker.note_void(seat, lead_suit);
+                    }
+                }
                 value
             }
             Err(err) => return Err(err),
         };
 
-        if let PlayOutcome::TrickCompleted { winner, .. } = out {
+        if let PlayOutcome::TrickCompleted { winner, penalties } = out {
             let mut plays = pre_plays;
             plays.push((seat, card));
             self.last_trick = Some(TrickSummary { winner, plays });
+            // Update moon state heuristics for the winner and others.
+            self.update_moon_states_after_trick(winner, penalties);
         }
 
         // Defer end-of-round auto-advance to the UI so we can finish
         // trick collect animations before dealing the next round.
 
         Ok(out)
+    }
+
+    fn update_moon_states_after_trick(&mut self, winner: PlayerPosition, penalties: u8) {
+        // Simple Stage 2 heuristic: commit if a seat shows control early with low penalties; abort on loss of control or fragmented penalties.
+        // Inputs: current round state and scoreboard.
+        let round = self.match_state.round();
+        let scores = self.match_state.scores();
+        let cards_played = 52usize.saturating_sub(self.unseen_tracker.unseen_count());
+        let totals = round.penalty_totals();
+
+        for seat in PlayerPosition::LOOP.iter().copied() {
+            let state = self.unseen_tracker.moon_state(seat);
+            // Basic commit gate: early in round, if seat is controlling (won this trick), has low score and penalties still concentrated.
+            if state == MoonState::Inactive || state == MoonState::Considering {
+                if seat == winner
+                    && penalties <= 1
+                    && cards_played <= 20
+                    && scores.score(seat) < 70
+                {
+                    // Move to Considering first; if already Considering, commit.
+                    let next = if state == MoonState::Considering {
+                        MoonState::Committed
+                    } else {
+                        MoonState::Considering
+                    };
+                    self.unseen_tracker.set_moon_state(seat, next);
+                }
+            }
+
+            // Abort conditions for committed moon: lost control and opponents have collected several hearts, or near-end with fragmented points.
+            if state == MoonState::Committed {
+                let my_total = totals[seat.index()];
+                let others_hearts: u32 = PlayerPosition::LOOP
+                    .iter()
+                    .copied()
+                    .filter(|&p| p != seat)
+                    .map(|p| totals[p.index()] as u32)
+                    .sum();
+                let near_end = cards_played >= 36;
+                let lost_control_recent = winner != seat && penalties == 0; // failed to capture a clean trick
+                if others_hearts >= 3 || near_end || lost_control_recent {
+                    // Abort moon mode
+                    let _ = my_total; // reserved for future nuanced checks
+                    self.unseen_tracker.set_moon_state(seat, MoonState::Inactive);
+                }
+            }
+        }
     }
 
     pub fn in_passing_phase(&self) -> bool {
@@ -236,6 +293,16 @@ impl GameController {
             match self.bot_difficulty {
                 BotDifficulty::EasyLegacy => legal.first().copied(),
                 _ => {
+                    // Compute style without holding an immutable borrow across mutation
+                    let commit = {
+                        let ctx_probe = self.bot_context(seat);
+                        crate::bot::determine_style(&ctx_probe)
+                            == crate::bot::BotStyle::AggressiveMoon
+                    };
+                    if commit {
+                        self.unseen_tracker
+                            .set_moon_state(seat, MoonState::Committed);
+                    }
                     let ctx = self.bot_context(seat);
                     PlayPlanner::choose(&legal, &ctx).or_else(|| legal.first().copied())
                 }

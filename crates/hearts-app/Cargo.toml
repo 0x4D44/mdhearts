@@ -16,6 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 [[bin]]
 name = "mdhearts"
 path = "src/main.rs"
+test = false
 
 [build-dependencies]
 time = { version = "0.3", features = ["formatting", "macros"] }
