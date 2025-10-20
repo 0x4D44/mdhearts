@@ -536,13 +536,13 @@ mod tests {
         assert!(!round.hearts_broken());
 
         let west_hand = round.hand(PlayerPosition::West).clone();
-        if let Some(h) = west_hand.iter().find(|c| c.suit == Suit::Hearts).copied() {
-            if west_hand.iter().any(|c| !c.suit.is_heart()) {
-                assert!(matches!(
-                    round.play_card(PlayerPosition::West, h),
-                    Err(PlayError::HeartsNotBroken)
-                ));
-            }
+        if let Some(h) = west_hand.iter().find(|c| c.suit == Suit::Hearts).copied()
+            && west_hand.iter().any(|c| !c.suit.is_heart())
+        {
+            assert!(matches!(
+                round.play_card(PlayerPosition::West, h),
+                Err(PlayError::HeartsNotBroken)
+            ));
         }
     }
 }
