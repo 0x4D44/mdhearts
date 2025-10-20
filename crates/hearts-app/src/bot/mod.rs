@@ -255,6 +255,39 @@ mod tests {
     }
 
     #[test]
+    fn style_forced_by_committed_moon_state() {
+        let seat = PlayerPosition::South;
+        let hand = vec![
+            Card::new(Rank::Two, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Diamonds),
+            Card::new(Rank::Five, Suit::Diamonds),
+            Card::new(Rank::Six, Suit::Spades),
+            Card::new(Rank::Seven, Suit::Spades),
+            Card::new(Rank::Eight, Suit::Hearts),
+            Card::new(Rank::Nine, Suit::Hearts),
+            Card::new(Rank::Ten, Suit::Clubs),
+            Card::new(Rank::Jack, Suit::Clubs),
+            Card::new(Rank::Queen, Suit::Diamonds),
+            Card::new(Rank::King, Suit::Diamonds),
+            Card::new(Rank::Ace, Suit::Diamonds),
+        ];
+        let round = build_round(seat, &hand);
+        let scores = build_scores([30, 38, 22, 27]);
+        let mut tracker = make_tracker(&round);
+        tracker.set_moon_state(seat, crate::bot::MoonState::Committed);
+        let ctx = BotContext::new(
+            seat,
+            &round,
+            &scores,
+            PassingDirection::Hold,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+        );
+        assert_eq!(determine_style(&ctx), BotStyle::AggressiveMoon);
+    }
+
+    #[test]
     fn style_hunt_leader_normal() {
         let seat = PlayerPosition::South;
         let hand = vec![

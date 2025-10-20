@@ -56,22 +56,23 @@ use windows::Win32::UI::Controls::SetScrollInfo;
 use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetDpiForWindow};
 use windows::Win32::UI::WindowsAndMessaging::{
     ACCEL, AdjustWindowRectEx, AppendMenuW, CREATESTRUCTW, CS_DBLCLKS, CS_HREDRAW, CS_VREDRAW,
-    CW_USEDEFAULT, CreateAcceleratorTableW, CreateMenu, CreatePopupMenu, CreateWindowExW,
-    DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL, FVIRTKEY,
-    GWLP_USERDATA, GetClientRect, GetMessageW, GetScrollInfo, GetSystemMetrics, GetWindowLongPtrW,
-    GetWindowPlacement, GetWindowRect, HACCEL, HMENU, IDC_ARROW, IDI_APPLICATION, IsWindow,
-    LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG,
-    MessageBoxW, PM_REMOVE, PeekMessageW, PostQuitMessage, RegisterClassExW, SB_BOTTOM,
-    SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP,
-    SB_VERT, SCROLLBAR_COMMAND, SCROLLINFO, SIF_ALL, SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXSCREEN,
-    SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW, SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE,
-    SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu,
-    SetWindowLongPtrW, SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow,
-    SystemParametersInfoW, TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOWPLACEMENT, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN,
-    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
-    WM_SIZE, WM_TIMER, WM_VSCROLL, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-    WS_OVERLAPPEDWINDOW, WS_VSCROLL, WaitMessage,
+    CW_USEDEFAULT, CheckMenuRadioItem, CreateAcceleratorTableW, CreateMenu, CreatePopupMenu,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, DrawMenuBar, FCONTROL,
+    FVIRTKEY, GWLP_USERDATA, GetClientRect, GetMenu, GetMessageW, GetScrollInfo, GetSubMenu,
+    GetSystemMetrics, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect, HACCEL, HMENU,
+    IDC_ARROW, IDI_APPLICATION, IsWindow, LoadCursorW, LoadIconW, MB_ICONINFORMATION, MB_OK,
+    MF_BYCOMMAND, MF_POPUP, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PM_REMOVE, PeekMessageW,
+    PostQuitMessage, RegisterClassExW, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP,
+    SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SB_VERT, SCROLLBAR_COMMAND, SCROLLINFO, SIF_ALL,
+    SIF_PAGE, SIF_POS, SIF_RANGE, SM_CXSCREEN, SM_CYSCREEN, SPI_GETWORKAREA, SW_SHOW,
+    SW_SHOWMINIMIZED, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetForegroundWindow, SetMenu, SetWindowLongPtrW,
+    SetWindowPlacement, SetWindowPos, SetWindowTextW, ShowWindow, SystemParametersInfoW,
+    TranslateAcceleratorW, TranslateMessage, WINDOW_EX_STYLE, WINDOWPLACEMENT, WM_CLOSE,
+    WM_COMMAND, WM_DESTROY, WM_DPICHANGED, WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDBLCLK,
+    WM_LBUTTONDOWN, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_SIZE, WM_TIMER,
+    WM_VSCROLL, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_VSCROLL,
+    WaitMessage,
 };
 use windows::core::{Interface, PCWSTR, Result, w};
 
@@ -1997,6 +1998,31 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
     unsafe { CreateAcceleratorTableW(&accels).expect("accel") }
 }
 
+fn update_difficulty_menu(hwnd: HWND, difficulty: crate::bot::BotDifficulty) {
+    unsafe {
+        if let Some(top) = GetMenu(hwnd) {
+            // "Game" is the first top-level menu; "Difficulty" is the 3rd item under it (index 2)
+            if let Some(game) = GetSubMenu(top, 0) {
+                if let Some(diff_menu) = GetSubMenu(game, 2) {
+                    let selected = match difficulty {
+                        crate::bot::BotDifficulty::EasyLegacy => ID_OPTIONS_DIFFICULTY_EASY,
+                        crate::bot::BotDifficulty::NormalHeuristic => ID_OPTIONS_DIFFICULTY_NORMAL,
+                        crate::bot::BotDifficulty::FutureHard => ID_OPTIONS_DIFFICULTY_HARD,
+                    };
+                    let _ = CheckMenuRadioItem(
+                        diff_menu,
+                        ID_OPTIONS_DIFFICULTY_EASY,
+                        ID_OPTIONS_DIFFICULTY_HARD,
+                        selected,
+                        MF_BYCOMMAND,
+                    );
+                    let _ = DrawMenuBar(hwnd);
+                }
+            }
+        }
+    }
+}
+
 unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -2017,6 +2043,10 @@ unsafe extern "system" fn window_proc(
                 unsafe {
                     let _ =
                         windows::Win32::UI::WindowsAndMessaging::SetTimer(Some(hwnd), 1, 16, None);
+                }
+                if let Some(cell) = state_cell(hwnd) {
+                    let diff = cell.borrow().controller.bot_difficulty();
+                    update_difficulty_menu(hwnd, diff);
                 }
                 LRESULT(1)
             }
@@ -2325,9 +2355,12 @@ unsafe extern "system" fn window_proc(
                     }
                 }
                 if let Some(diff) = difficulty_request {
-                    let mut state = cell.borrow_mut();
-                    state.controller.set_bot_difficulty(diff);
+                    {
+                        let mut state = cell.borrow_mut();
+                        state.controller.set_bot_difficulty(diff);
+                    }
                     save_bot_difficulty(diff);
+                    update_difficulty_menu(hwnd, diff);
                 }
             }
             if show_rules {
@@ -3256,7 +3289,13 @@ fn save_bot_difficulty(value: crate::bot::BotDifficulty) {
                 crate::bot::BotDifficulty::FutureHard => 2,
             };
             let bytes = raw.to_le_bytes();
-            let _ = RegSetValueExW(key, PCWSTR(name.as_ptr()), Some(0), REG_BINARY, Some(&bytes));
+            let _ = RegSetValueExW(
+                key,
+                PCWSTR(name.as_ptr()),
+                Some(0),
+                REG_BINARY,
+                Some(&bytes),
+            );
             let _ = RegCloseKey(key);
         }
     }

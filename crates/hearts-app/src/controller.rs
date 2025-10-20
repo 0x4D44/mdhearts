@@ -1,5 +1,5 @@
-use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner, UnseenTracker};
 use crate::bot::MoonState;
+use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner, UnseenTracker};
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -77,6 +77,10 @@ impl GameController {
         self.bot_difficulty = difficulty;
     }
 
+    pub fn bot_difficulty(&self) -> BotDifficulty {
+        self.bot_difficulty
+    }
+
     #[cfg(test)]
     fn configure_for_test(&mut self) {
         self.bot_difficulty = BotDifficulty::NormalHeuristic;
@@ -128,10 +132,10 @@ impl GameController {
                 // Track card reveal
                 self.unseen_tracker.note_card_played(seat, card);
                 // If this was a follow where suit was not followed, we can deduce a void.
-                if let Some(lead_suit) = pre_plays.first().map(|p| p.1.suit) {
-                    if card.suit != lead_suit {
-                        self.unseen_tracker.note_void(seat, lead_suit);
-                    }
+                if let Some(lead_suit) = pre_plays.first().map(|p| p.1.suit)
+                    && card.suit != lead_suit
+                {
+                    self.unseen_tracker.note_void(seat, lead_suit);
                 }
                 value
             }
@@ -153,33 +157,53 @@ impl GameController {
     }
 
     fn update_moon_states_after_trick(&mut self, winner: PlayerPosition, penalties: u8) {
-        // Simple Stage 2 heuristic: commit if a seat shows control early with low penalties; abort on loss of control or fragmented penalties.
-        // Inputs: current round state and scoreboard.
+        // Stage 2 heuristic: commit if a seat shows sustained control early with low penalties; abort on loss of control or fragmented points.
         let round = self.match_state.round();
         let scores = self.match_state.scores();
         let cards_played = 52usize.saturating_sub(self.unseen_tracker.unseen_count());
         let totals = round.penalty_totals();
+        use hearts_core::model::rank::Rank;
+        use hearts_core::model::suit::Suit;
 
         for seat in PlayerPosition::LOOP.iter().copied() {
             let state = self.unseen_tracker.moon_state(seat);
-            // Basic commit gate: early in round, if seat is controlling (won this trick), has low score and penalties still concentrated.
-            if state == MoonState::Inactive || state == MoonState::Considering {
-                if seat == winner
-                    && penalties <= 1
-                    && cards_played <= 20
-                    && scores.score(seat) < 70
-                {
-                    // Move to Considering first; if already Considering, commit.
+            // Commit gate: winner of a clean, early trick, with good hearts capacity and some control history.
+            if (state == MoonState::Inactive || state == MoonState::Considering)
+                && seat == winner
+                && penalties == 0
+                && cards_played <= 20
+                && scores.score(seat) < 70
+            {
+                let tricks_won = {
+                    let mut counts = [0u8; 4];
+                    for trick in round.trick_history() {
+                        if let Some(w) = trick.winner() {
+                            counts[w.index()] = counts[w.index()].saturating_add(1);
+                        }
+                    }
+                    counts[seat.index()]
+                };
+                let hand = round.hand(seat);
+                let hearts_in_hand = hand.iter().filter(|c| c.suit == Suit::Hearts).count();
+                let control_hearts = hand
+                    .iter()
+                    .filter(|c| c.suit == Suit::Hearts && c.rank >= Rank::Ten)
+                    .count();
+                if tricks_won >= 1 && hearts_in_hand >= 5 && control_hearts >= 3 {
                     let next = if state == MoonState::Considering {
                         MoonState::Committed
                     } else {
                         MoonState::Considering
                     };
+                    Self::dbg(&format!(
+                        "mdhearts: moon {:?} -> {:?} (seat={:?}, tricks_won={}, hearts={}, control_hearts={})",
+                        state, next, seat, tricks_won, hearts_in_hand, control_hearts
+                    ));
                     self.unseen_tracker.set_moon_state(seat, next);
                 }
             }
 
-            // Abort conditions for committed moon: lost control and opponents have collected several hearts, or near-end with fragmented points.
+            // Abort conditions for committed moon: lost control, opponents collected hearts, near-end, or too few hearts left
             if state == MoonState::Committed {
                 let my_total = totals[seat.index()];
                 let others_hearts: u32 = PlayerPosition::LOOP
@@ -190,10 +214,18 @@ impl GameController {
                     .sum();
                 let near_end = cards_played >= 36;
                 let lost_control_recent = winner != seat && penalties == 0; // failed to capture a clean trick
-                if others_hearts >= 3 || near_end || lost_control_recent {
-                    // Abort moon mode
-                    let _ = my_total; // reserved for future nuanced checks
-                    self.unseen_tracker.set_moon_state(seat, MoonState::Inactive);
+                let hearts_left = round
+                    .hand(seat)
+                    .iter()
+                    .filter(|c| c.suit == Suit::Hearts)
+                    .count();
+                if others_hearts >= 3 || near_end || lost_control_recent || hearts_left < 3 {
+                    Self::dbg(&format!(
+                        "mdhearts: moon ABORT for {:?} (others_hearts={}, near_end={}, lost_control={}, hearts_left={}, my_total={})",
+                        seat, others_hearts, near_end, lost_control_recent, hearts_left, my_total
+                    ));
+                    self.unseen_tracker
+                        .set_moon_state(seat, MoonState::Inactive);
                 }
             }
         }

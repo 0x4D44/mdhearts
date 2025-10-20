@@ -62,10 +62,13 @@ fn endgame_feed_points_to_leader() {
     let starting = PlayerPosition::East;
     let our_seat = PlayerPosition::South;
     let hands = [
-        vec![Card::new(Rank::Two, Suit::Hearts)],                   // North
-        vec![Card::new(Rank::Ace, Suit::Clubs)],                    // East (leader)
-        vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Five, Suit::Hearts)], // South
-        vec![Card::new(Rank::King, Suit::Diamonds)],                // West
+        vec![Card::new(Rank::Two, Suit::Hearts)], // North
+        vec![Card::new(Rank::Ace, Suit::Clubs)],  // East (leader)
+        vec![
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Five, Suit::Hearts),
+        ], // South
+        vec![Card::new(Rank::King, Suit::Diamonds)], // West
     ];
     let round = build_round(
         starting,
@@ -100,4 +103,3 @@ fn endgame_feed_points_to_leader() {
     let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
     assert_eq!(choice, Card::new(Rank::Queen, Suit::Spades));
 }
-

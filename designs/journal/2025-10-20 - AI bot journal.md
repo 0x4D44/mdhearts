@@ -8,3 +8,4 @@
 - Added second golden test for endgame feeding to leader near 100 using direct BotContext and constructed RoundState. All golden tests green.\n
 - Improved follow-up simulation to avoid self-dumps by provisional winner check; added helper to compute provisional winner. All tests still green.\n
 - Added two unit tests for follow-up simulation: (1) void-aware dump prefers hearts when broken; (2) avoid self-dump when our seat is provisional winner. Full workspace tests are green.\n
+- Refined moon commit/abort in controller with stronger gates (tricks won, hearts capacity, control hearts), and abort on lost control/others’ hearts/near-end/few hearts; added debug logs for transitions. Added unit test to ensure committed moon forces AggressiveMoon style.\n

@@ -92,12 +92,7 @@ impl PlayPlanner {
             if debug_enabled() {
                 eprintln!(
                     "mdhearts: cand {:?} {:?} lead={:?} will_cap={} pen={} score={}",
-                    card,
-                    style,
-                    lead_suit,
-                    will_capture,
-                    penalties,
-                    score
+                    card, style, lead_suit, will_capture, penalties, score
                 );
             }
 
@@ -204,10 +199,11 @@ fn base_score(
         score -= (card.rank.value() as i32) * 18;
     }
 
-    if let Some(lead) = lead_suit {
-        if card.suit != lead && !ctx.round.current_trick().plays().is_empty() {
-            score += 200;
-        }
+    if let Some(lead) = lead_suit
+        && card.suit != lead
+        && !ctx.round.current_trick().plays().is_empty()
+    {
+        score += 200;
     }
 
     match style {
@@ -233,10 +229,13 @@ fn base_score(
     let my_score = ctx.scores.score(ctx.seat);
     let cards_left = ctx.hand().len() as i32;
     // If someone else is near 100 and we can feed them, mildly prefer it in all styles.
-    if snapshot.max_player != ctx.seat && snapshot.max_score >= 90 {
-        if !will_capture && penalties > 0 && winner == snapshot.max_player {
-            score += penalties_i32 * (400 + (20 * (10 - cards_left.max(1))))
-        }
+    if snapshot.max_player != ctx.seat
+        && snapshot.max_score >= 90
+        && !will_capture
+        && penalties > 0
+        && winner == snapshot.max_player
+    {
+        score += penalties_i32 * (400 + (20 * (10 - cards_left.max(1))))
     }
     // If we are near 100, avoid captures even more.
     if my_score >= 85 {
@@ -304,7 +303,9 @@ fn choose_followup_card(
         }
         // Can't follow: dump strategy.
         // Bias towards dumping hearts if broken; otherwise queen of spades, then max penalty.
-        let hearts_void = tracker.map(|t| t.is_void(seat, Suit::Hearts)).unwrap_or(false);
+        let hearts_void = tracker
+            .map(|t| t.is_void(seat, Suit::Hearts))
+            .unwrap_or(false);
         let provisional = provisional_winner(round);
         let giving_to_origin = provisional == Some(origin);
         // Avoid giving points to origin (the player we are simulating for) to prevent self-dump skew
@@ -319,15 +320,15 @@ fn choose_followup_card(
                 return card;
             }
         }
-        if round.hearts_broken() && !hearts_void {
-            if let Some(card) = legal
+        if round.hearts_broken()
+            && !hearts_void
+            && let Some(card) = legal
                 .iter()
                 .copied()
                 .filter(|c| c.suit == Suit::Hearts)
                 .max_by_key(|c| c.rank.value())
-            {
-                return card;
-            }
+        {
+            return card;
         }
         if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
             return qs;
@@ -531,6 +532,44 @@ mod tests {
     }
 
     #[test]
+    fn avoid_capture_when_we_are_near_100() {
+        // East (our seat) is near 100 and can either capture with a high heart or slough a low heart to avoid capture.
+        let _seat = PlayerPosition::East;
+        let round = build_round(
+            PlayerPosition::North,
+            [
+                vec![Card::new(Rank::Ten, Suit::Hearts)], // North
+                vec![Card::new(Rank::Nine, Suit::Clubs)], // East hand will be set below
+                vec![
+                    Card::new(Rank::Queen, Suit::Hearts),
+                    Card::new(Rank::Two, Suit::Hearts),
+                ], // South (our seat)
+                vec![Card::new(Rank::Three, Suit::Clubs)], // West
+            ],
+            &[(PlayerPosition::North, Card::new(Rank::Ten, Suit::Hearts))],
+            true,
+        );
+
+        let scores = build_scores([40, 95, 60, 70]); // South has 60, East has 95
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let ctx = make_ctx(
+            PlayerPosition::South,
+            &round,
+            &scores,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+        );
+        let legal = legal_moves_for(&round, PlayerPosition::South);
+        assert!(legal.contains(&Card::new(Rank::Queen, Suit::Hearts)));
+        assert!(legal.contains(&Card::new(Rank::Two, Suit::Hearts)));
+
+        let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
+        // Should prefer to avoid capturing by playing the low heart
+        assert_eq!(choice, Card::new(Rank::Two, Suit::Hearts));
+    }
+
+    #[test]
     fn followup_void_prefers_hearts_when_broken() {
         // Setup: North leads King of Clubs, East plays Ace of Clubs (provisional winner East).
         // South cannot follow clubs and has hearts available, hearts are broken.
@@ -541,14 +580,14 @@ mod tests {
             Card::new(Rank::Seven, Suit::Hearts),
         ];
         let hands = [
-            vec![Card::new(Rank::Two, Suit::Spades)],         // North
-            vec![Card::new(Rank::Two, Suit::Diamonds)],        // East
+            vec![Card::new(Rank::Two, Suit::Spades)],   // North
+            vec![Card::new(Rank::Two, Suit::Diamonds)], // East
             {
                 let mut v = hearts.clone();
                 v.push(Card::new(Rank::Five, Suit::Diamonds));
                 v
             }, // South (no clubs)
-            vec![Card::new(Rank::Three, Suit::Spades)],        // West
+            vec![Card::new(Rank::Three, Suit::Spades)], // West
         ];
         let plays = [
             (PlayerPosition::North, Card::new(Rank::King, Suit::Clubs)),
@@ -572,14 +611,14 @@ mod tests {
         // Expect: follower (South) avoids dumping hearts/QS and plays lowest non-penalty (diamond).
         let starting = PlayerPosition::North;
         let hands = [
-            vec![Card::new(Rank::Two, Suit::Spades)],         // North
-            vec![Card::new(Rank::Two, Suit::Diamonds)],        // East
+            vec![Card::new(Rank::Two, Suit::Spades)],   // North
+            vec![Card::new(Rank::Two, Suit::Diamonds)], // East
             vec![
                 Card::new(Rank::Queen, Suit::Spades),
                 Card::new(Rank::Nine, Suit::Hearts),
                 Card::new(Rank::Three, Suit::Diamonds),
             ], // South (no clubs)
-            vec![Card::new(Rank::Three, Suit::Spades)],        // West
+            vec![Card::new(Rank::Three, Suit::Spades)], // West
         ];
         let plays = [
             (PlayerPosition::North, Card::new(Rank::King, Suit::Clubs)),

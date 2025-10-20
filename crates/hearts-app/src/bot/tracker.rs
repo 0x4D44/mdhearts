@@ -21,6 +21,12 @@ pub struct UnseenTracker {
     moon: [MoonState; 4],
 }
 
+impl Default for UnseenTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnseenTracker {
     pub fn new() -> Self {
         Self {
@@ -128,8 +134,14 @@ mod tests {
         assert!(tracker.is_void(PlayerPosition::South, Suit::Hearts));
 
         use super::MoonState;
-        assert_eq!(tracker.moon_state(PlayerPosition::East), MoonState::Inactive);
+        assert_eq!(
+            tracker.moon_state(PlayerPosition::East),
+            MoonState::Inactive
+        );
         tracker.set_moon_state(PlayerPosition::East, MoonState::Committed);
-        assert_eq!(tracker.moon_state(PlayerPosition::East), MoonState::Committed);
+        assert_eq!(
+            tracker.moon_state(PlayerPosition::East),
+            MoonState::Committed
+        );
     }
 }
