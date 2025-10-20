@@ -564,7 +564,7 @@ impl AppState {
             format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             format
         };
-        let mut controller = GameController::new_with_seed(None, PlayerPosition::North);
+        let controller = GameController::new_with_seed(None, PlayerPosition::North);
         let wic: IWICImagingFactory =
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
         let atlas = AtlasMeta::load_from_assets().unwrap_or_default();
@@ -599,7 +599,7 @@ impl AppState {
             dpi: DpiScale::uniform(initial_dpi),
         };
         if let Some(saved) = load_bot_difficulty() {
-            controller.set_bot_difficulty(saved);
+            this.controller.set_bot_difficulty(saved);
         }
         if let Some(saved) = load_card_back() {
             this.card_back = saved;
@@ -3235,11 +3235,11 @@ fn save_bot_difficulty(value: crate::bot::BotDifficulty) {
     let root = HKEY_CURRENT_USER;
     unsafe {
         let subkey = string_to_wide_z(REG_SUBKEY_APP);
-        let mut key: HKEY = HKEY(0);
+        let mut key: HKEY = HKEY(std::ptr::null_mut());
         if RegCreateKeyExW(
             root,
             PCWSTR(subkey.as_ptr()),
-            0,
+            Some(0),
             None,
             REG_OPTION_NON_VOLATILE,
             KEY_SET_VALUE,
@@ -3256,7 +3256,7 @@ fn save_bot_difficulty(value: crate::bot::BotDifficulty) {
                 crate::bot::BotDifficulty::FutureHard => 2,
             };
             let bytes = raw.to_le_bytes();
-            let _ = RegSetValueExW(key, PCWSTR(name.as_ptr()), 0, REG_BINARY, Some(&bytes));
+            let _ = RegSetValueExW(key, PCWSTR(name.as_ptr()), Some(0), REG_BINARY, Some(&bytes));
             let _ = RegCloseKey(key);
         }
     }
