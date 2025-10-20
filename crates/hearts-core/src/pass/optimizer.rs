@@ -3379,14 +3379,11 @@ fn violates_support_guard(
         .iter()
         .filter(|card| card.suit == Suit::Hearts && combo.iter().all(|(passed, _)| passed != *card))
         .count();
-    let spade_liability_available = input
-        .hand
-        .iter()
-        .any(|card| {
-            card.suit == Suit::Spades
-                && card.rank >= Rank::King
-                && !combo.iter().any(|(passed, _)| passed == card)
-        });
+    let spade_liability_available = input.hand.iter().any(|card| {
+        card.suit == Suit::Spades
+            && card.rank >= Rank::King
+            && !combo.iter().any(|(passed, _)| passed == card)
+    });
     let spade_liability_in_combo = combo.iter().any(|(card, _)| {
         card.is_queen_of_spades() || (card.suit == Suit::Spades && card.rank >= Rank::King)
     });

@@ -166,6 +166,7 @@ impl GameController {
             tracker,
             belief: belief_ref,
             features: self.bot_features,
+            telemetry: None,
         }
     }
     pub fn new_with_seed(seed: Option<u64>, starting: PlayerPosition) -> Self {

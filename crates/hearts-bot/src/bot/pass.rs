@@ -176,9 +176,21 @@ fn log_pass_decision(
         top_moon_penalties.push(candidate.moon_liability_penalty);
     }
 
+    let telemetry = ctx.telemetry();
+    let has_run_metadata = telemetry.is_some();
+    let run_id = telemetry.map(|meta| meta.run_id).unwrap_or("");
+    let hand_index = telemetry.map(|meta| meta.hand_index as i64).unwrap_or(-1);
+    let permutation_index = telemetry
+        .map(|meta| meta.permutation_index as i64)
+        .unwrap_or(-1);
+
     event!(
         target: "hearts_bot::pass_decision",
         Level::INFO,
+        has_run_metadata,
+        run_id = %run_id,
+        hand_index,
+        permutation_index,
         seat = ?ctx.seat,
         direction = ?ctx.passing_direction,
         cards = ?selected_cards,
@@ -410,6 +422,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -450,6 +463,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -502,6 +516,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -540,6 +555,7 @@ mod tests {
             features,
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -580,6 +596,7 @@ mod tests {
             features,
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
@@ -625,6 +642,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         let style = determine_style(&ctx_unseen);
         let snapshot = snapshot_scores(ctx_unseen.scores);
@@ -658,6 +676,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         let snapshot_seen = snapshot_scores(ctx_seen.scores);
         let score_seen = super::score_card(

@@ -5,4 +5,4 @@ pub use bot::{
     BeliefView, BotContext, BotDifficulty, BotFeatures, BotParams, BotStyle, PassPlanner,
     PlayPlanner, ScoreSnapshot, UnseenTracker,
 };
-pub use policy::{HeuristicPolicy, Policy, PolicyContext};
+pub use policy::{HeuristicPolicy, Policy, PolicyContext, TelemetryContext};

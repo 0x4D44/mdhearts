@@ -653,6 +653,7 @@ fn run_eval(
                         passing_direction: passing_dir,
                         belief: belief_ref,
                         features: bot_features,
+                        telemetry: None,
                     };
 
                     let pass_cards = policy.choose_pass(&ctx);
@@ -695,6 +696,7 @@ fn run_eval(
                     passing_direction: passing_dir,
                     belief: belief_ref,
                     features: bot_features,
+                    telemetry: None,
                 };
 
                 // Build observation if collecting data
@@ -966,6 +968,9 @@ fn run_self_play_eval(
                         seat,
                         tracker: &tracker,
                         passing_direction: passing_dir,
+                        belief: None,
+                        features: bot_features,
+                        telemetry: None,
                     };
 
                     let pass_cards = policy.choose_pass(&ctx);
@@ -1007,6 +1012,9 @@ fn run_self_play_eval(
                     seat: current_player,
                     tracker: &tracker,
                     passing_direction: passing_dir,
+                    belief: None,
+                    features: bot_features,
+                    telemetry: None,
                 };
 
                 // Build observation

@@ -11,6 +11,7 @@
 //! to ensure compatibility between observation encoding and model weights.
 
 use super::{Policy, PolicyContext};
+#[cfg(test)]
 use crate::bot::BotFeatures;
 use crate::rl::observation::{ObservationBuilder, SCHEMA_HASH, SCHEMA_VERSION};
 use crate::weights::loader::WeightManifest;
@@ -521,6 +522,7 @@ mod tests {
             passing_direction: PassingDirection::Hold,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
 
         let chosen = policy.choose_play(&ctx);
@@ -555,6 +557,7 @@ mod tests {
             passing_direction: PassingDirection::Left,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
 
         let chosen_pass = policy.choose_pass(&ctx);
@@ -747,6 +750,7 @@ mod tests {
             passing_direction: PassingDirection::Hold,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
 
         let (card, value, log_prob) = policy.forward_with_critic(&ctx);

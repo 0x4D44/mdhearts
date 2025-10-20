@@ -112,6 +112,9 @@ fn main() -> anyhow::Result<()> {
     if let Some(telemetry_path) = summary.telemetry_path.as_ref() {
         println!("Telemetry log: {}", telemetry_path.display());
     }
+    if let Some(pass_details_path) = summary.pass_details_path.as_ref() {
+        println!("Pass detail log: {}", pass_details_path.display());
+    }
     if let Some(outputs) = summary.telemetry_outputs.as_ref() {
         println!("Telemetry summary (JSON): {}", outputs.json_path.display());
         println!(

@@ -9,13 +9,14 @@ use std::time::{Duration, Instant};
 use crate::analytics::{AnalyticsCollector, AnalyticsError};
 use external::ExternalPolicy;
 use hearts_bot::bot::{BotDifficulty, BotFeatures, UnseenTracker};
-use hearts_bot::policy::{HeuristicPolicy, Policy, PolicyContext};
+use hearts_bot::policy::{HeuristicPolicy, Policy, PolicyContext, TelemetryContext};
 use hearts_core::belief::Belief;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::RoundPhase;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Serialize;
+use serde_json::json;
 use thiserror::Error;
 use tracing::{Level, event};
 
@@ -48,6 +49,7 @@ pub struct RunSummary {
     pub plot_path: Option<PathBuf>,
     pub telemetry_path: Option<PathBuf>,
     pub telemetry_outputs: Option<TelemetryOutputs>,
+    pub pass_details_path: Option<PathBuf>,
 }
 
 impl TournamentRunner {
@@ -88,7 +90,24 @@ impl TournamentRunner {
             fs::create_dir_all(&self.outputs.plots_dir)?;
         }
 
+        let telemetry_dir = self
+            .outputs
+            .summary_md
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let pass_details_path = if self.logging_enabled {
+            Some(telemetry_dir.join("pass_details.jsonl"))
+        } else {
+            None
+        };
+
         let mut writer = BufWriter::new(File::create(&self.outputs.jsonl)?);
+        let mut pass_writer = if let Some(path) = pass_details_path.as_ref() {
+            Some(BufWriter::new(File::create(path)?))
+        } else {
+            None
+        };
         let permutations = self.seat_permutations.as_slice();
         let mut rng = StdRng::seed_from_u64(self.config.deals.seed.unwrap_or(0));
         let mut rows_written = 0usize;
@@ -98,7 +117,13 @@ impl TournamentRunner {
             let base_seed = rng.next_u64();
 
             for (perm_index, perm) in permutations.iter().enumerate() {
-                let outcome = self.play_hand(hand_index, perm_index, base_seed, perm)?;
+                let outcome = self.play_hand(
+                    hand_index,
+                    perm_index,
+                    base_seed,
+                    perm,
+                    pass_writer.as_mut(),
+                )?;
                 analytics.record_hand(hand_index, perm_index, &outcome)?;
                 rows_written += write_hand_rows(
                     &mut writer,
@@ -112,6 +137,9 @@ impl TournamentRunner {
         }
 
         writer.flush()?;
+        if let Some(writer) = pass_writer.as_mut() {
+            writer.flush()?;
+        }
 
         let summary = analytics.finalize()?;
         summary.write_markdown(&self.outputs.summary_md)?;
@@ -122,13 +150,6 @@ impl TournamentRunner {
                 None
             }
         };
-
-        let telemetry_dir = self
-            .outputs
-            .summary_md
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
 
         let telemetry_path = if self.logging_enabled {
             Some(telemetry_dir.join("telemetry.jsonl"))
@@ -155,6 +176,7 @@ impl TournamentRunner {
             plot_path,
             telemetry_path,
             telemetry_outputs,
+            pass_details_path,
         })
     }
 }
@@ -210,6 +232,7 @@ impl TournamentRunner {
         permutation_index: usize,
         base_seed: u64,
         permutation: &[usize; 4],
+        mut pass_log: Option<&mut BufWriter<File>>,
     ) -> Result<HandOutcome, RunnerError> {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, base_seed);
         let mut seats = build_seat_states(permutation, &self.agents)?;
@@ -233,6 +256,15 @@ impl TournamentRunner {
                             None
                         };
                         let belief_ref = belief_holder.as_ref();
+                        let telemetry = if self.logging_enabled {
+                            Some(TelemetryContext {
+                                run_id: &self.config.run_id,
+                                hand_index: hand_index as u32,
+                                permutation_index: permutation_index as u32,
+                            })
+                        } else {
+                            None
+                        };
                         let ctx = PolicyContext {
                             seat: seat.seat,
                             hand: round.hand(seat.seat),
@@ -242,10 +274,27 @@ impl TournamentRunner {
                             tracker: &seat.tracker,
                             belief: belief_ref,
                             features: self.bot_features,
+                            telemetry,
                         };
                         let start = Instant::now();
                         let cards = seat.policy.choose_pass(&ctx);
                         let elapsed_ms = seat.metrics.record(start.elapsed());
+
+                        if let Some(writer) = pass_log.as_mut() {
+                            let record = json!({
+                                "hand_index": hand_index,
+                                "permutation_index": permutation_index,
+                                "seat": seat_label(seat.seat),
+                                "agent": seat.agent_name,
+                                "cards": cards
+                                    .iter()
+                                    .map(|c| format!("{:?}", c))
+                                    .collect::<Vec<_>>(),
+                            });
+                            serde_json::to_writer(&mut **writer, &record)
+                                .map_err(RunnerError::from)?;
+                            writer.write_all(b"\n").map_err(RunnerError::from)?;
+                        }
 
                         if self.logging_enabled && tracing::enabled!(Level::INFO) {
                             let cards_str = cards
@@ -310,6 +359,15 @@ impl TournamentRunner {
                     None
                 };
                 let belief_ref = belief_holder.as_ref();
+                let telemetry = if self.logging_enabled {
+                    Some(TelemetryContext {
+                        run_id: &self.config.run_id,
+                        hand_index: hand_index as u32,
+                        permutation_index: permutation_index as u32,
+                    })
+                } else {
+                    None
+                };
                 let ctx = PolicyContext {
                     seat: expected_seat,
                     hand: round.hand(expected_seat),
@@ -319,6 +377,7 @@ impl TournamentRunner {
                     tracker: &seat_state.tracker,
                     belief: belief_ref,
                     features: self.bot_features,
+                    telemetry,
                 };
                 let start = Instant::now();
                 let card = seat_state.policy.choose_play(&ctx);
@@ -423,19 +482,17 @@ fn detect_moon_shooter(penalties: &[u8; 4]) -> Option<PlayerPosition> {
     let twenty_six_count = penalties.iter().filter(|&&v| v == 26).count();
 
     // Standard shoot-the-moon: shooter 0, others 26
-    if zero_count == 1
-        && twenty_six_count == 3
-        && let Some((idx, _)) = penalties.iter().enumerate().find(|(_, p)| **p == 0)
-    {
-        return PlayerPosition::from_index(idx);
+    if zero_count == 1 && twenty_six_count == 3 {
+        if let Some(idx) = penalties.iter().position(|&p| p == 0) {
+            return PlayerPosition::from_index(idx);
+        }
     }
 
     // Alternative variant: shooter 26, others 0 (if penalties inverted)
-    if twenty_six_count == 1
-        && zero_count == 3
-        && let Some((idx, _)) = penalties.iter().enumerate().find(|(_, p)| **p == 26)
-    {
-        return PlayerPosition::from_index(idx);
+    if twenty_six_count == 1 && zero_count == 3 {
+        if let Some(idx) = penalties.iter().position(|&p| p == 26) {
+            return PlayerPosition::from_index(idx);
+        }
     }
 
     None
@@ -868,6 +925,7 @@ mod tests {
             tracker: &tracker,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
         let pass = policy.choose_pass(&ctx);
         assert_eq!(pass.len(), 3);

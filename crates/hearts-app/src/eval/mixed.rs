@@ -254,6 +254,7 @@ fn run_single_game(
                         tracker: &trackers[physical_seat.index()],
                         belief: belief_ref,
                         features: bot_features,
+                        telemetry: None,
                     };
                     policies[policy_idx].choose_pass(&ctx)
                 };
@@ -307,6 +308,7 @@ fn run_single_game(
                 tracker: &trackers[expected_seat.index()],
                 belief: belief_ref,
                 features: bot_features,
+                telemetry: None,
             };
 
             let card = policies[policy_idx].choose_play(&ctx);

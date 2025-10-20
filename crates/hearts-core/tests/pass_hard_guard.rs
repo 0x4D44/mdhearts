@@ -797,7 +797,8 @@ fn stage2_hand_767_forced_prefers_liability_mix() {
         for cand in enumerated {
             assert!(
                 cand.cards.iter().any(|card| {
-                    card.suit != Suit::Hearts && (card.is_queen_of_spades() || card.rank >= Rank::King)
+                    card.suit != Suit::Hearts
+                        && (card.is_queen_of_spades() || card.rank >= Rank::King)
                 }),
                 "enumerator output should include an off-suit liability: {:?}",
                 cand.cards

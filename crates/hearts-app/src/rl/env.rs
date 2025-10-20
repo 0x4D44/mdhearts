@@ -270,13 +270,11 @@ impl HeartsEnv {
     fn build_observation(&self) -> Observation {
         let round = self.match_state.round();
         let hand = round.hand(self.current_seat);
-        let mut belief_holder: Option<Belief> = None;
-        let belief_ref = if self.bot_features.belief_enabled() {
-            belief_holder = Some(Belief::from_state(round, self.current_seat));
-            belief_holder.as_ref()
-        } else {
-            None
-        };
+        let belief_holder = self
+            .bot_features
+            .belief_enabled()
+            .then(|| Belief::from_state(round, self.current_seat));
+        let belief_ref = belief_holder.as_ref();
 
         let ctx = PolicyContext {
             seat: self.current_seat,
@@ -287,6 +285,7 @@ impl HeartsEnv {
             tracker: &self.tracker,
             belief: belief_ref,
             features: self.bot_features,
+            telemetry: None,
         };
 
         self.obs_builder.build(&ctx)

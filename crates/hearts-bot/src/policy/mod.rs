@@ -21,6 +21,14 @@ pub struct PolicyContext<'a> {
     pub tracker: &'a UnseenTracker,
     pub belief: Option<&'a Belief>,
     pub features: BotFeatures,
+    pub telemetry: Option<TelemetryContext<'a>>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct TelemetryContext<'a> {
+    pub run_id: &'a str,
+    pub hand_index: u32,
+    pub permutation_index: u32,
 }
 
 /// Unified interface for AI decision-making (heuristic and learned policies)

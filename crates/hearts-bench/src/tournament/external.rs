@@ -104,18 +104,18 @@ impl ExternalPolicy {
         }
 
         let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-        if let Some(timeout) = self.options.timeout_ms
-            && elapsed_ms > timeout as f64
-        {
-            event!(
-                target: "hearts_bench::external",
-                Level::WARN,
-                agent = %self.name,
-                action,
-                elapsed_ms,
-                timeout_ms = timeout,
-                "external invocation exceeded timeout"
-            );
+        if let Some(timeout) = self.options.timeout_ms {
+            if elapsed_ms > timeout as f64 {
+                event!(
+                    target: "hearts_bench::external",
+                    Level::WARN,
+                    agent = %self.name,
+                    action,
+                    elapsed_ms,
+                    timeout_ms = timeout,
+                    "external invocation exceeded timeout"
+                );
+            }
         }
 
         let response: Response = serde_json::from_slice(&output.stdout)
@@ -425,6 +425,7 @@ mod tests {
             tracker: &tracker,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
         let pass = policy.choose_pass(&ctx);
         assert_eq!(pass.len(), 3);
@@ -451,6 +452,7 @@ mod tests {
             tracker: &play_tracker,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
         let card = policy.choose_play(&play_ctx);
         assert!(play_ctx.hand.contains(card));

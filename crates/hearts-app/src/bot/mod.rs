@@ -1,4 +1,4 @@
 pub use hearts_bot::bot::{
-    BotContext, BotDifficulty, BotParams, BotStyle, PassPlanner, PlayPlanner, ScoreSnapshot,
-    UnseenTracker,
+    BotContext, BotDifficulty, BotFeatures, BotParams, BotStyle, PassPlanner, PlayPlanner,
+    ScoreSnapshot, UnseenTracker,
 };

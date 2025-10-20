@@ -50,6 +50,7 @@ impl Policy for HeuristicPolicy {
             features,
             self.difficulty,
             &params,
+            ctx.telemetry,
         );
 
         // For EasyLegacy, just return first 3 cards
@@ -80,6 +81,7 @@ impl Policy for HeuristicPolicy {
             features,
             self.difficulty,
             &params,
+            ctx.telemetry,
         );
 
         // Compute legal moves
@@ -307,6 +309,7 @@ mod tests {
             tracker: &tracker,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
 
         let mut policy = HeuristicPolicy::easy();
@@ -340,6 +343,7 @@ mod tests {
             tracker: &tracker,
             belief: None,
             features: BotFeatures::default(),
+            telemetry: None,
         };
 
         let mut policy = HeuristicPolicy::normal();

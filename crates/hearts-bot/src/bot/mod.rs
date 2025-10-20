@@ -11,6 +11,7 @@ pub use pass::PassPlanner;
 pub use play::PlayPlanner;
 pub use tracker::UnseenTracker;
 
+use crate::policy::TelemetryContext;
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::passing::PassingDirection;
@@ -153,6 +154,7 @@ pub struct BotContext<'a> {
     pub features: BotFeatures,
     belief: Option<BeliefView<'a>>,
     moon_estimate: MoonEstimate,
+    telemetry: Option<TelemetryContext<'a>>,
 }
 
 impl<'a> BotContext<'a> {
@@ -166,6 +168,7 @@ impl<'a> BotContext<'a> {
         features: BotFeatures,
         difficulty: BotDifficulty,
         params: &'a BotParams,
+        telemetry: Option<TelemetryContext<'a>>,
     ) -> Self {
         let moon_estimator = MoonEstimator::default();
         let moon_features = MoonFeatures::from_state(seat, round, scores, passing_direction);
@@ -181,6 +184,7 @@ impl<'a> BotContext<'a> {
             difficulty,
             params,
             moon_estimate,
+            telemetry,
         }
     }
 
@@ -215,6 +219,10 @@ impl<'a> BotContext<'a> {
 
     pub fn objective_hint(&self) -> Objective {
         self.moon_estimate.objective
+    }
+
+    pub fn telemetry(&self) -> Option<TelemetryContext<'a>> {
+        self.telemetry
     }
 }
 
@@ -391,6 +399,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         assert_eq!(determine_style(&ctx), BotStyle::AggressiveMoon);
     }
@@ -427,6 +436,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         assert_eq!(ctx.objective_hint(), Objective::BlockShooter);
         assert!(ctx.moon_estimate().probability >= 0.32);
@@ -464,6 +474,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         assert_eq!(ctx.objective_hint(), Objective::MyPointsPerHand);
         assert!(ctx.moon_estimate().probability < 0.32);
@@ -491,6 +502,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         assert_eq!(determine_style(&ctx), BotStyle::HuntLeader);
     }
@@ -517,6 +529,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::FutureHard,
             &params,
+            None,
         );
         assert_eq!(determine_style(&ctx), BotStyle::HuntLeader);
     }
@@ -557,6 +570,7 @@ mod tests {
             BotFeatures::new(true, 0.2),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
 
         let matrix = ctx.void_matrix();
@@ -598,6 +612,7 @@ mod tests {
             BotFeatures::default(),
             BotDifficulty::NormalHeuristic,
             &params,
+            None,
         );
         assert_eq!(determine_style(&ctx), BotStyle::Cautious);
     }
@@ -622,6 +637,7 @@ mod tests {
                 BotFeatures::default(),
                 BotDifficulty::NormalHeuristic,
                 &params,
+                None,
             );
             determine_style(&ctx)
         };
@@ -639,6 +655,7 @@ mod tests {
                 BotFeatures::default(),
                 BotDifficulty::NormalHeuristic,
                 &params,
+                None,
             );
             determine_style(&ctx)
         };
