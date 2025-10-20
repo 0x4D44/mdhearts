@@ -1930,9 +1930,30 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
     };
     // Difficulty submenu
     let difficulty = unsafe { CreatePopupMenu().expect("difficulty") };
-    let _ = unsafe { AppendMenuW(difficulty, MF_STRING, ID_OPTIONS_DIFFICULTY_EASY as usize, w!("&Easy (Legacy)")) };
-    let _ = unsafe { AppendMenuW(difficulty, MF_STRING, ID_OPTIONS_DIFFICULTY_NORMAL as usize, w!("&Normal (Heuristic)")) };
-    let _ = unsafe { AppendMenuW(difficulty, MF_STRING, ID_OPTIONS_DIFFICULTY_HARD as usize, w!("&Hard (Future)") ) };
+    let _ = unsafe {
+        AppendMenuW(
+            difficulty,
+            MF_STRING,
+            ID_OPTIONS_DIFFICULTY_EASY as usize,
+            w!("&Easy (Legacy)"),
+        )
+    };
+    let _ = unsafe {
+        AppendMenuW(
+            difficulty,
+            MF_STRING,
+            ID_OPTIONS_DIFFICULTY_NORMAL as usize,
+            w!("&Normal (Heuristic)"),
+        )
+    };
+    let _ = unsafe {
+        AppendMenuW(
+            difficulty,
+            MF_STRING,
+            ID_OPTIONS_DIFFICULTY_HARD as usize,
+            w!("&Hard (Future)"),
+        )
+    };
     let _ = unsafe { AppendMenuW(game, MF_POPUP, difficulty.0 as usize, w!("&Difficulty")) };
 
     let _ = unsafe {

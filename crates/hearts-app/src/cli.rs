@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    MB_ICONINFORMATION, MB_OK, MESSAGEBOX_STYLE, MessageBoxW, MB_ICONERROR,
+    MB_ICONERROR, MB_ICONINFORMATION, MB_OK, MESSAGEBOX_STYLE, MessageBoxW,
 };
 
 pub enum CliOutcome {
