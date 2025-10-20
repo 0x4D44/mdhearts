@@ -72,8 +72,7 @@ impl GameController {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_bot_difficulty(&mut self, difficulty: BotDifficulty) {
+    pub fn set_bot_difficulty(&mut self, difficulty: BotDifficulty) {
         self.bot_difficulty = difficulty;
     }
 

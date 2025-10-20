@@ -88,6 +88,9 @@ const ID_GAME_NEW: u32 = 1001;
 const ID_GAME_RESTART: u32 = 1002;
 const ID_GAME_EXIT: u32 = 1003;
 const ID_OPTIONS_CARD_BACK: u32 = 1201;
+const ID_OPTIONS_DIFFICULTY_EASY: u32 = 1210;
+const ID_OPTIONS_DIFFICULTY_NORMAL: u32 = 1211;
+const ID_OPTIONS_DIFFICULTY_HARD: u32 = 1212;
 const ID_HELP_ABOUT: u32 = 1301;
 const ID_HELP_RULES: u32 = 1302;
 const IDI_APPICON: u16 = 501;
@@ -97,6 +100,7 @@ const ABOUT_BODY_PT: f32 = 16.0;
 const REG_SUBKEY_APP: &str = "Software\\0x4D44\\MDHearts";
 const REG_VALUE_WINDOW_PLACEMENT: &str = "WindowPlacement";
 const REG_VALUE_CARD_BACK: &str = "CardBack";
+const REG_VALUE_BOT_DIFFICULTY: &str = "BotDifficulty";
 const MIN_WINDOW_WIDTH: i32 = 720;
 const MIN_WINDOW_HEIGHT: i32 = 540;
 
@@ -560,7 +564,7 @@ impl AppState {
             format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             format
         };
-        let controller = GameController::new_with_seed(None, PlayerPosition::North);
+        let mut controller = GameController::new_with_seed(None, PlayerPosition::North);
         let wic: IWICImagingFactory =
             unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
         let atlas = AtlasMeta::load_from_assets().unwrap_or_default();
@@ -594,6 +598,9 @@ impl AppState {
             rotate_sides,
             dpi: DpiScale::uniform(initial_dpi),
         };
+        if let Some(saved) = load_bot_difficulty() {
+            controller.set_bot_difficulty(saved);
+        }
         if let Some(saved) = load_card_back() {
             this.card_back = saved;
         }
@@ -1921,6 +1928,13 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             w!("&Restart Round\tF5"),
         )
     };
+    // Difficulty submenu
+    let difficulty = unsafe { CreatePopupMenu().expect("difficulty") };
+    let _ = unsafe { AppendMenuW(difficulty, MF_STRING, ID_OPTIONS_DIFFICULTY_EASY as usize, w!("&Easy (Legacy)")) };
+    let _ = unsafe { AppendMenuW(difficulty, MF_STRING, ID_OPTIONS_DIFFICULTY_NORMAL as usize, w!("&Normal (Heuristic)")) };
+    let _ = unsafe { AppendMenuW(difficulty, MF_STRING, ID_OPTIONS_DIFFICULTY_HARD as usize, w!("&Hard (Future)") ) };
+    let _ = unsafe { AppendMenuW(game, MF_POPUP, difficulty.0 as usize, w!("&Difficulty")) };
+
     let _ = unsafe {
         AppendMenuW(
             game,
@@ -2230,6 +2244,7 @@ unsafe extern "system" fn window_proc(
         WM_COMMAND => {
             let id = (wparam.0 & 0xFFFF) as u32;
             let mut card_back_request: Option<CardBackId> = None;
+            let mut difficulty_request: Option<crate::bot::BotDifficulty> = None;
             let mut show_about = false;
             let mut show_rules = false;
             if let Some(cell) = state_cell(hwnd) {
@@ -2253,6 +2268,15 @@ unsafe extern "system" fn window_proc(
                         ID_GAME_EXIT => unsafe { PostQuitMessage(0) },
                         ID_OPTIONS_CARD_BACK => {
                             card_back_request = Some(state.card_back);
+                        }
+                        ID_OPTIONS_DIFFICULTY_EASY => {
+                            difficulty_request = Some(crate::bot::BotDifficulty::EasyLegacy);
+                        }
+                        ID_OPTIONS_DIFFICULTY_NORMAL => {
+                            difficulty_request = Some(crate::bot::BotDifficulty::NormalHeuristic);
+                        }
+                        ID_OPTIONS_DIFFICULTY_HARD => {
+                            difficulty_request = Some(crate::bot::BotDifficulty::FutureHard);
                         }
                         ID_HELP_RULES => {
                             show_rules = true;
@@ -2278,6 +2302,11 @@ unsafe extern "system" fn window_proc(
                             debug_out("mdhearts: ", &format!("Card back dialog error: {:?}", err));
                         }
                     }
+                }
+                if let Some(diff) = difficulty_request {
+                    let mut state = cell.borrow_mut();
+                    state.controller.set_bot_difficulty(diff);
+                    save_bot_difficulty(diff);
                 }
             }
             if show_rules {
@@ -3179,6 +3208,69 @@ fn load_card_back() -> Option<CardBackId> {
         }
         CardBackId::from_u32(raw)
     }
+}
+
+fn save_bot_difficulty(value: crate::bot::BotDifficulty) {
+    let root = HKEY_CURRENT_USER;
+    unsafe {
+        let subkey = string_to_wide_z(REG_SUBKEY_APP);
+        let mut key: HKEY = HKEY(0);
+        if RegCreateKeyExW(
+            root,
+            PCWSTR(subkey.as_ptr()),
+            0,
+            None,
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            None,
+            &mut key,
+            None,
+        )
+        .is_ok()
+        {
+            let name = string_to_wide_z(REG_VALUE_BOT_DIFFICULTY);
+            let raw: u32 = match value {
+                crate::bot::BotDifficulty::EasyLegacy => 0,
+                crate::bot::BotDifficulty::NormalHeuristic => 1,
+                crate::bot::BotDifficulty::FutureHard => 2,
+            };
+            let bytes = raw.to_le_bytes();
+            let _ = RegSetValueExW(key, PCWSTR(name.as_ptr()), 0, REG_BINARY, Some(&bytes));
+            let _ = RegCloseKey(key);
+        }
+    }
+}
+
+fn load_bot_difficulty() -> Option<crate::bot::BotDifficulty> {
+    let root = HKEY_CURRENT_USER;
+    unsafe {
+        let value = string_to_wide_z(REG_VALUE_BOT_DIFFICULTY);
+        let subkey = string_to_wide_z(REG_SUBKEY_APP);
+        let mut buf = [0u8; 4];
+        let mut size: u32 = buf.len() as u32;
+        if RegGetValueW(
+            root,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_BINARY,
+            None,
+            Some(buf.as_mut_ptr() as *mut _),
+            Some(&mut size),
+        )
+        .is_ok()
+        {
+            if size >= 4 {
+                let raw = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+                return match raw {
+                    0 => Some(crate::bot::BotDifficulty::EasyLegacy),
+                    1 => Some(crate::bot::BotDifficulty::NormalHeuristic),
+                    2 => Some(crate::bot::BotDifficulty::FutureHard),
+                    _ => None,
+                };
+            }
+        }
+    }
+    None
 }
 
 fn save_window_placement(hwnd: HWND) {
