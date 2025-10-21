@@ -3,7 +3,7 @@ mod play;
 mod tracker;
 
 pub use pass::PassPlanner;
-pub use play::PlayPlanner;
+pub use play::{debug_weights_string, PlayPlanner};
 pub use tracker::{MoonState, UnseenTracker};
 
 use hearts_core::model::card::Card;

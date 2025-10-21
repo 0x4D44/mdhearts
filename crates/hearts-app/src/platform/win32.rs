@@ -2000,10 +2000,13 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
 
 fn update_difficulty_menu(hwnd: HWND, difficulty: crate::bot::BotDifficulty) {
     unsafe {
-        if let Some(top) = GetMenu(hwnd) {
+        let top = GetMenu(hwnd);
+        if top.0 != std::ptr::null_mut() {
             // "Game" is the first top-level menu; "Difficulty" is the 3rd item under it (index 2)
-            if let Some(game) = GetSubMenu(top, 0) {
-                if let Some(diff_menu) = GetSubMenu(game, 2) {
+            let game = GetSubMenu(top, 0);
+            if game.0 != std::ptr::null_mut() {
+                let diff_menu = GetSubMenu(game, 2);
+                if diff_menu.0 != std::ptr::null_mut() {
                     let selected = match difficulty {
                         crate::bot::BotDifficulty::EasyLegacy => ID_OPTIONS_DIFFICULTY_EASY,
                         crate::bot::BotDifficulty::NormalHeuristic => ID_OPTIONS_DIFFICULTY_NORMAL,
@@ -2014,7 +2017,7 @@ fn update_difficulty_menu(hwnd: HWND, difficulty: crate::bot::BotDifficulty) {
                         ID_OPTIONS_DIFFICULTY_EASY,
                         ID_OPTIONS_DIFFICULTY_HARD,
                         selected,
-                        MF_BYCOMMAND,
+                        MF_BYCOMMAND.0,
                     );
                     let _ = DrawMenuBar(hwnd);
                 }

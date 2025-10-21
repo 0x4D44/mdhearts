@@ -9,3 +9,17 @@
 - Improved follow-up simulation to avoid self-dumps by provisional winner check; added helper to compute provisional winner. All tests still green.\n
 - Added two unit tests for follow-up simulation: (1) void-aware dump prefers hearts when broken; (2) avoid self-dump when our seat is provisional winner. Full workspace tests are green.\n
 - Refined moon commit/abort in controller with stronger gates (tricks won, hearts capacity, control hearts), and abort on lost control/others’ hearts/near-end/few hearts; added debug logs for transitions. Added unit test to ensure committed moon forces AggressiveMoon style.\n
+- Added endgame avoidance test: when our score is high (=90), prefer non-capturing play; fixed Windows menu API usage to keep tests building; all hearts-app tests pass.\n
+- Added controller-level moon commit?abort golden (unit test): drove three crafted tricks to commit on two clean wins then abort on clean loss. Stabilized by sequencing plays via expected_to_play and seeding a prior trick to bypass 2? rule. All tests pass.\n
+- Implemented leader-targeted dumping in follow-up simulation: when provisional winner is scoreboard leader, prefer QS then hearts; passed leader target from planner simulation. Added unit test to verify QS dump to leader. All tests still green.\n
+- Weight tuning: increased HuntLeader feed-to-leader weight slightly; added leader-hearts golden (dump hearts to leaderboard winner when QS absent). All tests pass after tuning.\n
+- Added structured per-candidate decision logging in play + pass planners (gated by MDH_DEBUG_LOGS). Logs include feature contributions and final totals to aid tuning. All tests still pass.\n
+- Added negative-case test to confirm policy: dumping hearts when broken is acceptable even if provisional winner isn’t the leaderboard player. Adjusted expectations accordingly; all tests pass.\n
+- Early-round cautious lead heuristic: added mild penalty (-600) for leading hearts early even after hearts are broken (unless hunting/mooning). Added golden to assert behavior. All tests passing.\n
+- Tuning pass: raised off-suit dump bonus when void (500?600), increased cards_played bias (x8?x10), strengthened near-100 self-protection, and discouraged passing penalties to leader more (-1200?-1400). All tests remain green.\n
+- Env-driven weight overrides: added MDH_W_* knobs (off-suit, cards_played, early hearts lead, near100, hunt feed, pass to leader). Defaults preserve current tuned values. Tests remain green.\n
+- Documented MDH_W_* weights in README and added startup print of active weights under MDH_DEBUG_LOGS.\n
+- Added CLI command --show-weights and README entry to print active AI weights; preserves existing CLI help.\n
+- Added PlayPlanner::explain_candidates and controller API to expose per-seat candidate scores; new CLI --explain-once <seed> <seat> prints candidates and scores for quick tuning; updated CLI help.\n
+- Added explain tooling: controller API, planner helper, CLI commands (--explain-once, --explain-batch), and a tuning seeds doc to streamline future adjustments.\n
+- Added snapshot-based explain command (--explain-snapshot) and controller constructor from MatchState for direct snapshot analysis. README updated.\n

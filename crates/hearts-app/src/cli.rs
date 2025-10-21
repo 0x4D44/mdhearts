@@ -55,6 +55,89 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
     };
 
     match cmd.as_str() {
+        "--show-weights" => {
+            let s = crate::bot::debug_weights_string();
+            let msg = format!("AI Weights: {s}");
+            println!("{msg}");
+            show_info_box("AI Weights", &msg);
+            Ok(CliOutcome::Handled)
+        }
+        "--explain-once" => {
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--explain-once <seed> <seat>"))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--explain-once <seed> <seat>"))?;
+
+            let mut controller = crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            // Resolve passes if any
+            if controller.in_passing_phase() {
+                if let Some(cards) = controller.simple_pass_for(seat) {
+                    let _ = controller.submit_pass(seat, cards);
+                }
+                let _ = controller.submit_auto_passes_for_others(seat);
+                let _ = controller.resolve_passes();
+            }
+            // Autoplay until target seat turn
+            while !controller.in_passing_phase() && controller.expected_to_play() != seat {
+                if controller.autoplay_one(seat).is_none() {
+                    break;
+                }
+            }
+            let legal = controller.legal_moves(seat);
+            if legal.is_empty() {
+                println!("No legal moves for {:?}", seat);
+                return Ok(CliOutcome::Handled);
+            }
+            let explained = controller.explain_candidates_for(seat);
+            println!("Explain {:?} (seed {}):", seat, seed);
+            for (card, score) in explained.iter() {
+                println!("  {} => {}", card, score);
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--explain-batch" => {
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"))?;
+            let seed_start = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"))?;
+            let count = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"))?;
+
+            for i in 0..count {
+                let seed = seed_start + i;
+                let mut controller = crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+                if controller.in_passing_phase() {
+                    if let Some(cards) = controller.simple_pass_for(seat) {
+                        let _ = controller.submit_pass(seat, cards);
+                    }
+                    let _ = controller.submit_auto_passes_for_others(seat);
+                    let _ = controller.resolve_passes();
+                }
+                while !controller.in_passing_phase() && controller.expected_to_play() != seat {
+                    if controller.autoplay_one(seat).is_none() {
+                        break;
+                    }
+                }
+                let explained = controller.explain_candidates_for(seat);
+                println!("Explain {:?} (seed {}):", seat, seed);
+                for (card, score) in explained.iter() {
+                    println!("  {} => {}", card, score);
+                }
+            }
+            Ok(CliOutcome::Handled)
+        }
         "--export-snapshot" => {
             let path = args
                 .next()
@@ -79,8 +162,34 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             import_snapshot(path)?;
             Ok(CliOutcome::Handled)
         }
+        "--explain-snapshot" => {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or(CliError::MissingArgument("--explain-snapshot <path> <seat>"))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--explain-snapshot <path> <seat>"))?;
+            let json = fs::read_to_string(&path)?;
+            let snapshot = MatchSnapshot::from_json(&json)?;
+            let match_state = snapshot.restore();
+            let controller = crate::controller::GameController::new_from_match_state(match_state);
+            let legal = controller.legal_moves(seat);
+            if legal.is_empty() {
+                println!("No legal moves for {:?}", seat);
+                return Ok(CliOutcome::Handled);
+            }
+            let explained = controller.explain_candidates_for(seat);
+            println!("Explain {:?} from snapshot {}:", seat, path.display());
+            for (card, score) in explained.iter() {
+                println!("  {} => {}", card, score);
+            }
+            Ok(CliOutcome::Handled)
+        }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --help";
+            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat>\n  --explain-batch <seat> <seed_start> <count>\n  --explain-snapshot <path> <seat>\n  --help";
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)

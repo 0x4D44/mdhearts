@@ -54,12 +54,33 @@ impl GameController {
         };
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
-        Self {
+        let this = Self {
             match_state,
             last_trick: None,
             bot_difficulty: BotDifficulty::from_env(),
             unseen_tracker,
-        }
+        };
+        Self::dbg(&format!(
+            "mdhearts: AI weights {}",
+            crate::bot::debug_weights_string()
+        ));
+        this
+    }
+
+    pub fn new_from_match_state(match_state: hearts_core::game::match_state::MatchState) -> Self {
+        let mut unseen_tracker = UnseenTracker::new();
+        unseen_tracker.reset_for_round(match_state.round());
+        let this = Self {
+            match_state,
+            last_trick: None,
+            bot_difficulty: BotDifficulty::from_env(),
+            unseen_tracker,
+        };
+        Self::dbg(&format!(
+            "mdhearts: AI weights {}",
+            crate::bot::debug_weights_string()
+        ));
+        this
     }
 
     fn bot_context(&self, seat: PlayerPosition) -> BotContext<'_> {
@@ -273,6 +294,29 @@ impl GameController {
 
     pub fn passing_direction(&self) -> hearts_core::model::passing::PassingDirection {
         self.match_state.passing_direction()
+    }
+
+    pub fn explain_candidates_for(&self, seat: PlayerPosition) -> Vec<(Card, i32)> {
+        let legal = self.legal_moves(seat);
+        let ctx = self.bot_context(seat);
+        crate::bot::PlayPlanner::explain_candidates(&legal, &ctx)
+    }
+
+    // Test-only helpers
+    #[cfg(test)]
+    pub fn set_round_and_scores_for_test(
+        &mut self,
+        round: hearts_core::model::round::RoundState,
+        scores: [u32; 4],
+    ) {
+        *self.match_state.round_mut() = round;
+        self.match_state.scores_mut().set_totals(scores);
+        self.unseen_tracker.reset_for_round(self.match_state.round());
+    }
+
+    #[cfg(test)]
+    pub fn moon_state_for_test(&self, seat: PlayerPosition) -> crate::bot::MoonState {
+        self.unseen_tracker.moon_state(seat)
     }
 }
 
@@ -580,5 +624,140 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn moon_commit_then_abort_flow() {
+        let mut controller = GameController::new_with_seed(Some(12345), PlayerPosition::South);
+        controller.configure_for_test();
+
+        // Hands setup
+        let south = vec![
+            // Hearts control
+            Card::new(Rank::Ace, Suit::Hearts),
+            Card::new(Rank::King, Suit::Hearts),
+            Card::new(Rank::Queen, Suit::Hearts),
+            Card::new(Rank::Jack, Suit::Hearts),
+            Card::new(Rank::Ten, Suit::Hearts),
+            // Clubs for clean captures
+            Card::new(Rank::Ace, Suit::Clubs),
+            Card::new(Rank::King, Suit::Clubs),
+            // A low diamond to slough
+            Card::new(Rank::Two, Suit::Diamonds),
+        ];
+        let east = vec![
+            Card::new(Rank::Eight, Suit::Clubs),
+            Card::new(Rank::Six, Suit::Clubs),
+            Card::new(Rank::Ace, Suit::Diamonds), // later wins clean diamond trick
+        ];
+        let north = vec![
+            Card::new(Rank::Seven, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Diamonds),
+            Card::new(Rank::Six, Suit::Diamonds),
+        ];
+        let west = vec![
+            Card::new(Rank::Six, Suit::Clubs),
+            Card::new(Rank::Five, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Diamonds),
+        ];
+
+        let round = {
+            use hearts_core::model::hand::Hand;
+            use hearts_core::model::round::{RoundPhase, RoundState};
+            use hearts_core::model::trick::Trick;
+            let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
+            hands[PlayerPosition::South.index()] = Hand::with_cards(south);
+            hands[PlayerPosition::East.index()] = Hand::with_cards(east);
+            hands[PlayerPosition::North.index()] = Hand::with_cards(north);
+            hands[PlayerPosition::West.index()] = Hand::with_cards(west);
+            // Seed a completed trick to avoid first-trick (2C) restrictions
+            let mut seed = Trick::new(PlayerPosition::South);
+            seed.play(PlayerPosition::South, Card::new(Rank::Two, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::West, Card::new(Rank::Three, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::North, Card::new(Rank::Four, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::East, Card::new(Rank::Five, Suit::Clubs)).unwrap();
+            RoundState::from_hands_with_state(
+                hands,
+                PlayerPosition::South,
+                PassingDirection::Hold,
+                RoundPhase::Playing,
+                Trick::new(PlayerPosition::South),
+                vec![seed],
+                false,
+            )
+        };
+        controller.set_round_and_scores_for_test(round, [10, 20, 10, 15]);
+
+        // Trick 1 (clubs): South AC, then West 5C, North 7C, East 6C -> South wins clean
+        let mut t1 = vec![
+            (PlayerPosition::South, Card::new(Rank::Ace, Suit::Clubs)),
+            (PlayerPosition::West, Card::new(Rank::Five, Suit::Clubs)),
+            (PlayerPosition::North, Card::new(Rank::Seven, Suit::Clubs)),
+            (PlayerPosition::East, Card::new(Rank::Six, Suit::Clubs)),
+        ];
+        for _ in 0..4 {
+            let seat = controller.expected_to_play();
+            let idx = t1
+                .iter()
+                .position(|(s, _)| *s == seat)
+                .expect("seat to play present");
+            let (_, card) = t1.remove(idx);
+            let legal = controller.legal_moves(seat);
+            assert!(legal.contains(&card), "illegal {:?} for {:?}", card, seat);
+            controller.play(seat, card).expect("play ok");
+        }
+
+        assert_eq!(
+            controller.moon_state_for_test(PlayerPosition::South) as u8,
+            crate::bot::MoonState::Considering as u8
+        );
+
+        // Trick 2: South KC, West 6C, North 3D (void), East 8C -> South still wins clean
+        let mut t2 = vec![
+            (PlayerPosition::South, Card::new(Rank::King, Suit::Clubs)),
+            (PlayerPosition::West, Card::new(Rank::Six, Suit::Clubs)),
+            (PlayerPosition::North, Card::new(Rank::Three, Suit::Diamonds)),
+            (PlayerPosition::East, Card::new(Rank::Eight, Suit::Clubs)),
+        ];
+        for _ in 0..4 {
+            let seat = controller.expected_to_play();
+            let idx = t2
+                .iter()
+                .position(|(s, _)| *s == seat)
+                .expect("seat to play present");
+            let (_, card) = t2.remove(idx);
+            let legal = controller.legal_moves(seat);
+            assert!(legal.contains(&card), "illegal {:?} for {:?}", card, seat);
+            controller.play(seat, card).expect("play ok");
+        }
+
+        assert_eq!(
+            controller.moon_state_for_test(PlayerPosition::South) as u8,
+            crate::bot::MoonState::Committed as u8
+        );
+
+        // Trick 3 (diamonds): South 2D, West 4D, North 3D, East AD -> East wins clean => abort
+        let mut t3 = vec![
+            (PlayerPosition::South, Card::new(Rank::Two, Suit::Diamonds)),
+            (PlayerPosition::West, Card::new(Rank::Four, Suit::Diamonds)),
+            (PlayerPosition::North, Card::new(Rank::Six, Suit::Diamonds)),
+            (PlayerPosition::East, Card::new(Rank::Ace, Suit::Diamonds)),
+        ];
+        for _ in 0..4 {
+            let seat = controller.expected_to_play();
+            let idx = t3
+                .iter()
+                .position(|(s, _)| *s == seat)
+                .expect("seat to play present");
+            let (_, card) = t3.remove(idx);
+            let legal = controller.legal_moves(seat);
+            assert!(legal.contains(&card), "illegal {:?} for {:?}", card, seat);
+            controller.play(seat, card).expect("play ok");
+        }
+
+        assert_eq!(
+            controller.moon_state_for_test(PlayerPosition::South) as u8,
+            crate::bot::MoonState::Inactive as u8
+        );
     }
 }

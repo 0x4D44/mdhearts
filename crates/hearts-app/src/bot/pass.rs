@@ -5,6 +5,7 @@ use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::rank::Rank;
 use hearts_core::model::suit::Suit;
+use std::sync::OnceLock;
 
 pub struct PassPlanner;
 
@@ -77,55 +78,73 @@ fn score_card(
     snapshot: super::ScoreSnapshot,
 ) -> i32 {
     let mut score: i32 = 0;
+    let mut parts: Vec<( &'static str, i32)> = Vec::new();
     let suit_len = count_cards_in_suit(hand, card.suit);
     let rank_value = card.rank.value() as i32;
     let card_penalty = card.penalty_value() as i32;
 
     if card.is_queen_of_spades() {
         score += 18_000;
+        parts.push(("qs_priority", 18_000));
     }
 
     if card.suit == Suit::Spades && !matches!(style, BotStyle::AggressiveMoon) {
         match card.rank {
-            Rank::Ace => score += 5_000,
-            Rank::King => score += 7_000,
-            Rank::Queen => score += 18_000,
-            Rank::Jack => score += 2_500,
+            Rank::Ace => { score += 5_000; parts.push(("spade_ace", 5000)); }
+            Rank::King => { score += 7_000; parts.push(("spade_king", 7000)); }
+            Rank::Queen => { score += 18_000; parts.push(("spade_queen", 18000)); }
+            Rank::Jack => { score += 2_500; parts.push(("spade_jack", 2500)); }
             _ => {}
         }
     }
 
     if card.suit == Suit::Hearts {
-        score += 6_000 + rank_value * 120;
+        let d = 6_000 + rank_value * 120;
+        score += d;
+        parts.push(("hearts_value", d));
     } else if rank_value >= Rank::King.value() as i32 {
-        score += 2_200 + rank_value * 80;
+        let d = 2_200 + rank_value * 80;
+        score += d;
+        parts.push(("high_rank_offsuit", d));
     }
 
     if suit_len <= 2 {
-        score += 4_000 - (suit_len as i32 * 800);
+        let d = 4_000 - (suit_len as i32 * 800);
+        score += d;
+        parts.push(("short_suit_void", d));
     } else if suit_len >= 5 {
-        score -= (suit_len as i32 - 4) * 400;
+        let d = -((suit_len as i32 - 4) * 400);
+        score += d;
+        parts.push(("long_suit_penalty", d));
     }
 
     if passing_to_trailing {
-        score += card_penalty * 1_400;
+        let d = card_penalty * 1_400;
+        score += d;
+        parts.push(("to_trailing_penalty_bonus", d));
     }
 
     if passing_to_leader {
-        score -= card_penalty * 1_200;
+        let d = -(card_penalty * pass_weights().to_leader_penalty);
+        score += d;
+        parts.push(("to_leader_penalty_avoid", d));
     }
 
     if my_score >= 75 {
-        score += card_penalty * 1_600;
+        let d = card_penalty * 1_600;
+        score += d;
+        parts.push(("high_self_score_shed", d));
     }
 
     if ctx.tracker.is_unseen(card) {
         score += 90;
+        parts.push(("unseen_bonus", 90));
     }
 
     let two_of_clubs = Card::new(Rank::Two, Suit::Clubs);
     if card == two_of_clubs {
         score -= 4_000;
+        parts.push(("two_of_clubs_keep", -4000));
     }
 
     // Style adjustments
@@ -133,22 +152,30 @@ fn score_card(
         BotStyle::AggressiveMoon => {
             if card.suit == Suit::Hearts {
                 score -= 9_000;
+                parts.push(("moon_keep_hearts", -9000));
             }
             if card.is_queen_of_spades() {
                 score -= 12_000;
+                parts.push(("moon_keep_qs", -12000));
             }
             if card.suit == Suit::Spades && card.rank >= Rank::Queen {
                 score -= 9_000;
+                parts.push(("moon_keep_high_spades", -9000));
             }
             if suit_len == 1 && card.suit != Suit::Hearts {
                 score += 2_500;
+                parts.push(("moon_void_nonhearts", 2500));
             }
         }
         BotStyle::HuntLeader => {
             if card_penalty > 0 {
-                score += 900 * card_penalty;
+                let d = 900 * card_penalty;
+                score += d;
+                parts.push(("hunt_pass_penalty", d));
                 if passing_to_trailing {
-                    score += 600 * card_penalty;
+                    let d2 = 600 * card_penalty;
+                    score += d2;
+                    parts.push(("hunt_pass_to_trailing", d2));
                 }
             }
         }
@@ -157,14 +184,39 @@ fn score_card(
 
     // Late-round adjustment to shed high cards.
     let cards_played = ctx.cards_played() as i32;
-    score += cards_played * 12;
+    let d = cards_played * 12;
+    score += d;
+    parts.push(("cards_played_bias", d));
 
     // Bias towards discarding the very highest ranks when we are well ahead.
     if snapshot.min_player == ctx.seat && snapshot.max_score - snapshot.min_score >= 15 {
-        score += rank_value * 40;
+        let d = rank_value * 40;
+        score += d;
+        parts.push(("leader_high_rank_bias", d));
     }
-
+    if debug_enabled() {
+        let mut detail = String::new();
+        use std::fmt::Write as _;
+        for (name, delta) in &parts {
+            let _ = write!(&mut detail, " {}={}", name, delta);
+        }
+        eprintln!("mdhearts: pass {} total={} parts:{}", card, score, detail);
+    }
     score
+}
+
+struct PassWeights {
+    to_leader_penalty: i32,
+}
+
+fn pass_weights() -> &'static PassWeights {
+    static CACHED: OnceLock<PassWeights> = OnceLock::new();
+    CACHED.get_or_init(|| PassWeights {
+        to_leader_penalty: std::env::var("MDH_W_PASS_TO_LEADER_PENALTY")
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(1400),
+    })
 }
 
 #[cfg(test)]

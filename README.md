@@ -11,6 +11,10 @@ Modern Rust revival of the classic Microsoft Hearts experience.
 - `cargo run -p hearts-app --bin mdhearts`
 - `mdhearts.exe --export-snapshot snapshots/test.json [seed] [seat]`
 - `mdhearts.exe --import-snapshot snapshots/test.json`
+- `mdhearts.exe --show-weights` (prints active AI weights)
+- `mdhearts.exe --explain-once <seed> <seat>` (prints candidate scores at first decision for that seat)
+- `mdhearts.exe --explain-batch <seat> <seed_start> <count>` (prints candidates across a range of seeds)
+- `mdhearts.exe --explain-snapshot <path> <seat>` (prints candidates for a seat from a saved snapshot)
 
 Additional references:
 - Win32 UI roadmap: `docs/WIN32_UI_PLAN.md`
@@ -20,6 +24,24 @@ Additional references:
 ## Configuration
 - `MDH_BOT_DIFFICULTY` (`easy`, `normal`, `hard`): controls AI play style. `normal` enables the new heuristic planner; `easy` retains the legacy logic.
 - `MDH_DEBUG_LOGS=1`: emits detailed AI decision output to DebugView for diagnostics.
+
+### AI tuning (env weights)
+When `MDH_DEBUG_LOGS=1` is enabled, the app prints active AI weights at startup and per-decision feature contributions. You can override some weights at runtime via environment variables (no rebuild required):
+
+- `MDH_W_OFFSUIT_BONUS` (default `600`): bonus per penalty point when dumping off-suit while void.
+- `MDH_W_CARDS_PLAYED` (default `10`): global pacing factor per card played.
+- `MDH_W_EARLY_HEARTS_LEAD` (default `600`): cautious penalty for leading hearts early even if hearts are broken.
+- `MDH_W_NEAR100_SELF_CAPTURE_BASE` (default `1300`): baseline penalty for capturing when own score ≥85.
+- `MDH_W_NEAR100_SHED_PERPEN` (default `250`): bonus per penalty shed when own score ≥85.
+- `MDH_W_HUNT_FEED_PERPEN` (default `800`): bonus per penalty fed to the current leader when hunting.
+- `MDH_W_PASS_TO_LEADER_PENALTY` (default `1400`): passing-time penalty per penalty point when passing to the current leader.
+
+Example (PowerShell):
+```
+$env:MDH_DEBUG_LOGS = "1"
+$env:MDH_W_OFFSUIT_BONUS = "700"
+cargo run -p hearts-app --bin mdhearts
+```
 
 
 ## Release Notes
