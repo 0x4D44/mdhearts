@@ -1,3 +1,5 @@
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use crate::bot::MoonState;
 use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner, UnseenTracker};
 use hearts_core::game::match_state::MatchState;
@@ -83,7 +85,7 @@ impl GameController {
         this
     }
 
-    fn bot_context(&self, seat: PlayerPosition) -> BotContext<'_> {
+    pub fn bot_context(&self, seat: PlayerPosition) -> BotContext<'_> {
         BotContext::new(
             seat,
             self.match_state.round(),
@@ -299,7 +301,12 @@ impl GameController {
     pub fn explain_candidates_for(&self, seat: PlayerPosition) -> Vec<(Card, i32)> {
         let legal = self.legal_moves(seat);
         let ctx = self.bot_context(seat);
-        crate::bot::PlayPlanner::explain_candidates(&legal, &ctx)
+        match self.bot_difficulty {
+            BotDifficulty::SearchLookahead => {
+                crate::bot::PlayPlannerHard::explain_candidates(&legal, &ctx)
+            }
+            _ => crate::bot::PlayPlanner::explain_candidates(&legal, &ctx),
+        }
     }
 
     // Test-only helpers
@@ -311,7 +318,8 @@ impl GameController {
     ) {
         *self.match_state.round_mut() = round;
         self.match_state.scores_mut().set_totals(scores);
-        self.unseen_tracker.reset_for_round(self.match_state.round());
+        self.unseen_tracker
+            .reset_for_round(self.match_state.round());
     }
 
     #[cfg(test)]
@@ -368,6 +376,21 @@ impl GameController {
         } else {
             match self.bot_difficulty {
                 BotDifficulty::EasyLegacy => legal.first().copied(),
+                BotDifficulty::SearchLookahead => {
+                    // Compute style without holding an immutable borrow across mutation
+                    let commit = {
+                        let ctx_probe = self.bot_context(seat);
+                        crate::bot::determine_style(&ctx_probe)
+                            == crate::bot::BotStyle::AggressiveMoon
+                    };
+                    if commit {
+                        self.unseen_tracker
+                            .set_moon_state(seat, MoonState::Committed);
+                    }
+                    let ctx = self.bot_context(seat);
+                    crate::bot::PlayPlannerHard::choose(&legal, &ctx)
+                        .or_else(|| legal.first().copied())
+                }
                 _ => {
                     // Compute style without holding an immutable borrow across mutation
                     let commit = {
@@ -672,10 +695,14 @@ mod tests {
             hands[PlayerPosition::West.index()] = Hand::with_cards(west);
             // Seed a completed trick to avoid first-trick (2C) restrictions
             let mut seed = Trick::new(PlayerPosition::South);
-            seed.play(PlayerPosition::South, Card::new(Rank::Two, Suit::Clubs)).unwrap();
-            seed.play(PlayerPosition::West, Card::new(Rank::Three, Suit::Clubs)).unwrap();
-            seed.play(PlayerPosition::North, Card::new(Rank::Four, Suit::Clubs)).unwrap();
-            seed.play(PlayerPosition::East, Card::new(Rank::Five, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::South, Card::new(Rank::Two, Suit::Clubs))
+                .unwrap();
+            seed.play(PlayerPosition::West, Card::new(Rank::Three, Suit::Clubs))
+                .unwrap();
+            seed.play(PlayerPosition::North, Card::new(Rank::Four, Suit::Clubs))
+                .unwrap();
+            seed.play(PlayerPosition::East, Card::new(Rank::Five, Suit::Clubs))
+                .unwrap();
             RoundState::from_hands_with_state(
                 hands,
                 PlayerPosition::South,
@@ -716,7 +743,10 @@ mod tests {
         let mut t2 = vec![
             (PlayerPosition::South, Card::new(Rank::King, Suit::Clubs)),
             (PlayerPosition::West, Card::new(Rank::Six, Suit::Clubs)),
-            (PlayerPosition::North, Card::new(Rank::Three, Suit::Diamonds)),
+            (
+                PlayerPosition::North,
+                Card::new(Rank::Three, Suit::Diamonds),
+            ),
             (PlayerPosition::East, Card::new(Rank::Eight, Suit::Clubs)),
         ];
         for _ in 0..4 {

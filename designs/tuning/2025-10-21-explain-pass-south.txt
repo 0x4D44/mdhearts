@@ -1,0 +1,26 @@
+﻿# explain pass batch (seat=south, start=100, count=8)
+AI Weights: off_suit_dump_bonus=600 cards_played_bias=10 early_hearts_lead_caution=600 near100_self_capture_base=1300 near100_shed_perpen=250 hunt_feed_perpen=800 leader_feed_base=120 nonleader_feed_perpen=1200 leader_feed_gap_per10=40
+Explain-pass South (seed 100):
+  Hand: 3C, 6C, AC, 2D, AD, 2S, 10S, QS, KS, 6H, 10H, JH, QH
+  Picks: QS, KS, QH
+Explain-pass South (seed 101):
+  Hand: 2C, 3C, 8C, JC, AC, JD, 3S, 10S, 4H, 6H, 9H, KH, AH
+  Picks: AH, KH, 9H
+Explain-pass South (seed 102):
+  Hand: 4C, 6C, 9C, 10C, KC, 5D, 10D, 3S, 6S, 8S, 6H, JH, KH
+  Picks: KH, JH, 6H
+Explain-pass South (seed 103):
+  Hand: 6C, KC, 4D, 6D, 7D, AD, 3S, 6S, 8S, 4H, 6H, 7H, 8H
+  Picks: 8H, 7H, 6H
+Explain-pass South (seed 104):
+  Hand: 7C, 8C, JC, QC, 3D, 6D, 8D, JD, 5S, 9S, 10S, JS, QH
+  Picks: QH, JS, 7C
+Explain-pass South (seed 105):
+  Hand: 9C, 2D, 5D, 7D, JD, KD, 2S, 5S, 8S, KS, 8H, JH, KH
+  Picks: KS, KH, JH
+Explain-pass South (seed 106):
+  Hand: 2C, 5C, 7C, 9C, 10C, 2D, 3D, AD, 10S, AS, 4H, 6H, 9H
+  Picks: AS, 9H, 6H
+Explain-pass South (seed 107):
+  Hand: 2C, 9C, 10C, 4D, 6D, 7D, QD, 2S, 9S, 10S, KS, AS, 5H
+  Picks: KS, 5H, AS

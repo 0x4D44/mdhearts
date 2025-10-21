@@ -4,6 +4,8 @@ use hearts_core::model::player::PlayerPosition;
 use std::fs;
 use std::path::PathBuf;
 #[cfg(windows)]
+use std::sync::OnceLock;
+#[cfg(windows)]
 use windows::Win32::Foundation::HWND;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -56,9 +58,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
 
     match cmd.as_str() {
         "--show-weights" => {
-            let s = crate::bot::debug_weights_string();
-            let msg = format!("AI Weights: {s}");
-            println!("{msg}");
+            let norm = crate::bot::debug_weights_string();
+            let hard = crate::bot::debug_hard_weights_string();
+            let msg = format!("AI Weights (Normal): {}\nAI Weights (Hard):   {}", norm, hard);
+            println!("{}", msg);
             show_info_box("AI Weights", &msg);
             Ok(CliOutcome::Handled)
         }
@@ -72,8 +75,13 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 .map(|s| parse_seat(&s))
                 .transpose()?
                 .ok_or(CliError::MissingArgument("--explain-once <seed> <seat>"))?;
+            let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s));
 
-            let mut controller = crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            let mut controller =
+                crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            if let Some(d) = difficulty {
+                controller.set_bot_difficulty(d);
+            }
             // Resolve passes if any
             if controller.in_passing_phase() {
                 if let Some(cards) = controller.simple_pass_for(seat) {
@@ -95,29 +103,62 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             }
             let explained = controller.explain_candidates_for(seat);
             println!("Explain {:?} (seed {}):", seat, seed);
+            println!(
+                "  {} candidates (difficulty={:?})",
+                explained.len(),
+                controller.bot_difficulty()
+            );
+            // Show Hard planner stats if available
+            if matches!(
+                controller.bot_difficulty(),
+                crate::bot::BotDifficulty::FutureHard
+            ) {
+                if let Some(stats) = crate::bot::search::last_stats() {
+                    println!(
+                        "  hard-stats: scanned={} elapsed={}ms",
+                        stats.scanned, stats.elapsed_ms
+                    );
+                }
+            }
             for (card, score) in explained.iter() {
                 println!("  {} => {}", card, score);
+            }
+            // Optional verbose breakdown for Hard when debug logs are enabled
+            if matches!(
+                controller.bot_difficulty(),
+                crate::bot::BotDifficulty::FutureHard
+            ) && debug_logs_enabled() {
+                let legal = controller.legal_moves(seat);
+                let ctx = controller.bot_context(seat);
+                let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
+                println!("  hard-verbose (card base cont total):");
+                for (c, b, cont, t) in verbose {
+                    println!("    {} {} {} {}", c, b, cont, t);
+                }
             }
             Ok(CliOutcome::Handled)
         }
         "--explain-batch" => {
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"))?;
-            let seed_start = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"))?;
-            let count = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"),
+            )?;
+            let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s));
 
             for i in 0..count {
                 let seed = seed_start + i;
-                let mut controller = crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+                let mut controller = crate::controller::GameController::new_with_seed(
+                    Some(seed),
+                    PlayerPosition::North,
+                );
+                if let Some(d) = difficulty {
+                    controller.set_bot_difficulty(d);
+                }
                 if controller.in_passing_phase() {
                     if let Some(cards) = controller.simple_pass_for(seat) {
                         let _ = controller.submit_pass(seat, cards);
@@ -132,8 +173,36 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 }
                 let explained = controller.explain_candidates_for(seat);
                 println!("Explain {:?} (seed {}):", seat, seed);
+                println!(
+                    "  {} candidates (difficulty={:?})",
+                    explained.len(),
+                    controller.bot_difficulty()
+                );
+                if matches!(
+                    controller.bot_difficulty(),
+                    crate::bot::BotDifficulty::FutureHard
+                ) {
+                    if let Some(stats) = crate::bot::search::last_stats() {
+                        println!(
+                            "  hard-stats: scanned={} elapsed={}ms",
+                            stats.scanned, stats.elapsed_ms
+                        );
+                    }
+                }
                 for (card, score) in explained.iter() {
                     println!("  {} => {}", card, score);
+                }
+                if matches!(
+                    controller.bot_difficulty(),
+                    crate::bot::BotDifficulty::FutureHard
+                ) && debug_logs_enabled() {
+                    let legal = controller.legal_moves(seat);
+                    let ctx = controller.bot_context(seat);
+                    let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
+                    println!("  hard-verbose (card base cont total):");
+                    for (c, b, cont, t) in verbose {
+                        println!("    {} {} {} {}", c, b, cont, t);
+                    }
                 }
             }
             Ok(CliOutcome::Handled)
@@ -166,12 +235,12 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             let path = args
                 .next()
                 .map(PathBuf::from)
-                .ok_or(CliError::MissingArgument("--explain-snapshot <path> <seat>"))?;
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--explain-snapshot <path> <seat>"))?;
+                .ok_or(CliError::MissingArgument(
+                    "--explain-snapshot <path> <seat>",
+                ))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--explain-snapshot <path> <seat>"),
+            )?;
             let json = fs::read_to_string(&path)?;
             let snapshot = MatchSnapshot::from_json(&json)?;
             let match_state = snapshot.restore();
@@ -183,19 +252,349 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             }
             let explained = controller.explain_candidates_for(seat);
             println!("Explain {:?} from snapshot {}:", seat, path.display());
+            println!(
+                "  {} candidates (difficulty={:?})",
+                explained.len(),
+                controller.bot_difficulty()
+            );
+            if matches!(
+                controller.bot_difficulty(),
+                crate::bot::BotDifficulty::FutureHard
+            ) {
+                if let Some(stats) = crate::bot::search::last_stats() {
+                    println!(
+                        "  hard-stats: scanned={} elapsed={}ms",
+                        stats.scanned, stats.elapsed_ms
+                    );
+                }
+            }
             for (card, score) in explained.iter() {
                 println!("  {} => {}", card, score);
             }
+            if matches!(
+                controller.bot_difficulty(),
+                crate::bot::BotDifficulty::FutureHard
+            ) && debug_logs_enabled() {
+                let legal = controller.legal_moves(seat);
+                let ctx = controller.bot_context(seat);
+                let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
+                println!("  hard-verbose (card base cont total):");
+                for (c, b, cont, t) in verbose {
+                    println!("    {} {} {} {}", c, b, cont, t);
+                }
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--explain-pass-once" => {
+            let seed = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--explain-pass-once <seed> <seat>"),
+            )?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--explain-pass-once <seed> <seat>"),
+            )?;
+
+            let controller =
+                crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            if !controller.in_passing_phase() {
+                println!("Round is not in passing phase for seed {}.", seed);
+                return Ok(CliOutcome::Handled);
+            }
+            let hand_vec: Vec<_> = controller.hand(seat);
+            let ctx = controller.bot_context(seat);
+            if let Some(picks) = crate::bot::PassPlanner::choose(
+                &hearts_core::model::hand::Hand::with_cards(hand_vec.clone()),
+                &ctx,
+            ) {
+                println!("Explain-pass {:?} (seed {}):", seat, seed);
+                println!(
+                    "  Hand: {}",
+                    hand_vec
+                        .iter()
+                        .map(|c| c.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+                println!("  Picks: {}, {}, {}", picks[0], picks[1], picks[2]);
+            } else {
+                println!("Not enough cards to pass for {:?}", seat);
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--explain-pass-batch" => {
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--explain-pass-batch <seat> <seed_start> <count>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--explain-pass-batch <seat> <seed_start> <count>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--explain-pass-batch <seat> <seed_start> <count>"),
+            )?;
+
+            for i in 0..count {
+                let seed = seed_start + i;
+                let controller = crate::controller::GameController::new_with_seed(
+                    Some(seed),
+                    PlayerPosition::North,
+                );
+                if !controller.in_passing_phase() {
+                    println!("[seed {}] Not in passing phase", seed);
+                    continue;
+                }
+                let hand_vec: Vec<_> = controller.hand(seat);
+                let ctx = controller.bot_context(seat);
+                if let Some(picks) = crate::bot::PassPlanner::choose(
+                    &hearts_core::model::hand::Hand::with_cards(hand_vec.clone()),
+                    &ctx,
+                ) {
+                    println!("Explain-pass {:?} (seed {}):", seat, seed);
+                    println!(
+                        "  Hand: {}",
+                        hand_vec
+                            .iter()
+                            .map(|c| c.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    println!("  Picks: {}, {}, {}", picks[0], picks[1], picks[2]);
+                } else {
+                    println!("[seed {}] Not enough cards to pass for {:?}", seed, seat);
+                }
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--compare-once" => {
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--compare-once <seed> <seat>"))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--compare-once <seed> <seat>"))?;
+
+            // Normal
+            let mut normal =
+                crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            normal.set_bot_difficulty(crate::bot::BotDifficulty::NormalHeuristic);
+            if normal.in_passing_phase() {
+                if let Some(cards) = normal.simple_pass_for(seat) {
+                    let _ = normal.submit_pass(seat, cards);
+                }
+                let _ = normal.submit_auto_passes_for_others(seat);
+                let _ = normal.resolve_passes();
+            }
+            while !normal.in_passing_phase() && normal.expected_to_play() != seat {
+                if normal.autoplay_one(seat).is_none() {
+                    break;
+                }
+            }
+            let normal_expl = normal.explain_candidates_for(seat);
+            let normal_top = normal_expl.iter().max_by_key(|(_, s)| *s).map(|(c, _)| *c);
+
+            // Hard
+            let mut hard =
+                crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            hard.set_bot_difficulty(crate::bot::BotDifficulty::FutureHard);
+            if hard.in_passing_phase() {
+                if let Some(cards) = hard.simple_pass_for(seat) {
+                    let _ = hard.submit_pass(seat, cards);
+                }
+                let _ = hard.submit_auto_passes_for_others(seat);
+                let _ = hard.resolve_passes();
+            }
+            while !hard.in_passing_phase() && hard.expected_to_play() != seat {
+                if hard.autoplay_one(seat).is_none() {
+                    break;
+                }
+            }
+            let hard_expl = hard.explain_candidates_for(seat);
+            let hard_top = hard_expl.iter().max_by_key(|(_, s)| *s).map(|(c, _)| *c);
+
+            println!("Compare {:?} (seed {}):", seat, seed);
+            println!(
+                "  Normal: top={:?} candidates={}",
+                normal_top,
+                normal_expl.len()
+            );
+            println!(
+                "  Hard:   top={:?} candidates={}",
+                hard_top,
+                hard_expl.len()
+            );
+            if let Some(stats) = crate::bot::search::last_stats() {
+                println!(
+                    "  Hard stats: scanned={} elapsed={}ms",
+                    stats.scanned, stats.elapsed_ms
+                );
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--compare-batch" => {
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--compare-batch <seat> <seed_start> <count>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--compare-batch <seat> <seed_start> <count>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--compare-batch <seat> <seed_start> <count>"),
+            )?;
+
+            println!("seed,seat,normal_top,hard_top,agree,hard_scanned,hard_elapsed_ms");
+            for i in 0..count {
+                let seed = seed_start + i;
+                // Normal
+                let mut normal = crate::controller::GameController::new_with_seed(
+                    Some(seed),
+                    PlayerPosition::North,
+                );
+                normal.set_bot_difficulty(crate::bot::BotDifficulty::NormalHeuristic);
+                if normal.in_passing_phase() {
+                    if let Some(cards) = normal.simple_pass_for(seat) {
+                        let _ = normal.submit_pass(seat, cards);
+                    }
+                    let _ = normal.submit_auto_passes_for_others(seat);
+                    let _ = normal.resolve_passes();
+                }
+                while !normal.in_passing_phase() && normal.expected_to_play() != seat {
+                    if normal.autoplay_one(seat).is_none() {
+                        break;
+                    }
+                }
+                let normal_expl = normal.explain_candidates_for(seat);
+                let normal_top = normal_expl
+                    .iter()
+                    .max_by_key(|(_, s)| *s)
+                    .map(|(c, _)| c.to_string())
+                    .unwrap_or_else(|| "(none)".to_string());
+
+                // Hard
+                let mut hard = crate::controller::GameController::new_with_seed(
+                    Some(seed),
+                    PlayerPosition::North,
+                );
+                hard.set_bot_difficulty(crate::bot::BotDifficulty::FutureHard);
+                if hard.in_passing_phase() {
+                    if let Some(cards) = hard.simple_pass_for(seat) {
+                        let _ = hard.submit_pass(seat, cards);
+                    }
+                    let _ = hard.submit_auto_passes_for_others(seat);
+                    let _ = hard.resolve_passes();
+                }
+                while !hard.in_passing_phase() && hard.expected_to_play() != seat {
+                    if hard.autoplay_one(seat).is_none() {
+                        break;
+                    }
+                }
+                let hard_expl = hard.explain_candidates_for(seat);
+                let hard_top_card = hard_expl.iter().max_by_key(|(_, s)| *s).map(|(c, _)| *c);
+                let hard_top = hard_top_card
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "(none)".to_string());
+                let agree = hard_top == normal_top;
+                let stats = crate::bot::search::last_stats();
+                let (scanned, elapsed) = stats
+                    .map(|s| (s.scanned, s.elapsed_ms))
+                    .unwrap_or((0usize, 0u32));
+                println!(
+                    "{}, {:?}, {}, {}, {}, {}, {}",
+                    seed, seat, normal_top, hard_top, agree, scanned, elapsed
+                );
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--explain-json" => {
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"))?;
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or(CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"))?;
+            let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s));
+
+            let mut controller =
+                crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            if let Some(d) = difficulty { controller.set_bot_difficulty(d); }
+            if controller.in_passing_phase() {
+                if let Some(cards) = controller.simple_pass_for(seat) {
+                    let _ = controller.submit_pass(seat, cards);
+                }
+                let _ = controller.submit_auto_passes_for_others(seat);
+                let _ = controller.resolve_passes();
+            }
+            while !controller.in_passing_phase() && controller.expected_to_play() != seat {
+                if controller.autoplay_one(seat).is_none() { break; }
+            }
+            let explained = controller.explain_candidates_for(seat);
+            let diff = format!("{:?}", controller.bot_difficulty());
+            let mut stats_obj = serde_json::Value::Null;
+            if matches!(controller.bot_difficulty(), crate::bot::BotDifficulty::FutureHard) {
+                if let Some(stats) = crate::bot::search::last_stats() {
+                    stats_obj = serde_json::json!({
+                        "scanned": stats.scanned,
+                        "elapsed_ms": stats.elapsed_ms
+                    });
+                }
+            }
+            let weights = match controller.bot_difficulty() {
+                crate::bot::BotDifficulty::FutureHard => serde_json::json!({
+                    "normal": crate::bot::debug_weights_string(),
+                    "hard": crate::bot::debug_hard_weights_string(),
+                }),
+                _ => serde_json::json!({
+                    "normal": crate::bot::debug_weights_string(),
+                }),
+            };
+            let verbose = if matches!(controller.bot_difficulty(), crate::bot::BotDifficulty::FutureHard) {
+                let legal = controller.legal_moves(seat);
+                let ctx = controller.bot_context(seat);
+                let v = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
+                serde_json::json!(v.iter().map(|(c, base, cont, total)| serde_json::json!({
+                    "card": c.to_string(),
+                    "base": base,
+                    "cont": cont,
+                    "total": total
+                })).collect::<Vec<_>>())
+            } else {
+                serde_json::Value::Null
+            };
+            let json = serde_json::json!({
+                "seed": seed,
+                "seat": format!("{:?}", seat),
+                "difficulty": diff,
+                "candidates": explained.iter().map(|(c,s)| serde_json::json!({"card": c.to_string(), "score": s})).collect::<Vec<_>>(),
+                "hard_stats": stats_obj,
+                "weights": weights,
+                "candidates_verbose": verbose,
+            });
+            if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+            std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap())?;
+            println!("Wrote explain JSON to {}", path.display());
             Ok(CliOutcome::Handled)
         }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat>\n  --explain-batch <seat> <seed_start> <count>\n  --explain-snapshot <path> <seat>\n  --help";
+            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty]\n  --explain-batch <seat> <seed_start> <count> [difficulty]\n  --explain-snapshot <path> <seat>\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat>\n  --compare-batch <seat> <seed_start> <count>\n  --explain-json <seed> <seat> <path> [difficulty]\n  --help";
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)
         }
         other => Err(CliError::UnknownCommand(other.to_string())),
     }
+}
+
+fn debug_logs_enabled() -> bool {
+    std::env::var("MDH_DEBUG_LOGS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(false)
 }
 
 fn export_snapshot(path: PathBuf, seed: u64, seat: PlayerPosition) -> Result<(), CliError> {
@@ -251,9 +650,22 @@ fn parse_seat(input: &str) -> Result<PlayerPosition, CliError> {
     }
 }
 
+fn parse_difficulty_opt(input: &str) -> Option<crate::bot::BotDifficulty> {
+    match input.to_ascii_lowercase().as_str() {
+        "easy" | "legacy" => Some(crate::bot::BotDifficulty::EasyLegacy),
+        "normal" | "default" => Some(crate::bot::BotDifficulty::NormalHeuristic),
+        "hard" | "future" => Some(crate::bot::BotDifficulty::FutureHard),
+        _ => None,
+    }
+}
+
 #[cfg(windows)]
 pub fn show_error_box(message: &str) {
-    eprintln!("{message}");
+    if !popups_enabled() {
+        eprintln!("{message}");
+        println!("mdhearts CLI: {}", message);
+        return;
+    }
     show_box("mdhearts CLI", message, MB_ICONERROR | MB_OK);
 }
 
@@ -265,6 +677,10 @@ pub fn show_error_box(message: &str) {
 
 #[cfg(windows)]
 fn show_info_box(title: &str, message: &str) {
+    if !popups_enabled() {
+        println!("{}: {}", title, message);
+        return;
+    }
     show_box(title, message, MB_ICONINFORMATION | MB_OK);
 }
 
@@ -285,6 +701,16 @@ fn show_box(title: &str, message: &str, flags: MESSAGEBOX_STYLE) {
             flags,
         );
     }
+}
+
+#[cfg(windows)]
+fn popups_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("MDH_CLI_POPUPS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(windows)]

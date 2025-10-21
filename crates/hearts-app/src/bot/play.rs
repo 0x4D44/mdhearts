@@ -170,7 +170,9 @@ impl PlayPlanner {
                 }
             } else {
                 score -= (card.rank.value() as i32) * 10;
-                if card.suit == Suit::Hearts && !ctx.round.hearts_broken() && style != BotStyle::HuntLeader
+                if card.suit == Suit::Hearts
+                    && !ctx.round.hearts_broken()
+                    && style != BotStyle::HuntLeader
                 {
                     score -= 1_100;
                 }
@@ -195,7 +197,10 @@ impl PlayPlanner {
             }
             out.push((card, score));
         }
-        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| card_sort_key(a.0).cmp(&card_sort_key(b.0))));
+        out.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| card_sort_key(a.0).cmp(&card_sort_key(b.0)))
+        });
         out
     }
 }
@@ -208,10 +213,16 @@ struct DebugParts {
 impl DebugParts {
     fn maybe_new(card: Card, style: BotStyle, lead: Option<Suit>, base: i32) -> Self {
         if debug_enabled() {
-            let s = format!("mdhearts: cand {} {:?} lead={:?} base={} parts:", card, style, lead, base);
+            let s = format!(
+                "mdhearts: cand {} {:?} lead={:?} base={} parts:",
+                card, style, lead, base
+            );
             Self { on: true, msg: s }
         } else {
-            Self { on: false, msg: String::new() }
+            Self {
+                on: false,
+                msg: String::new(),
+            }
         }
     }
     fn add(&mut self, name: &str, delta: i32) {
@@ -299,6 +310,14 @@ fn base_score(
 ) -> i32 {
     let penalties_i32 = penalties as i32;
     let mut score: i32 = 0;
+    // Current trick penalties already on table before our play
+    let penalties_on_table_now: i32 = ctx
+        .round
+        .current_trick()
+        .plays()
+        .iter()
+        .map(|p| p.card.penalty_value() as i32)
+        .sum();
 
     if will_capture {
         score -= 4_800;
@@ -337,6 +356,29 @@ fn base_score(
             }
         }
         BotStyle::Cautious => {}
+    }
+
+    // Planner-level leader targeting: small positive even before near-100 scenarios.
+    if snapshot.max_player != ctx.seat
+        && !will_capture
+        && penalties > 0
+        && winner == snapshot.max_player
+    {
+        let gap = snapshot
+            .max_score
+            .saturating_sub(ctx.scores.score(ctx.seat)) as i32;
+        let gap_units = (gap.min(30) / 10).max(0); // 0..=3
+        score += penalties_i32
+            * (weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10);
+    }
+    // Downweight feeding penalties to a non-leader (prevents blindly dumping QS to second place).
+    if snapshot.max_player != ctx.seat
+        && !will_capture
+        && penalties > 0
+        && winner != snapshot.max_player
+        && penalties_on_table_now > 0
+    {
+        score -= penalties_i32 * weights().nonleader_feed_perpen;
     }
 
     // Endgame nuance
@@ -405,6 +447,9 @@ struct Weights {
     near100_self_capture_base: i32,
     near100_shed_perpen: i32,
     hunt_feed_perpen: i32,
+    leader_feed_base: i32,
+    nonleader_feed_perpen: i32,
+    leader_feed_gap_per10: i32,
 }
 
 fn parse_env_i32(key: &str) -> Option<i32> {
@@ -420,19 +465,25 @@ fn weights() -> &'static Weights {
         near100_self_capture_base: parse_env_i32("MDH_W_NEAR100_SELF_CAPTURE_BASE").unwrap_or(1300),
         near100_shed_perpen: parse_env_i32("MDH_W_NEAR100_SHED_PERPEN").unwrap_or(250),
         hunt_feed_perpen: parse_env_i32("MDH_W_HUNT_FEED_PERPEN").unwrap_or(800),
+        leader_feed_base: parse_env_i32("MDH_W_LEADER_FEED_BASE").unwrap_or(120),
+        nonleader_feed_perpen: parse_env_i32("MDH_W_NONLEADER_FEED_PERPEN").unwrap_or(1200),
+        leader_feed_gap_per10: parse_env_i32("MDH_W_LEADER_FEED_GAP_PER10").unwrap_or(40),
     })
 }
 
 pub fn debug_weights_string() -> String {
     let w = weights();
     format!(
-        "off_suit_dump_bonus={} cards_played_bias={} early_hearts_lead_caution={} near100_self_capture_base={} near100_shed_perpen={} hunt_feed_perpen={}",
+        "off_suit_dump_bonus={} cards_played_bias={} early_hearts_lead_caution={} near100_self_capture_base={} near100_shed_perpen={} hunt_feed_perpen={} leader_feed_base={} nonleader_feed_perpen={} leader_feed_gap_per10={}",
         w.off_suit_dump_bonus,
         w.cards_played_bias,
         w.early_hearts_lead_caution,
         w.near100_self_capture_base,
         w.near100_shed_perpen,
-        w.hunt_feed_perpen
+        w.hunt_feed_perpen,
+        w.leader_feed_base,
+        w.nonleader_feed_perpen,
+        w.leader_feed_gap_per10
     )
 }
 
@@ -455,6 +506,12 @@ fn choose_followup_card(
 ) -> Card {
     let legal = legal_moves_for(round, seat);
     let lead_suit = round.current_trick().lead_suit();
+    let penalties_on_table: u8 = round
+        .current_trick()
+        .plays()
+        .iter()
+        .map(|p| p.card.penalty_value())
+        .sum();
 
     if let Some(lead) = lead_suit {
         // If we can follow suit, play the lowest of lead suit.
@@ -486,25 +543,44 @@ fn choose_followup_card(
             }
         }
         // If provisional winner is the scoreboard leader, prefer to dump QS or hearts to them
-        if let (Some(pw), Some(leader)) = (provisional, leader_target) {
-            if pw == leader {
-                if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
-                    return qs;
-                }
-                if round.hearts_broken()
-                    && !hearts_void
-                    && let Some(card) = legal
-                        .iter()
-                        .copied()
-                        .filter(|c| c.suit == Suit::Hearts)
-                        .max_by_key(|c| c.rank.value())
-                {
-                    return card;
-                }
+        if let (Some(pw), Some(leader)) = (provisional, leader_target)
+            && pw == leader
+        {
+            if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
+                return qs;
+            }
+            if !hearts_void
+                && let Some(card) = legal
+                    .iter()
+                    .copied()
+                    .filter(|c| c.suit == Suit::Hearts)
+                    .max_by_key(|c| c.rank.value())
+            {
+                return card;
             }
         }
-        if round.hearts_broken()
-            && !hearts_void
+        // If the provisional winner is not the leader and there are already penalties on table, avoid feeding big penalties.
+        if let (Some(pw), Some(leader)) = (provisional, leader_target)
+            && pw != leader
+            && penalties_on_table > 0
+        {
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .filter(|c| c.penalty_value() == 0)
+                .min_by_key(|c| c.rank.value())
+            {
+                return card;
+            }
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .min_by_key(|c| (c.penalty_value(), c.rank.value()))
+            {
+                return card;
+            }
+        }
+        if !hearts_void
             && let Some(card) = legal
                 .iter()
                 .copied()
@@ -513,8 +589,11 @@ fn choose_followup_card(
         {
             return card;
         }
-        if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
-            return qs;
+        // Avoid generic QS fallback when feeding a non-leader with existing penalties
+        if leader_target.is_none() || provisional == leader_target || penalties_on_table == 0 {
+            if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
+                return qs;
+            }
         }
     }
 
@@ -828,8 +907,8 @@ mod tests {
     fn followup_targets_leader_with_qs_when_possible() {
         let starting = PlayerPosition::North;
         let hands = [
-            vec![Card::new(Rank::Two, Suit::Spades)],   // North
-            vec![Card::new(Rank::Ace, Suit::Clubs)],     // East (provisional winner)
+            vec![Card::new(Rank::Two, Suit::Spades)], // North
+            vec![Card::new(Rank::Ace, Suit::Clubs)],  // East (provisional winner)
             vec![
                 Card::new(Rank::Queen, Suit::Spades),
                 Card::new(Rank::Nine, Suit::Hearts),
@@ -858,8 +937,8 @@ mod tests {
         // East is provisional winner, but leader is West; avoid dumping QS to East, choose low non-penalty instead.
         let starting = PlayerPosition::North;
         let hands = [
-            vec![Card::new(Rank::Two, Suit::Spades)],   // North
-            vec![Card::new(Rank::Ace, Suit::Clubs)],     // East (provisional winner)
+            vec![Card::new(Rank::Two, Suit::Spades)], // North
+            vec![Card::new(Rank::Ace, Suit::Clubs)],  // East (provisional winner)
             vec![
                 Card::new(Rank::Queen, Suit::Spades),
                 Card::new(Rank::Nine, Suit::Hearts),
@@ -888,8 +967,8 @@ mod tests {
     fn followup_targets_leader_with_hearts_when_qs_unavailable() {
         let starting = PlayerPosition::North;
         let hands = [
-            vec![Card::new(Rank::Two, Suit::Spades)],   // North
-            vec![Card::new(Rank::Ace, Suit::Clubs)],     // East (provisional winner)
+            vec![Card::new(Rank::Two, Suit::Spades)], // North
+            vec![Card::new(Rank::Ace, Suit::Clubs)],  // East (provisional winner)
             vec![
                 Card::new(Rank::Ten, Suit::Hearts),
                 Card::new(Rank::Nine, Suit::Hearts),

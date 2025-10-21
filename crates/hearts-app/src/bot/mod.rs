@@ -1,9 +1,11 @@
 mod pass;
 mod play;
+pub mod search;
 mod tracker;
 
 pub use pass::PassPlanner;
 pub use play::{debug_weights_string, PlayPlanner};
+pub use search::{debug_hard_weights_string, PlayPlannerHard};
 pub use tracker::{MoonState, UnseenTracker};
 
 use hearts_core::model::card::Card;
@@ -21,6 +23,7 @@ pub enum BotDifficulty {
     EasyLegacy,
     NormalHeuristic,
     FutureHard,
+    SearchLookahead,
 }
 
 impl Default for BotDifficulty {
@@ -40,6 +43,8 @@ impl BotDifficulty {
                 "default" => BotDifficulty::NormalHeuristic,
                 "hard" => BotDifficulty::FutureHard,
                 "future" => BotDifficulty::FutureHard,
+                "search" => BotDifficulty::SearchLookahead,
+                "lookahead" => BotDifficulty::SearchLookahead,
                 _ => BotDifficulty::default(),
             },
             Err(_) => BotDifficulty::default(),

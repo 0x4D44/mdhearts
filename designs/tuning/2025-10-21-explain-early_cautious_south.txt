@@ -1,0 +1,20 @@
+﻿# explain batch early_cautious_south (seat=south)
+AI Weights: off_suit_dump_bonus=600 cards_played_bias=10 early_hearts_lead_caution=600 near100_self_capture_base=1300 near100_shed_perpen=250 hunt_feed_perpen=800 leader_feed_base=120 nonleader_feed_perpen=1200 leader_feed_gap_per10=40
+
+## seed 42
+Explain South (seed 42):
+  2C => 720
+
+## seed 31415
+Explain South (seed 31415):
+  6C => 606
+  7C => 582
+  10C => -5070
+  QC => -5154
+
+## seed 27182
+Explain South (seed 27182):
+  3C => 698
+  6C => 626
+  JC => -5092
+  KC => -5176

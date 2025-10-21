@@ -92,6 +92,7 @@ const ID_OPTIONS_CARD_BACK: u32 = 1201;
 const ID_OPTIONS_DIFFICULTY_EASY: u32 = 1210;
 const ID_OPTIONS_DIFFICULTY_NORMAL: u32 = 1211;
 const ID_OPTIONS_DIFFICULTY_HARD: u32 = 1212;
+const ID_OPTIONS_DIFFICULTY_SEARCH: u32 = 1213;
 const ID_HELP_ABOUT: u32 = 1301;
 const ID_HELP_RULES: u32 = 1302;
 const IDI_APPICON: u16 = 501;
@@ -411,6 +412,9 @@ pub fn run() -> Result<()> {
     }?;
 
     let haccel = init_menu_and_accels(hwnd);
+    // Ensure difficulty radiomarks reflect persisted/default state now that menu exists
+    let initial_diff = load_bot_difficulty().unwrap_or(crate::bot::BotDifficulty::EasyLegacy);
+    update_difficulty_menu(hwnd, initial_diff);
     restore_window_placement(hwnd);
     unsafe {
         let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_SHOW);
@@ -599,8 +603,15 @@ impl AppState {
             rotate_sides,
             dpi: DpiScale::uniform(initial_dpi),
         };
-        if let Some(saved) = load_bot_difficulty() {
-            this.controller.set_bot_difficulty(saved);
+        match load_bot_difficulty() {
+            Some(saved) => {
+                this.controller.set_bot_difficulty(saved);
+            }
+            None => {
+                let def = crate::bot::BotDifficulty::EasyLegacy;
+                this.controller.set_bot_difficulty(def);
+                save_bot_difficulty(def);
+            }
         }
         if let Some(saved) = load_card_back() {
             this.card_back = saved;
@@ -1955,6 +1966,14 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             w!("&Hard (Future)"),
         )
     };
+    let _ = unsafe {
+        AppendMenuW(
+            difficulty,
+            MF_STRING,
+            ID_OPTIONS_DIFFICULTY_SEARCH as usize,
+            w!("&Search (Lookahead)"),
+        )
+    };
     let _ = unsafe { AppendMenuW(game, MF_POPUP, difficulty.0 as usize, w!("&Difficulty")) };
 
     let _ = unsafe {
@@ -2011,11 +2030,12 @@ fn update_difficulty_menu(hwnd: HWND, difficulty: crate::bot::BotDifficulty) {
                         crate::bot::BotDifficulty::EasyLegacy => ID_OPTIONS_DIFFICULTY_EASY,
                         crate::bot::BotDifficulty::NormalHeuristic => ID_OPTIONS_DIFFICULTY_NORMAL,
                         crate::bot::BotDifficulty::FutureHard => ID_OPTIONS_DIFFICULTY_HARD,
+                        crate::bot::BotDifficulty::SearchLookahead => ID_OPTIONS_DIFFICULTY_SEARCH,
                     };
                     let _ = CheckMenuRadioItem(
                         diff_menu,
                         ID_OPTIONS_DIFFICULTY_EASY,
-                        ID_OPTIONS_DIFFICULTY_HARD,
+                        ID_OPTIONS_DIFFICULTY_SEARCH,
                         selected,
                         MF_BYCOMMAND.0,
                     );
@@ -2331,6 +2351,9 @@ unsafe extern "system" fn window_proc(
                         }
                         ID_OPTIONS_DIFFICULTY_HARD => {
                             difficulty_request = Some(crate::bot::BotDifficulty::FutureHard);
+                        }
+                        ID_OPTIONS_DIFFICULTY_SEARCH => {
+                            difficulty_request = Some(crate::bot::BotDifficulty::SearchLookahead);
                         }
                         ID_HELP_RULES => {
                             show_rules = true;
@@ -3290,6 +3313,7 @@ fn save_bot_difficulty(value: crate::bot::BotDifficulty) {
                 crate::bot::BotDifficulty::EasyLegacy => 0,
                 crate::bot::BotDifficulty::NormalHeuristic => 1,
                 crate::bot::BotDifficulty::FutureHard => 2,
+                crate::bot::BotDifficulty::SearchLookahead => 3,
             };
             let bytes = raw.to_le_bytes();
             let _ = RegSetValueExW(
@@ -3328,6 +3352,7 @@ fn load_bot_difficulty() -> Option<crate::bot::BotDifficulty> {
                     0 => Some(crate::bot::BotDifficulty::EasyLegacy),
                     1 => Some(crate::bot::BotDifficulty::NormalHeuristic),
                     2 => Some(crate::bot::BotDifficulty::FutureHard),
+                    3 => Some(crate::bot::BotDifficulty::SearchLookahead),
                     _ => None,
                 };
             }

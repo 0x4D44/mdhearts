@@ -1,0 +1,17 @@
+﻿# explain batch near100_south (seat=south)
+AI Weights: off_suit_dump_bonus=600 cards_played_bias=10 early_hearts_lead_caution=600 near100_self_capture_base=1300 near100_shed_perpen=250 hunt_feed_perpen=800 leader_feed_base=120 nonleader_feed_perpen=1200 leader_feed_gap_per10=40
+
+## seed 9001
+Explain South (seed 9001):
+  10D => 950
+  JD => 950
+  5S => 950
+  6S => 950
+  10S => 950
+
+## seed 9010
+Explain South (seed 9010):
+  7C => 582
+  JC => -5112
+  QC => -5154
+  KC => -5196

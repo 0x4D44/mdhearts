@@ -14,10 +14,8 @@ use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 #[cfg(windows)]
 use windows::core::{PCWSTR, w};
 
-#[cfg(windows)]
 mod bot;
 mod cli;
-#[cfg(windows)]
 mod controller;
 mod platform;
 

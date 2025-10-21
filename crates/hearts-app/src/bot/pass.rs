@@ -78,7 +78,7 @@ fn score_card(
     snapshot: super::ScoreSnapshot,
 ) -> i32 {
     let mut score: i32 = 0;
-    let mut parts: Vec<( &'static str, i32)> = Vec::new();
+    let mut parts: Vec<(&'static str, i32)> = Vec::new();
     let suit_len = count_cards_in_suit(hand, card.suit);
     let rank_value = card.rank.value() as i32;
     let card_penalty = card.penalty_value() as i32;
@@ -90,10 +90,22 @@ fn score_card(
 
     if card.suit == Suit::Spades && !matches!(style, BotStyle::AggressiveMoon) {
         match card.rank {
-            Rank::Ace => { score += 5_000; parts.push(("spade_ace", 5000)); }
-            Rank::King => { score += 7_000; parts.push(("spade_king", 7000)); }
-            Rank::Queen => { score += 18_000; parts.push(("spade_queen", 18000)); }
-            Rank::Jack => { score += 2_500; parts.push(("spade_jack", 2500)); }
+            Rank::Ace => {
+                score += 5_000;
+                parts.push(("spade_ace", 5000));
+            }
+            Rank::King => {
+                score += 7_000;
+                parts.push(("spade_king", 7000));
+            }
+            Rank::Queen => {
+                score += 18_000;
+                parts.push(("spade_queen", 18000));
+            }
+            Rank::Jack => {
+                score += 2_500;
+                parts.push(("spade_jack", 2500));
+            }
             _ => {}
         }
     }
@@ -128,6 +140,11 @@ fn score_card(
         let d = -(card_penalty * pass_weights().to_leader_penalty);
         score += d;
         parts.push(("to_leader_penalty_avoid", d));
+        if card.is_queen_of_spades() {
+            // Never hand QS to the scoreboard leader; overpower any positive QS heuristics.
+            score -= 50_000;
+            parts.push(("avoid_qs_to_leader", -50000));
+        }
     }
 
     if my_score >= 75 {
@@ -274,7 +291,8 @@ mod tests {
             Card::new(Rank::Five, Suit::Diamonds),
         ];
         let round = build_round(seat, &hand, passing);
-        let scores = build_scores([20, 10, 30, 25]);
+        // Ensure the passing target (Left from North = East) is not the scoreboard leader
+        let scores = build_scores([20, 25, 30, 10]);
         let mut tracker = UnseenTracker::new();
         tracker.reset_for_round(&round);
         let ctx = BotContext::new(
