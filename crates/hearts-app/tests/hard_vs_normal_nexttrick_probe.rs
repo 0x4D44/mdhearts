@@ -111,11 +111,19 @@ fn hard_prefers_lead_setting_up_feed_nexttrick() {
 
     let norm = PlayPlanner::explain_candidates(&legal, &ctx_norm);
     let hard = PlayPlannerHard::explain_candidates(&legal, &ctx_hard);
-    let score_of = |list: &Vec<(Card, i32)>, c: Card| list.iter().find(|(cc, _)| *cc == c).map(|(_, s)| *s).unwrap();
+    let score_of = |list: &Vec<(Card, i32)>, c: Card| {
+        list.iter()
+            .find(|(cc, _)| *cc == c)
+            .map(|(_, s)| *s)
+            .unwrap()
+    };
     let _s2_norm = score_of(&norm, Card::new(Rank::Two, Suit::Spades));
     let _s10_norm = score_of(&norm, Card::new(Rank::Ten, Suit::Spades));
     let s2_hard = score_of(&hard, Card::new(Rank::Two, Suit::Spades));
     let s10_hard = score_of(&hard, Card::new(Rank::Ten, Suit::Spades));
     // Hard should change relative preference due to next-trick probe
-    assert!(s2_hard != s10_hard, "hard should break tie/change ranking via next-trick probe");
+    assert!(
+        s2_hard != s10_hard,
+        "hard should break tie/change ranking via next-trick probe"
+    );
 }

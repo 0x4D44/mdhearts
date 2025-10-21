@@ -19,7 +19,7 @@ Modern Rust revival of the classic Microsoft Hearts experience.
 - `mdhearts.exe --explain-pass-batch <seat> <seed_start> <count>` (prints hand and 3 chosen pass cards across many seeds)
   - Both `--explain-once` and `--explain-batch` accept an optional `[difficulty]` argument (`easy|normal|hard`).
 - `mdhearts.exe --compare-once <seed> <seat>` (runs Normal and Hard explain for the same snapshot and prints top choices and Hard stats)
-- `mdhearts.exe --compare-batch <seat> <seed_start> <count>` (prints CSV lines of Normal vs Hard top picks and Hard stats across many seeds)
+- `mdhearts.exe --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree]` (prints CSV lines of Normal vs Hard top picks and Hard stats; `--out` writes to file, `--only-disagree` filters to disagreements)
 - `mdhearts.exe --explain-json <seed> <seat> <path> [difficulty]` (writes a JSON file with candidates, difficulty, weights, and Hard stats)
 
 Additional references:
@@ -39,6 +39,17 @@ Additional references:
   - `MDH_HARD_NEXTTRICK_HEARTS_CAP` (default `10`): cap for the hearts component above.
 - `MDH_HARD_NEXT_BRANCH_LIMIT` (default `3`): number of candidate leads to probe when we lead the next trick in Hard’s 2‑ply probe.
 - `MDH_HARD_EARLY_CUTOFF_MARGIN` (default `300`): early cutoff guard in Hard; stops scanning candidates when the next base score cannot beat the best total even with this margin.
+
+Moon tuning (env)
+- `MDH_MOON_COMMIT_MAX_CARDS` (default `20`): max cards played in round to consider committing to moon.
+- `MDH_MOON_COMMIT_MAX_SCORE` (default `70`): max current score to consider committing.
+- `MDH_MOON_COMMIT_MIN_TRICKS` (default `2`): minimum tricks won before commit consideration (bot will mark Considering after the first clean control trick, and Commit when this threshold is met).
+- `MDH_MOON_COMMIT_MIN_HEARTS` (default `5`): minimum hearts in hand before commit consideration.
+- `MDH_MOON_COMMIT_MIN_CONTROL` (default `3`): minimum high hearts (≥10) before commit consideration.
+- `MDH_MOON_ABORT_OTHERS_HEARTS` (default `3`): abort if opponents have collected at least this many hearts total.
+- `MDH_MOON_ABORT_NEAREND_CARDS` (default `36`): abort when at or beyond this many cards played (near end of round).
+- `MDH_MOON_ABORT_MIN_HEARTS_LEFT` (default `3`): abort if we have fewer hearts than this.
+- `MDH_MOON_ABORT_LOST_CONTROL` (default `true`): abort when we fail to capture a clean trick while attempting moon.
 - `MDH_DEBUG_LOGS=1`: emits detailed AI decision output to DebugView for diagnostics.
 - `MDH_CLI_POPUPS=1`: enable Windows message-box popups for CLI info/errors. By default, CLI prints to console only to avoid blocking automation.
 

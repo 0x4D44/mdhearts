@@ -51,7 +51,13 @@ impl PlayPlannerHard {
             .ok()
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(300);
-        SearchConfig { branch_limit: bl, time_cap_ms: cap, next_branch_limit: nbl, early_cutoff_margin: cutoff, ..SearchConfig::default() }
+        SearchConfig {
+            branch_limit: bl,
+            time_cap_ms: cap,
+            next_branch_limit: nbl,
+            early_cutoff_margin: cutoff,
+            ..SearchConfig::default()
+        }
     }
 
     pub fn choose(legal: &[Card], ctx: &BotContext<'_>) -> Option<Card> {
@@ -375,7 +381,8 @@ fn weights() -> &'static HardWeights {
         next_trick_hearts_per: parse_env_i32("MDH_HARD_NEXTTRICK_HEARTS_PER").unwrap_or(2),
         next_trick_hearts_cap: parse_env_i32("MDH_HARD_NEXTTRICK_HEARTS_CAP").unwrap_or(10),
         next2_feed_perpen: parse_env_i32("MDH_HARD_NEXT2_FEED_PERPEN").unwrap_or(40),
-        next2_self_capture_perpen: parse_env_i32("MDH_HARD_NEXT2_SELF_CAPTURE_PERPEN").unwrap_or(60),
+        next2_self_capture_perpen: parse_env_i32("MDH_HARD_NEXT2_SELF_CAPTURE_PERPEN")
+            .unwrap_or(60),
     })
 }
 
@@ -408,7 +415,12 @@ pub fn last_stats() -> Option<Stats> {
     LAST_STATS.lock().ok().and_then(|g| *g)
 }
 
-fn next_trick_probe(sim_round: &RoundState, leader: PlayerPosition, ctx: &BotContext<'_>, leader_target: PlayerPosition) -> i32 {
+fn next_trick_probe(
+    sim_round: &RoundState,
+    leader: PlayerPosition,
+    ctx: &BotContext<'_>,
+    leader_target: PlayerPosition,
+) -> i32 {
     let cfg = PlayPlannerHard::config();
     let tmp_ctx = BotContext::new(
         leader,
@@ -419,67 +431,121 @@ fn next_trick_probe(sim_round: &RoundState, leader: PlayerPosition, ctx: &BotCon
         ctx.difficulty,
     );
     let legal = legal_moves_for(sim_round, leader);
-    if legal.is_empty() { return 0; }
+    if legal.is_empty() {
+        return 0;
+    }
     let mut ordered = PlayPlanner::explain_candidates(&legal, &tmp_ctx);
-    ordered.sort_by(|a,b| b.1.cmp(&a.1));
+    ordered.sort_by(|a, b| b.1.cmp(&a.1));
     let start = std::time::Instant::now();
     let mut bonus = 0;
     for (lead_card, _) in ordered.into_iter().take(cfg.next_branch_limit) {
-        if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms { break; }
+        if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms {
+            break;
+        }
         let mut probe = sim_round.clone();
         // Play our lead
-        let _ = match probe.play_card(leader, lead_card) { Ok(o) => o, Err(_) => continue };
+        let _ = match probe.play_card(leader, lead_card) {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
         // Branch selectively on the first opponent reply (two variants)
         let first_opponent = next_to_play(&probe);
         let mut replies: Vec<Card> = Vec::new();
         // Canonical reply
-        let canon = choose_followup_search(&probe, first_opponent, Some(ctx.tracker), leader, Some(leader_target));
+        let canon = choose_followup_search(
+            &probe,
+            first_opponent,
+            Some(ctx.tracker),
+            leader,
+            Some(leader_target),
+        );
         replies.push(canon);
         // Alternate: max-penalty dump if available when not following suit
         if let Some(lead_suit) = probe.current_trick().lead_suit() {
             let legal = legal_moves_for(&probe, first_opponent);
             let can_follow = legal.iter().any(|c| c.suit == lead_suit);
             if !can_follow {
-                if let Some(alt) = legal.into_iter().max_by_key(|c| (c.penalty_value(), c.rank.value())) {
-                    if alt != canon { replies.push(alt); }
+                if let Some(alt) = legal
+                    .into_iter()
+                    .max_by_key(|c| (c.penalty_value(), c.rank.value()))
+                {
+                    if alt != canon {
+                        replies.push(alt);
+                    }
                 }
             }
         }
         // Evaluate each reply variant; additionally branch on the second opponent reply when time permits.
         let mut local_best = 0;
         for reply in replies.into_iter() {
-            if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms { break; }
+            if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms {
+                break;
+            }
             let mut branch = probe.clone();
-            let _ = match branch.play_card(first_opponent, reply) { Ok(o) => o, Err(_) => continue };
+            let _ = match branch.play_card(first_opponent, reply) {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
             // Optional second-opponent branching
             let second_opponent = next_to_play(&branch);
             let mut replies2: Vec<Card> = Vec::new();
-            let canon2 = choose_followup_search(&branch, second_opponent, Some(ctx.tracker), leader, Some(leader_target));
+            let canon2 = choose_followup_search(
+                &branch,
+                second_opponent,
+                Some(ctx.tracker),
+                leader,
+                Some(leader_target),
+            );
             replies2.push(canon2);
             if let Some(lead_suit2) = branch.current_trick().lead_suit() {
                 let legal2 = legal_moves_for(&branch, second_opponent);
                 let can_follow2 = legal2.iter().any(|c| c.suit == lead_suit2);
                 if !can_follow2 {
-                    if let Some(alt2) = legal2.into_iter().max_by_key(|c| (c.penalty_value(), c.rank.value())) {
-                        if alt2 != canon2 { replies2.push(alt2); }
+                    if let Some(alt2) = legal2
+                        .into_iter()
+                        .max_by_key(|c| (c.penalty_value(), c.rank.value()))
+                    {
+                        if alt2 != canon2 {
+                            replies2.push(alt2);
+                        }
                     }
                 }
             }
             for reply2 in replies2.into_iter() {
-                if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms { break; }
+                if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms {
+                    break;
+                }
                 let mut branch2 = branch.clone();
-                let mut outcome2 = match branch2.play_card(second_opponent, reply2) { Ok(o) => o, Err(_) => continue };
+                let mut outcome2 = match branch2.play_card(second_opponent, reply2) {
+                    Ok(o) => o,
+                    Err(_) => continue,
+                };
                 while !matches!(outcome2, PlayOutcome::TrickCompleted { .. }) {
                     let nxt = next_to_play(&branch2);
-                    let r = choose_followup_search(&branch2, nxt, Some(ctx.tracker), leader, Some(leader_target));
-                    outcome2 = match branch2.play_card(nxt, r) { Ok(o) => o, Err(_) => break };
+                    let r = choose_followup_search(
+                        &branch2,
+                        nxt,
+                        Some(ctx.tracker),
+                        leader,
+                        Some(leader_target),
+                    );
+                    outcome2 = match branch2.play_card(nxt, r) {
+                        Ok(o) => o,
+                        Err(_) => break,
+                    };
                 }
                 if let PlayOutcome::TrickCompleted { winner, penalties } = outcome2 {
                     let p = penalties as i32;
                     let mut cont = 0;
-                    if winner == leader_target && p > 0 { cont += weights().next2_feed_perpen * p; }
-                    if winner == leader && p > 0 { cont -= weights().next2_self_capture_perpen * p; }
-                    if cont > local_best { local_best = cont; }
+                    if winner == leader_target && p > 0 {
+                        cont += weights().next2_feed_perpen * p;
+                    }
+                    if winner == leader && p > 0 {
+                        cont -= weights().next2_self_capture_perpen * p;
+                    }
+                    if cont > local_best {
+                        local_best = cont;
+                    }
                 }
             }
         }
@@ -506,4 +572,3 @@ pub fn debug_hard_weights_string() -> String {
         w.next2_self_capture_perpen,
     )
 }
-

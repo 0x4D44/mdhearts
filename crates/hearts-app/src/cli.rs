@@ -60,7 +60,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
         "--show-weights" => {
             let norm = crate::bot::debug_weights_string();
             let hard = crate::bot::debug_hard_weights_string();
-            let msg = format!("AI Weights (Normal): {}\nAI Weights (Hard):   {}", norm, hard);
+            let msg = format!(
+                "AI Weights (Normal): {}\nAI Weights (Hard):   {}",
+                norm, hard
+            );
             println!("{}", msg);
             show_info_box("AI Weights", &msg);
             Ok(CliOutcome::Handled)
@@ -127,7 +130,8 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             if matches!(
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
-            ) && debug_logs_enabled() {
+            ) && debug_logs_enabled()
+            {
                 let legal = controller.legal_moves(seat);
                 let ctx = controller.bot_context(seat);
                 let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
@@ -195,10 +199,12 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 if matches!(
                     controller.bot_difficulty(),
                     crate::bot::BotDifficulty::FutureHard
-                ) && debug_logs_enabled() {
+                ) && debug_logs_enabled()
+                {
                     let legal = controller.legal_moves(seat);
                     let ctx = controller.bot_context(seat);
-                    let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
+                    let verbose =
+                        crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
                     println!("  hard-verbose (card base cont total):");
                     for (c, b, cont, t) in verbose {
                         println!("    {} {} {} {}", c, b, cont, t);
@@ -274,7 +280,8 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             if matches!(
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
-            ) && debug_logs_enabled() {
+            ) && debug_logs_enabled()
+            {
                 let legal = controller.legal_moves(seat);
                 let ctx = controller.bot_context(seat);
                 let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
@@ -429,6 +436,15 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     stats.scanned, stats.elapsed_ms
                 );
             }
+            if debug_logs_enabled() {
+                let legal = hard.legal_moves(seat);
+                let ctx = hard.bot_context(seat);
+                let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
+                println!("  hard-verbose (card base cont total):");
+                for (c, b, cont, t) in verbose {
+                    println!("    {} {} {} {}", c, b, cont, t);
+                }
+            }
             Ok(CliOutcome::Handled)
         }
         "--compare-batch" => {
@@ -442,7 +458,28 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 CliError::MissingArgument("--compare-batch <seat> <seed_start> <count>"),
             )?;
 
-            println!("seed,seat,normal_top,hard_top,agree,hard_scanned,hard_elapsed_ms");
+            // Optional output path: --out <path>
+            let mut out_path: Option<PathBuf> = None;
+            let mut only_disagree = false;
+            // Parse optional flags: --out <path>, --only-disagree (order-agnostic)
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--out" => {
+                        let path = args
+                            .next()
+                            .map(PathBuf::from)
+                            .ok_or(CliError::MissingArgument(
+                                "--compare-batch <seat> <seed_start> <count> --out <path>",
+                            ))?;
+                        out_path = Some(path);
+                    }
+                    "--only-disagree" => only_disagree = true,
+                    other => return Err(CliError::UnknownCommand(other.to_string())),
+                }
+            }
+
+            let mut buffer = String::new();
+            buffer.push_str("seed,seat,normal_top,hard_top,agree,hard_scanned,hard_elapsed_ms\n");
             for i in 0..count {
                 let seed = seed_start + i;
                 // Normal
@@ -498,32 +535,46 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 let (scanned, elapsed) = stats
                     .map(|s| (s.scanned, s.elapsed_ms))
                     .unwrap_or((0usize, 0u32));
-                println!(
-                    "{}, {:?}, {}, {}, {}, {}, {}",
-                    seed, seat, normal_top, hard_top, agree, scanned, elapsed
-                );
+                if !only_disagree || !agree {
+                    use std::fmt::Write as _;
+                    let _ = write!(
+                        &mut buffer,
+                        "{}, {:?}, {}, {}, {}, {}, {}\n",
+                        seed, seat, normal_top, hard_top, agree, scanned, elapsed
+                    );
+                }
+            }
+            if let Some(path) = out_path {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::write(&path, &buffer)?;
+                println!("Wrote compare CSV to {}", path.display());
+            } else {
+                print!("{}", buffer);
             }
             Ok(CliOutcome::Handled)
         }
         "--explain-json" => {
-            let seed = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"))?;
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"))?;
+            let seed = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"),
+            )?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"),
+            )?;
             let path = args
                 .next()
                 .map(PathBuf::from)
-                .ok_or(CliError::MissingArgument("--explain-json <seed> <seat> <path> [difficulty]"))?;
+                .ok_or(CliError::MissingArgument(
+                    "--explain-json <seed> <seat> <path> [difficulty]",
+                ))?;
             let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s));
 
             let mut controller =
                 crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
-            if let Some(d) = difficulty { controller.set_bot_difficulty(d); }
+            if let Some(d) = difficulty {
+                controller.set_bot_difficulty(d);
+            }
             if controller.in_passing_phase() {
                 if let Some(cards) = controller.simple_pass_for(seat) {
                     let _ = controller.submit_pass(seat, cards);
@@ -532,12 +583,17 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 let _ = controller.resolve_passes();
             }
             while !controller.in_passing_phase() && controller.expected_to_play() != seat {
-                if controller.autoplay_one(seat).is_none() { break; }
+                if controller.autoplay_one(seat).is_none() {
+                    break;
+                }
             }
             let explained = controller.explain_candidates_for(seat);
             let diff = format!("{:?}", controller.bot_difficulty());
             let mut stats_obj = serde_json::Value::Null;
-            if matches!(controller.bot_difficulty(), crate::bot::BotDifficulty::FutureHard) {
+            if matches!(
+                controller.bot_difficulty(),
+                crate::bot::BotDifficulty::FutureHard
+            ) {
                 if let Some(stats) = crate::bot::search::last_stats() {
                     stats_obj = serde_json::json!({
                         "scanned": stats.scanned,
@@ -554,16 +610,23 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     "normal": crate::bot::debug_weights_string(),
                 }),
             };
-            let verbose = if matches!(controller.bot_difficulty(), crate::bot::BotDifficulty::FutureHard) {
+            let verbose = if matches!(
+                controller.bot_difficulty(),
+                crate::bot::BotDifficulty::FutureHard
+            ) {
                 let legal = controller.legal_moves(seat);
                 let ctx = controller.bot_context(seat);
                 let v = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
-                serde_json::json!(v.iter().map(|(c, base, cont, total)| serde_json::json!({
-                    "card": c.to_string(),
-                    "base": base,
-                    "cont": cont,
-                    "total": total
-                })).collect::<Vec<_>>())
+                serde_json::json!(
+                    v.iter()
+                        .map(|(c, base, cont, total)| serde_json::json!({
+                            "card": c.to_string(),
+                            "base": base,
+                            "cont": cont,
+                            "total": total
+                        }))
+                        .collect::<Vec<_>>()
+                )
             } else {
                 serde_json::Value::Null
             };
@@ -576,13 +639,15 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 "weights": weights,
                 "candidates_verbose": verbose,
             });
-            if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
             std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap())?;
             println!("Wrote explain JSON to {}", path.display());
             Ok(CliOutcome::Handled)
         }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty]\n  --explain-batch <seat> <seed_start> <count> [difficulty]\n  --explain-snapshot <path> <seat>\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat>\n  --compare-batch <seat> <seed_start> <count>\n  --explain-json <seed> <seat> <path> [difficulty]\n  --help";
+            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty]\n  --explain-batch <seat> <seed_start> <count> [difficulty]\n  --explain-snapshot <path> <seat>\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat>\n  --compare-batch <seat> <seed_start> <count> [--out <path>]\n  --explain-json <seed> <seat> <path> [difficulty]\n  --help";
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)

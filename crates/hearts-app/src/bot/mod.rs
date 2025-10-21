@@ -4,8 +4,8 @@ pub mod search;
 mod tracker;
 
 pub use pass::PassPlanner;
-pub use play::{debug_weights_string, PlayPlanner};
-pub use search::{debug_hard_weights_string, PlayPlannerHard};
+pub use play::{PlayPlanner, debug_weights_string};
+pub use search::{PlayPlannerHard, debug_hard_weights_string};
 pub use tracker::{MoonState, UnseenTracker};
 
 use hearts_core::model::card::Card;

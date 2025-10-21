@@ -63,8 +63,10 @@ impl GameController {
             unseen_tracker,
         };
         Self::dbg(&format!(
-            "mdhearts: AI weights {}",
-            crate::bot::debug_weights_string()
+            "mdhearts: AI weights {} | hard {} | moon {}",
+            crate::bot::debug_weights_string(),
+            crate::bot::search::debug_hard_weights_string(),
+            debug_moon_config_string()
         ));
         this
     }
@@ -79,8 +81,10 @@ impl GameController {
             unseen_tracker,
         };
         Self::dbg(&format!(
-            "mdhearts: AI weights {}",
-            crate::bot::debug_weights_string()
+            "mdhearts: AI weights {} | hard {} | moon {}",
+            crate::bot::debug_weights_string(),
+            crate::bot::search::debug_hard_weights_string(),
+            debug_moon_config_string()
         ));
         this
     }
@@ -185,6 +189,7 @@ impl GameController {
         let scores = self.match_state.scores();
         let cards_played = 52usize.saturating_sub(self.unseen_tracker.unseen_count());
         let totals = round.penalty_totals();
+        let cfg = moon_cfg();
         use hearts_core::model::rank::Rank;
         use hearts_core::model::suit::Suit;
 
@@ -194,8 +199,8 @@ impl GameController {
             if (state == MoonState::Inactive || state == MoonState::Considering)
                 && seat == winner
                 && penalties == 0
-                && cards_played <= 20
-                && scores.score(seat) < 70
+                && cards_played <= cfg.commit_cards_played_max
+                && scores.score(seat) < cfg.commit_max_score
             {
                 let tricks_won = {
                     let mut counts = [0u8; 4];
@@ -212,17 +217,28 @@ impl GameController {
                     .iter()
                     .filter(|c| c.suit == Suit::Hearts && c.rank >= Rank::Ten)
                     .count();
-                if tricks_won >= 1 && hearts_in_hand >= 5 && control_hearts >= 3 {
-                    let next = if state == MoonState::Considering {
-                        MoonState::Committed
-                    } else {
-                        MoonState::Considering
-                    };
-                    Self::dbg(&format!(
-                        "mdhearts: moon {:?} -> {:?} (seat={:?}, tricks_won={}, hearts={}, control_hearts={})",
-                        state, next, seat, tricks_won, hearts_in_hand, control_hearts
-                    ));
-                    self.unseen_tracker.set_moon_state(seat, next);
+                if hearts_in_hand >= cfg.commit_min_hearts
+                    && control_hearts >= cfg.commit_min_control_hearts
+                {
+                    if tricks_won as usize >= cfg.commit_min_tricks_won as usize {
+                        let next = if state == MoonState::Considering {
+                            MoonState::Committed
+                        } else {
+                            MoonState::Considering
+                        };
+                        Self::dbg(&format!(
+                            "mdhearts: moon {:?} -> {:?} (seat={:?}, tricks_won={}, hearts={}, control_hearts={})",
+                            state, next, seat, tricks_won, hearts_in_hand, control_hearts
+                        ));
+                        self.unseen_tracker.set_moon_state(seat, next);
+                    } else if state == MoonState::Inactive && tricks_won >= 1 {
+                        Self::dbg(&format!(
+                            "mdhearts: moon {:?} -> Considering (seat={:?}, tricks_won={}, hearts={}, control_hearts={})",
+                            state, seat, tricks_won, hearts_in_hand, control_hearts
+                        ));
+                        self.unseen_tracker
+                            .set_moon_state(seat, MoonState::Considering);
+                    }
                 }
             }
 
@@ -235,14 +251,19 @@ impl GameController {
                     .filter(|&p| p != seat)
                     .map(|p| totals[p.index()] as u32)
                     .sum();
-                let near_end = cards_played >= 36;
-                let lost_control_recent = winner != seat && penalties == 0; // failed to capture a clean trick
+                let near_end = cards_played >= cfg.abort_near_end_cards_played_min;
+                let lost_control_recent =
+                    cfg.abort_on_lost_control_clean && winner != seat && penalties == 0;
                 let hearts_left = round
                     .hand(seat)
                     .iter()
                     .filter(|c| c.suit == Suit::Hearts)
                     .count();
-                if others_hearts >= 3 || near_end || lost_control_recent || hearts_left < 3 {
+                if others_hearts >= cfg.abort_others_hearts_min
+                    || near_end
+                    || lost_control_recent
+                    || hearts_left < cfg.abort_min_hearts_left
+                {
                     Self::dbg(&format!(
                         "mdhearts: moon ABORT for {:?} (others_hearts={}, near_end={}, lost_control={}, hearts_left={}, my_total={})",
                         seat, others_hearts, near_end, lost_control_recent, hearts_left, my_total
@@ -302,7 +323,7 @@ impl GameController {
         let legal = self.legal_moves(seat);
         let ctx = self.bot_context(seat);
         match self.bot_difficulty {
-            BotDifficulty::SearchLookahead => {
+            BotDifficulty::SearchLookahead | BotDifficulty::FutureHard => {
                 crate::bot::PlayPlannerHard::explain_candidates(&legal, &ctx)
             }
             _ => crate::bot::PlayPlanner::explain_candidates(&legal, &ctx),
@@ -326,6 +347,69 @@ impl GameController {
     pub fn moon_state_for_test(&self, seat: PlayerPosition) -> crate::bot::MoonState {
         self.unseen_tracker.moon_state(seat)
     }
+}
+
+// --- Moon tuning config ---
+#[derive(Debug, Clone, Copy)]
+struct MoonConfig {
+    commit_cards_played_max: usize,
+    commit_max_score: u32,
+    commit_min_tricks_won: u8,
+    commit_min_hearts: usize,
+    commit_min_control_hearts: usize,
+    abort_others_hearts_min: u32,
+    abort_near_end_cards_played_min: usize,
+    abort_min_hearts_left: usize,
+    abort_on_lost_control_clean: bool,
+}
+
+fn parse_env_u32(key: &str) -> Option<u32> {
+    std::env::var(key).ok().and_then(|s| s.parse::<u32>().ok())
+}
+fn parse_env_usize(key: &str) -> Option<usize> {
+    std::env::var(key)
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+}
+fn parse_env_u8(key: &str) -> Option<u8> {
+    std::env::var(key).ok().and_then(|s| s.parse::<u8>().ok())
+}
+fn parse_env_bool(key: &str) -> Option<bool> {
+    std::env::var(key).ok().and_then(|v| {
+        let l = v.to_ascii_lowercase();
+        Some(l == "1" || l == "true" || l == "on")
+    })
+}
+
+fn moon_cfg() -> MoonConfig {
+    MoonConfig {
+        commit_cards_played_max: parse_env_usize("MDH_MOON_COMMIT_MAX_CARDS").unwrap_or(20),
+        commit_max_score: parse_env_u32("MDH_MOON_COMMIT_MAX_SCORE").unwrap_or(70),
+        commit_min_tricks_won: parse_env_u8("MDH_MOON_COMMIT_MIN_TRICKS").unwrap_or(2),
+        commit_min_hearts: parse_env_usize("MDH_MOON_COMMIT_MIN_HEARTS").unwrap_or(5),
+        commit_min_control_hearts: parse_env_usize("MDH_MOON_COMMIT_MIN_CONTROL").unwrap_or(3),
+        abort_others_hearts_min: parse_env_u32("MDH_MOON_ABORT_OTHERS_HEARTS").unwrap_or(3),
+        abort_near_end_cards_played_min: parse_env_usize("MDH_MOON_ABORT_NEAREND_CARDS")
+            .unwrap_or(36),
+        abort_min_hearts_left: parse_env_usize("MDH_MOON_ABORT_MIN_HEARTS_LEFT").unwrap_or(3),
+        abort_on_lost_control_clean: parse_env_bool("MDH_MOON_ABORT_LOST_CONTROL").unwrap_or(true),
+    }
+}
+
+fn debug_moon_config_string() -> String {
+    let c = moon_cfg();
+    format!(
+        "commit_max_cards={} commit_max_score={} commit_min_tricks={} commit_min_hearts={} commit_min_control={} abort_others_hearts={} abort_nearend_cards={} abort_min_hearts_left={} abort_lost_control={}",
+        c.commit_cards_played_max,
+        c.commit_max_score,
+        c.commit_min_tricks_won,
+        c.commit_min_hearts,
+        c.commit_min_control_hearts,
+        c.abort_others_hearts_min,
+        c.abort_near_end_cards_played_min,
+        c.abort_min_hearts_left,
+        c.abort_on_lost_control_clean,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -790,4 +874,120 @@ mod tests {
             crate::bot::MoonState::Inactive as u8
         );
     }
+
+    // Note: Avoid env-mutation tests here; they can race under parallel test execution.
+    // The following test was removed in favor of manual checks via CLI with MDH_DEBUG_LOGS.
+    /*
+    #[test]
+    fn moon_abort_toggle_respected() {
+        // Disable abort on lost clean control; prevent other abort criteria
+        let prev_lost = std::env::var("MDH_MOON_ABORT_LOST_CONTROL").ok();
+        let prev_others = std::env::var("MDH_MOON_ABORT_OTHERS_HEARTS").ok();
+        let prev_near = std::env::var("MDH_MOON_ABORT_NEAREND_CARDS").ok();
+        let prev_left = std::env::var("MDH_MOON_ABORT_MIN_HEARTS_LEFT").ok();
+        unsafe {
+            std::env::set_var("MDH_MOON_ABORT_LOST_CONTROL", "0");
+            std::env::set_var("MDH_MOON_ABORT_OTHERS_HEARTS", "100");
+            std::env::set_var("MDH_MOON_ABORT_NEAREND_CARDS", "100");
+            std::env::set_var("MDH_MOON_ABORT_MIN_HEARTS_LEFT", "0");
+        }
+
+        let mut controller = GameController::new_with_seed(Some(12345), PlayerPosition::South);
+        controller.configure_for_test();
+
+        // Reuse the same scripted setup as in moon_commit_then_abort_flow
+        let south = vec![
+            Card::new(Rank::Ace, Suit::Hearts),
+            Card::new(Rank::King, Suit::Hearts),
+            Card::new(Rank::Queen, Suit::Hearts),
+            Card::new(Rank::Jack, Suit::Hearts),
+            Card::new(Rank::Ten, Suit::Hearts),
+            Card::new(Rank::Ace, Suit::Clubs),
+            Card::new(Rank::King, Suit::Clubs),
+            Card::new(Rank::Two, Suit::Diamonds),
+        ];
+        let east = vec![
+            Card::new(Rank::Eight, Suit::Clubs),
+            Card::new(Rank::Six, Suit::Clubs),
+            Card::new(Rank::Ace, Suit::Diamonds),
+        ];
+        let north = vec![
+            Card::new(Rank::Seven, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Diamonds),
+            Card::new(Rank::Six, Suit::Diamonds),
+        ];
+        let west = vec![
+            Card::new(Rank::Six, Suit::Clubs),
+            Card::new(Rank::Five, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Diamonds),
+        ];
+        let round = {
+            use hearts_core::model::hand::Hand;
+            use hearts_core::model::round::{RoundPhase, RoundState};
+            use hearts_core::model::trick::Trick;
+            let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
+            hands[PlayerPosition::South.index()] = Hand::with_cards(south);
+            hands[PlayerPosition::East.index()] = Hand::with_cards(east);
+            hands[PlayerPosition::North.index()] = Hand::with_cards(north);
+            hands[PlayerPosition::West.index()] = Hand::with_cards(west);
+            let mut seed = Trick::new(PlayerPosition::South);
+            seed.play(PlayerPosition::South, Card::new(Rank::Two, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::West, Card::new(Rank::Three, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::North, Card::new(Rank::Four, Suit::Clubs)).unwrap();
+            seed.play(PlayerPosition::East, Card::new(Rank::Five, Suit::Clubs)).unwrap();
+            RoundState::from_hands_with_state(
+                hands,
+                PlayerPosition::South,
+                PassingDirection::Hold,
+                RoundPhase::Playing,
+                Trick::new(PlayerPosition::South),
+                vec![seed],
+                false,
+            )
+        };
+        controller.set_round_and_scores_for_test(round, [10, 20, 10, 15]);
+
+        // Trick 1
+        for (s, c) in [
+            (PlayerPosition::South, Card::new(Rank::Ace, Suit::Clubs)),
+            (PlayerPosition::West, Card::new(Rank::Five, Suit::Clubs)),
+            (PlayerPosition::North, Card::new(Rank::Seven, Suit::Clubs)),
+            (PlayerPosition::East, Card::new(Rank::Six, Suit::Clubs)),
+        ] {
+            controller.play(s, c).unwrap();
+        }
+        // Trick 2
+        for (s, c) in [
+            (PlayerPosition::South, Card::new(Rank::King, Suit::Clubs)),
+            (PlayerPosition::West, Card::new(Rank::Six, Suit::Clubs)),
+            (PlayerPosition::North, Card::new(Rank::Three, Suit::Diamonds)),
+            (PlayerPosition::East, Card::new(Rank::Eight, Suit::Clubs)),
+        ] {
+            controller.play(s, c).unwrap();
+        }
+        // Trick 3 (lost clean control)
+        for (s, c) in [
+            (PlayerPosition::South, Card::new(Rank::Two, Suit::Diamonds)),
+            (PlayerPosition::West, Card::new(Rank::Four, Suit::Diamonds)),
+            (PlayerPosition::North, Card::new(Rank::Six, Suit::Diamonds)),
+            (PlayerPosition::East, Card::new(Rank::Ace, Suit::Diamonds)),
+        ] {
+            controller.play(s, c).unwrap();
+        }
+
+        assert_eq!(
+            controller.moon_state_for_test(PlayerPosition::South) as u8,
+            crate::bot::MoonState::Committed as u8,
+            "should remain committed when abort-on-lost-control disabled"
+        );
+
+        // Restore env
+        unsafe {
+            match prev_lost { Some(v) => std::env::set_var("MDH_MOON_ABORT_LOST_CONTROL", v), None => std::env::remove_var("MDH_MOON_ABORT_LOST_CONTROL") }
+            match prev_others { Some(v) => std::env::set_var("MDH_MOON_ABORT_OTHERS_HEARTS", v), None => std::env::remove_var("MDH_MOON_ABORT_OTHERS_HEARTS") }
+            match prev_near { Some(v) => std::env::set_var("MDH_MOON_ABORT_NEAREND_CARDS", v), None => std::env::remove_var("MDH_MOON_ABORT_NEAREND_CARDS") }
+            match prev_left { Some(v) => std::env::set_var("MDH_MOON_ABORT_MIN_HEARTS_LEFT", v), None => std::env::remove_var("MDH_MOON_ABORT_MIN_HEARTS_LEFT") }
+        }
+    }
+    */
 }

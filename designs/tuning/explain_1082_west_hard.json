@@ -1,0 +1,77 @@
+{
+  "candidates": [
+    {
+      "card": "7D",
+      "score": 960
+    },
+    {
+      "card": "9D",
+      "score": 960
+    },
+    {
+      "card": "10D",
+      "score": 960
+    },
+    {
+      "card": "JD",
+      "score": 960
+    },
+    {
+      "card": "QD",
+      "score": 960
+    },
+    {
+      "card": "2S",
+      "score": 960
+    }
+  ],
+  "candidates_verbose": [
+    {
+      "base": 960,
+      "card": "7D",
+      "cont": 0,
+      "total": 960
+    },
+    {
+      "base": 960,
+      "card": "9D",
+      "cont": 0,
+      "total": 960
+    },
+    {
+      "base": 960,
+      "card": "10D",
+      "cont": 0,
+      "total": 960
+    },
+    {
+      "base": 960,
+      "card": "JD",
+      "cont": 0,
+      "total": 960
+    },
+    {
+      "base": 960,
+      "card": "QD",
+      "cont": 0,
+      "total": 960
+    },
+    {
+      "base": 960,
+      "card": "2S",
+      "cont": 0,
+      "total": 960
+    }
+  ],
+  "difficulty": "FutureHard",
+  "hard_stats": {
+    "elapsed_ms": 0,
+    "scanned": 6
+  },
+  "seat": "West",
+  "seed": 1082,
+  "weights": {
+    "hard": "branch_limit=6 next_branch_limit=3 time_cap_ms=10 cutoff_margin=300 cont_feed_perpen=60 cont_self_capture_perpen=80 next_singleton=25 next_hearts_per=2 next_hearts_cap=10 next2_feed_perpen=40 next2_self_capture_perpen=60",
+    "normal": "off_suit_dump_bonus=600 cards_played_bias=10 early_hearts_lead_caution=600 near100_self_capture_base=1300 near100_shed_perpen=250 hunt_feed_perpen=800 leader_feed_base=120 nonleader_feed_perpen=1200 leader_feed_gap_per10=40"
+  }
+}
