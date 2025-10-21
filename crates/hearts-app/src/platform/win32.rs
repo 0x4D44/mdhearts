@@ -1963,7 +1963,7 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
             difficulty,
             MF_STRING,
             ID_OPTIONS_DIFFICULTY_HARD as usize,
-            w!("&Hard (Future)"),
+            w!("&Hard (Heuristic+)"),
         )
     };
     let _ = unsafe {
