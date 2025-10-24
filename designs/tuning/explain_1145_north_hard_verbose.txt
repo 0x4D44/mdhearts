@@ -1,0 +1,24 @@
+﻿Explain North (seed 1145):
+  6 candidates (difficulty=FutureHard)
+  hard-flags: det=1 steps=120 topk=6
+  hard-stats: scanned=6 elapsed=0ms
+  4D => 960
+  6D => 960
+  JD => 960
+  QD => 960
+  KD => 960
+  AD => 960
+  hard-verbose (card base cont total):
+    4D 960 0 960
+    6D 960 0 960
+    JD 960 0 960
+    QD 960 0 960
+    KD 960 0 960
+    AD 960 0 960
+  hard-verbose-parts:
+    4D 960 0 960 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    6D 960 0 960 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    JD 960 0 960 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    QD 960 0 960 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    KD 960 0 960 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    AD 960 0 960 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0

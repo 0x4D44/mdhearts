@@ -2,6 +2,8 @@
 
 Modern Rust revival of the classic Microsoft Hearts experience.
 
+CI: see GitHub Actions workflow in `.github/workflows/ci.yml` (builds/tests on Windows/Linux; PR eval smoke).
+
 ## Getting Started
 1. Install Rust stable (`x86_64-pc-windows-msvc`).
 2. Follow `docs/SETUP_WINDOWS.md` for Win32 build prerequisites.
@@ -21,24 +23,76 @@ Modern Rust revival of the classic Microsoft Hearts experience.
 - `mdhearts.exe --compare-once <seed> <seat>` (runs Normal and Hard explain for the same snapshot and prints top choices and Hard stats)
 - `mdhearts.exe --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree]` (prints CSV lines of Normal vs Hard top picks and Hard stats; `--out` writes to file, `--only-disagree` filters to disagreements)
 - `mdhearts.exe --explain-json <seed> <seat> <path> [difficulty]` (writes a JSON file with candidates, difficulty, weights, and Hard stats)
+- `mdhearts.exe --bench-check <difficulty> <seat> <seed_start> <count> [Hard flags]` (quick perf stats: avg and p95 µs over a seed range)
+- `mdhearts.exe --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]` (simulate one round per seed with two difficulties and emit CSV of penalties for the given seat)
+- `mdhearts.exe --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]` (simulate one round per seed with two difficulties and emit CSV of penalties for the given seat)
+- `mdhearts.exe --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]` (run mixed-seat evaluations using a seed file; `<mix>` is 4 chars for N,E,S,W using `e|n|h`)
+
+Hard (FutureHard) flags (for explain/compare/json)
+- Append flags to control Hard without env vars:
+  - `--hard-deterministic`, `--hard-steps <n>`, `--hard-phaseb-topk <k>`, `--hard-branch-limit <n>`, `--hard-next-branch-limit <n>`, `--hard-time-cap-ms <ms>`, `--hard-cutoff <margin>`, `--hard-cont-boost-gap <n>`, `--hard-cont-boost-factor <n>`, `--hard-verbose`
+- CLI prints a one-line `hard-flags:` summary for quick visibility.
+
+Advanced (env): tiering and stats
+- `MDH_HARD_TIERS_ENABLE=1` — enable leverage-based tiering of Hard limits (defaults off).
+- Thresholds: `MDH_HARD_LEVERAGE_THRESH_NARROW` (default 20), `MDH_HARD_LEVERAGE_THRESH_NORMAL` (default 50).
+- With `MDH_DEBUG_LOGS=1`, `--explain-once` prints extended Hard stats (tier, leverage, utilization, and effective limits).
 
 Additional references:
 - Win32 UI roadmap: `docs/WIN32_UI_PLAN.md`
 - Snapshot CLI usage: `docs/CLI_TOOLS.md`
+
+Hard Defaults Gate (choose-only)
+- Enable Hard determinization by default (choose paths only) to stabilize and slightly deepen Hard without affecting explain output:
+  - PowerShell: `$env:MDH_HARD_DET_DEFAULT_ON = "1"; $env:MDH_HARD_DET_SAMPLE_K = "3"; $env:MDH_HARD_DETERMINISTIC = "1"; $env:MDH_HARD_TEST_STEPS = "120"`
+  - Then run mixed-seat evals, e.g.: `mdhearts --match-mixed west 1000 200 nnhh --out designs/tuning/mixed_nnhh_demo.csv`
+  - Explain paths remain deterministic; choose uses determinization when Hard is active.
+- Tuning quickstart: `designs/tuning/2025-10-22 - Tuning Quickstart.md`
+- Tuning artifacts index: `designs/2025.10.22 - Tuning Artifacts Index.md`
+- Evaluation & stability plan: `designs/2025.10.22 - Stage 6 (Evaluation & Stability) Plan.md`
+- AI tuning contributor guide: `docs/CONTRIBUTING_AI_TUNING.md`
+- Designs folder index: `designs/INDEX.md`
+
+## Deterministic Evaluation (HOWTO)
+- For a quick, reproducible sweep across seats, use the helper script:
+  - PowerShell: `powershell -ExecutionPolicy Bypass -File tools/run_eval.ps1 -Verbose`
+  - The script sets deterministic Hard flags (`MDH_HARD_DETERMINISTIC=1`, `MDH_HARD_TEST_STEPS=<n>`) and runs:
+    - `--compare-batch` with `--only-disagree` per seat
+    - `--match-batch` Normal vs Hard per seat
+  - Outputs are timestamped CSVs under `designs/tuning/` and a single summary Markdown `designs/tuning/eval_summary_<timestamp>.md`.
+  - Adjust ranges via parameters (defaults: West 1000..1149, South 1080..1229, East 2000..2149, North 1100..1299); see script header.
+  - Tip: keep `MDH_CLI_POPUPS` unset so results go to console/files (no message boxes).
 
 
 ## Configuration
 - `MDH_BOT_DIFFICULTY` (`easy`, `normal`, `hard`): controls AI play style. `normal` enables the new heuristic planner; `easy` retains the legacy logic.
 - `hard` currently uses a shallow-search scaffold that orders by heuristic and considers the top-N branches (configurable with `MDH_HARD_BRANCH_LIMIT`).
 - `MDH_HARD_TIME_CAP_MS` (default `10`): per-decision time cap for Hard’s candidate scanning; breaks early when exceeded.
+- `MDH_HARD_DETERMINISTIC` (default `off`): when enabled, uses a deterministic step-capped budget instead of wall-clock timing for Hard scanning (stable tests/logs).
+- `MDH_HARD_TEST_STEPS` (no default): optional step cap used when deterministic mode is on.
+- `MDH_HARD_DET_DEFAULT_ON` (default `off`): enable determinization by default for Hard choose paths (explain remains deterministic). Pair with `MDH_HARD_DET_SAMPLE_K` and related flags as needed.
 - Hard continuation tuning (tiny weights):
   - `MDH_HARD_CONT_FEED_PERPEN` (default `60`): bonus per penalty point when current-trick rollout feeds the leader.
   - `MDH_HARD_CONT_SELF_CAPTURE_PERPEN` (default `80`): penalty per penalty point when rollout has us capture penalties.
   - `MDH_HARD_NEXTTRICK_SINGLETON` (default `25`): bonus per singleton non-hearts suit if we will lead the next trick (cap 3 suits).
   - `MDH_HARD_NEXTTRICK_HEARTS_PER` (default `2`): small per-heart bonus if hearts are broken and we lead next.
   - `MDH_HARD_NEXTTRICK_HEARTS_CAP` (default `10`): cap for the hearts component above.
+  - `MDH_HARD_CONT_BOOST_GAP` (default `0`=off): when > 0, apply a multiplicative boost to the continuation component for candidates whose base is within this gap of the top base.
+  - `MDH_HARD_CONT_BOOST_FACTOR` (default `1`=no boost): multiplicative factor applied to continuation when the above gap condition holds.
+  - `MDH_HARD_QS_RISK_PER` (default `0`=off): small negative when we’ll lead next and still hold A♠ (QS exposure risk).
+  - `MDH_HARD_CTRL_HEARTS_PER` (default `0`=off): small positive per heart when we’ll lead next and hearts are broken.
+  - `MDH_HARD_CTRL_HANDOFF_PEN` (default `0`=off): small negative when we will not lead next (loss of initiative).
+  - `MDH_HARD_CONT_CAP` (default `0`=off): symmetric cap on total continuation magnitude to keep effects tiny.
+  - `MDH_HARD_MOON_RELIEF_PERPEN` (default `0`=off): small positive per penalty when we win a trick and moon state is Considering/Committed.
 - `MDH_HARD_NEXT_BRANCH_LIMIT` (default `3`): number of candidate leads to probe when we lead the next trick in Hard’s 2‑ply probe.
 - `MDH_HARD_EARLY_CUTOFF_MARGIN` (default `300`): early cutoff guard in Hard; stops scanning candidates when the next base score cannot beat the best total even with this margin.
+- `MDH_HARD_PHASEB_TOPK` (default `0`): compute continuation only for top‑K candidates; candidates beyond K use base‑only (monotonic fallback under budget).
+- `MDH_HARD_NEXT3_ENABLE` (default `off`): enable a minimal third‑opponent branch in the next‑trick probe.
+
+Head‑to‑head (match) evaluation
+- Use `--match-batch` to compare two difficulties across a seed range for a specific seat. Columns: `seed,seat,diffA,diffB,a_pen,b_pen,delta` where `delta=b_pen-a_pen`.
+- Example (console): `mdhearts --match-batch west 1000 50 normal hard --hard-deterministic --hard-steps 80`
+- Example (to file): `mdhearts --match-batch east 2000 100 normal hard --out designs/tuning/match_east_2000_100.csv`
 
 Moon tuning (env)
 - `MDH_MOON_COMMIT_MAX_CARDS` (default `20`): max cards played in round to consider committing to moon.
@@ -97,3 +151,8 @@ cargo run -p hearts-app --bin mdhearts
 - Run the installer script (requires Inno Setup): `iscc installers\Hearts.iss`
 - Output setup executable is written to `installers/MDHearts-1.0.1-Setup.exe`.
 
+- Flags helpful for tuning/inspection:
+  - `--show-weights [--out <path>]` — print or write Normal/Hard weights summary (respects env overrides)
+  - `--hard-verbose` — with `MDH_DEBUG_LOGS=1`, print continuation part breakdown for Hard in explain commands
+- Evaluation helper script
+  - tools/run_eval.ps1 — run deterministic compare/match across all seats; writes timestamped CSVs and a single summary Markdown.

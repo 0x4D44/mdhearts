@@ -1,0 +1,9 @@
+Explain-after East (seed 2012, plays 3): 3 candidates (difficulty=FutureHard)
+  hard-stats: scanned=3 elapsed=5ms
+  3C => 693
+  7C => 597
+  AC => -5218
+  hard-verbose (card base cont total):
+    3C 698 -5 693
+    7C 602 -5 597
+    AC -5218 0 -5218

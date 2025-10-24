@@ -1,0 +1,8 @@
+Explain-after West (seed 1097, plays 3): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=0ms
+  2D => 970
+  3D => 970
+  7D => 970
+  8D => 970
+  9D => 970
+  JD => 970

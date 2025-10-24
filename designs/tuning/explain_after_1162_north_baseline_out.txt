@@ -1,0 +1,8 @@
+Explain-after North (seed 1162, plays 3): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=0ms
+  3D => 970
+  4D => 970
+  5D => 970
+  JD => 970
+  QD => 970
+  4S => 970

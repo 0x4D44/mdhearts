@@ -1,0 +1,6 @@
+Explain-after West (seed 1008, plays 1): 4 candidates (difficulty=FutureHard)
+  hard-stats: scanned=4 elapsed=1ms
+  3C => 678
+  9C => -5003
+  10C => -5045
+  JC => -5087

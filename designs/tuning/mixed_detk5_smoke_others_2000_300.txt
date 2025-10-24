@@ -1,0 +1,6 @@
+north,nnhh,2000,mean=7.967
+north,hhnn,2000,mean=7.967
+east,nnhh,2000,mean=6.750
+east,hhnn,2000,mean=6.750
+south,nnhh,2000,mean=6.377
+south,hhnn,2000,mean=6.377

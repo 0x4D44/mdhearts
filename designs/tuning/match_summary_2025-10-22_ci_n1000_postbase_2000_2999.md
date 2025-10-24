@@ -1,0 +1,5 @@
+﻿# Match Batch Normal vs Hard — postbase 95% CI (delta=b_pen - a_pen) 2000..2999, n=1000 per seat`n`n| seat | n | mean | std | 95% CI | note |`n|---|---:|---:|---:|---|---|`n| west | 1000 | 0 | 0 | [0.000, 0.000] | equal |
+| north | 1000 | 0 | 0 | [0.000, 0.000] | equal |
+| east | 1000 | 0 | 0 | [0.000, 0.000] | equal |
+| south | 1000 | 0 | 0 | [0.000, 0.000] | equal |
+

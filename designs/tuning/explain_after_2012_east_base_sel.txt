@@ -1,0 +1,5 @@
+Explain-after East (seed 2012, plays 3): 3 candidates (difficulty=FutureHard)
+  hard-stats: scanned=3 elapsed=0ms
+  3C => 693
+  7C => 597
+  AC => -5218

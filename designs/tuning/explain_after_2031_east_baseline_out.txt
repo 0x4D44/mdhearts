@@ -1,0 +1,15 @@
+Explain-after East (seed 2031, plays 2): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=7ms
+  5D => 960
+  6D => 960
+  9D => 960
+  JD => 960
+  KD => 960
+  AD => 960
+  hard-verbose (card base cont total):
+    5D 960 0 960
+    6D 960 0 960
+    9D 960 0 960
+    JD 960 0 960
+    KD 960 0 960
+    AD 960 0 960

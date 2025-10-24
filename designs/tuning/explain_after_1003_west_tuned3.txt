@@ -1,0 +1,4 @@
+Explain-after West (seed 1003, plays 2): 2 candidates (difficulty=FutureHard)
+  hard-stats: scanned=2 elapsed=0ms
+  5C => 640
+  KC => -5161

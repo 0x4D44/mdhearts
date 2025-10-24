@@ -1,0 +1,16 @@
+north,nnhh,n=500,mean=6.572
+north,hhnn,n=500,mean=6.572
+north,nhnh,n=500,mean=6.572
+north,hnhn,n=500,mean=6.572
+east,nnhh,n=500,mean=6.444
+east,hhnn,n=500,mean=6.444
+east,nhnh,n=500,mean=6.444
+east,hnhn,n=500,mean=6.444
+south,nnhh,n=500,mean=6.618
+south,hhnn,n=500,mean=6.618
+south,nhnh,n=500,mean=6.618
+south,hnhn,n=500,mean=6.618
+west,nnhh,n=500,mean=6.366
+west,hhnn,n=500,mean=6.366
+west,nhnh,n=500,mean=6.366
+west,hnhn,n=500,mean=6.366

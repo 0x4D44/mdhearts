@@ -1,4 +1,4 @@
-use super::{
+﻿use super::{
     BotContext, BotStyle, card_sort_key, count_cards_in_suit, determine_style, snapshot_scores,
 };
 use hearts_core::model::card::Card;
@@ -371,6 +371,57 @@ fn base_score(
         score += penalties_i32
             * (weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10);
     }
+    // Phase B (Hard-only default): tiny extra leader-feed nudge on penalty tricks.
+    if matches!(ctx.difficulty, super::BotDifficulty::FutureHard)
+        && !will_capture
+        && penalties > 0
+        && winner == snapshot.max_player
+        && penalties_on_table_now > 0
+        && !ctx.round.is_first_trick()
+    {
+        // small safe nudge per penalty (kept conservative to preserve goldens)
+        score += penalties_i32 * 30;
+        // Wide-tier-like conditions: larger gap or high leader score -> slightly stronger nudge
+        let gap = snapshot
+            .max_score
+            .saturating_sub(ctx.scores.score(ctx.seat)) as i32;
+        if snapshot.max_score >= 90 || gap >= 15 {
+            score += penalties_i32 * 20;
+        }
+    }
+    // H2 (env-gated): Tiny planner nudges to complement Hard continuation without changing defaults.
+    if std::env::var("MDH_HARD_PLANNER_NUDGES").map(|v| v=="1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")).unwrap_or(false) {
+        // Apply only when not in the first trick to avoid interfering with 2♣ logic and early constraints.
+        if !ctx.round.is_first_trick() {
+            // Leader-feed nudge: if base per-penalty leader-feed is small, add a tiny extra per penalty when feeding leader.
+            if snapshot.max_player != ctx.seat
+                && !will_capture
+                && penalties > 0
+                && winner == snapshot.max_player
+                && penalties_on_table_now > 0
+            {
+                let gap = snapshot
+                    .max_score
+                    .saturating_sub(ctx.scores.score(ctx.seat)) as i32;
+                let gap_units = (gap.min(30) / 10).max(0);
+                let per = weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10;
+                let cap = parse_env_i32("MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE").unwrap_or(0);
+                if cap <= 0 || per < cap {
+                    let nudge = parse_env_i32("MDH_HARD_PLANNER_LEADER_FEED_NUDGE").unwrap_or(0);
+                    if nudge != 0 {
+                        score += penalties_i32 * nudge;
+                    }
+                }
+            }
+            // Self-capture nudge near 100: add a tiny extra penalty to capturing points when we're high.
+            if will_capture && ctx.scores.score(ctx.seat) >= 85 && penalties_on_table_now > 0 {
+                let nudge = parse_env_i32("MDH_HARD_PLANNER_SELF_CAPTURE_NUDGE").unwrap_or(0);
+                if nudge != 0 {
+                    score -= penalties_i32 * nudge;
+                }
+            }
+        }
+    }
     // Downweight feeding penalties to a non-leader (prevents blindly dumping QS to second place).
     if snapshot.max_player != ctx.seat
         && !will_capture
@@ -399,6 +450,18 @@ fn base_score(
             score -= weights().near100_self_capture_base + penalties_i32 * 900;
         } else {
             score += penalties_i32 * weights().near100_shed_perpen;
+        }
+    }
+    // Phase B (Hard-only default): tiny extra penalty when near 100 and we would capture points now.
+    if matches!(ctx.difficulty, super::BotDifficulty::FutureHard)
+        && my_score >= 85
+        && will_capture
+        && penalties_on_table_now > 0
+        && !ctx.round.is_first_trick()
+    {
+        score -= penalties_i32 * 30;
+        if snapshot.max_score >= 90 {
+            score -= penalties_i32 * 20;
         }
     }
 
@@ -450,6 +513,7 @@ struct Weights {
     leader_feed_base: i32,
     nonleader_feed_perpen: i32,
     leader_feed_gap_per10: i32,
+    endgame_feed_cap_perpen: i32,
 }
 
 fn parse_env_i32(key: &str) -> Option<i32> {
@@ -468,13 +532,14 @@ fn weights() -> &'static Weights {
         leader_feed_base: parse_env_i32("MDH_W_LEADER_FEED_BASE").unwrap_or(120),
         nonleader_feed_perpen: parse_env_i32("MDH_W_NONLEADER_FEED_PERPEN").unwrap_or(1200),
         leader_feed_gap_per10: parse_env_i32("MDH_W_LEADER_FEED_GAP_PER10").unwrap_or(40),
+        endgame_feed_cap_perpen: parse_env_i32("MDH_W_ENDGAME_FEED_CAP").unwrap_or(0),
     })
 }
 
 pub fn debug_weights_string() -> String {
     let w = weights();
     format!(
-        "off_suit_dump_bonus={} cards_played_bias={} early_hearts_lead_caution={} near100_self_capture_base={} near100_shed_perpen={} hunt_feed_perpen={} leader_feed_base={} nonleader_feed_perpen={} leader_feed_gap_per10={}",
+        "off_suit_dump_bonus={} cards_played_bias={} early_hearts_lead_caution={} near100_self_capture_base={} near100_shed_perpen={} hunt_feed_perpen={} leader_feed_base={} nonleader_feed_perpen={} leader_feed_gap_per10={} endgame_feed_cap_perpen={}",
         w.off_suit_dump_bonus,
         w.cards_played_bias,
         w.early_hearts_lead_caution,
@@ -483,7 +548,8 @@ pub fn debug_weights_string() -> String {
         w.hunt_feed_perpen,
         w.leader_feed_base,
         w.nonleader_feed_perpen,
-        w.leader_feed_gap_per10
+        w.leader_feed_gap_per10,
+        w.endgame_feed_cap_perpen
     )
 }
 
@@ -1252,3 +1318,4 @@ mod tests {
         assert_eq!(choice, Card::new(Rank::Queen, Suit::Hearts));
     }
 }
+

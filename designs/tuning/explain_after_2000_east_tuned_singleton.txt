@@ -1,0 +1,4 @@
+Explain-after East (seed 2000, plays 3): 2 candidates (difficulty=FutureHard)
+  hard-stats: scanned=2 elapsed=1ms
+  8C => -4926
+  JC => -5052

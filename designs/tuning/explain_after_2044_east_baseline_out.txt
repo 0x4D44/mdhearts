@@ -1,0 +1,8 @@
+Explain-after East (seed 2044, plays 1): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=0ms
+  2D => 950
+  5D => 950
+  8D => 950
+  9D => 950
+  JD => 950
+  2S => 950

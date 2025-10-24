@@ -58,14 +58,32 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
 
     match cmd.as_str() {
         "--show-weights" => {
+            // Optional: --out <path>
+            let mut out: Option<std::path::PathBuf> = None;
+            if let Some(flag) = args.next() {
+                if flag == "--out" {
+                    let p = args
+                        .next()
+                        .ok_or(CliError::MissingArgument("--show-weights --out <path>"))?;
+                    out = Some(std::path::PathBuf::from(p));
+                } else {
+                    return Err(CliError::UnknownCommand(flag));
+                }
+            }
             let norm = crate::bot::debug_weights_string();
             let hard = crate::bot::debug_hard_weights_string();
             let msg = format!(
                 "AI Weights (Normal): {}\nAI Weights (Hard):   {}",
                 norm, hard
             );
-            println!("{}", msg);
-            show_info_box("AI Weights", &msg);
+            if let Some(path) = out {
+                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                std::fs::write(&path, &msg).map_err(CliError::Io)?;
+                println!("Wrote weights to {}", path.display());
+            } else {
+                println!("{}", msg);
+                show_info_box("AI Weights", &msg);
+            }
             Ok(CliOutcome::Handled)
         }
         "--explain-once" => {
@@ -79,6 +97,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 .transpose()?
                 .ok_or(CliError::MissingArgument("--explain-once <seed> <seat>"))?;
             let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s));
+            parse_hard_cli_flags(&mut args)?;
 
             let mut controller =
                 crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
@@ -116,11 +135,29 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
             ) {
+                if let Some(flags) = hard_flags_summary() {
+                    println!("  hard-flags: {}", flags);
+                }
                 if let Some(stats) = crate::bot::search::last_stats() {
                     println!(
                         "  hard-stats: scanned={} elapsed={}ms",
                         stats.scanned, stats.elapsed_ms
                     );
+                    if debug_logs_enabled() {
+                        println!(
+                            "    tier={:?} leverage={} util={}% limits: topk={} nextM={} ab={}",
+                            stats.tier,
+                            stats.leverage_score,
+                            stats.utilization,
+                            stats.limits_in_effect.phaseb_topk,
+                            stats.limits_in_effect.next_probe_m,
+                            stats.limits_in_effect.ab_margin,
+                        );
+                        println!(
+                            "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={}",
+                            stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil, stats.next3_tiny_hits
+                        );
+                    }
                 }
             }
             for (card, score) in explained.iter() {
@@ -139,6 +176,18 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 for (c, b, cont, t) in verbose {
                     println!("    {} {} {} {}", c, b, cont, t);
                 }
+                if std::env::var("MDH_HARD_VERBOSE_CONT").map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")).unwrap_or(false) {
+                    let parts = crate::bot::PlayPlannerHard::explain_candidates_verbose_parts(&legal, &ctx);
+                    println!("  hard-verbose-parts:");
+                    for (c, b, p, t) in parts {
+                        let cont_sum = p.feed + p.self_capture + p.next_start + p.next_probe + p.qs_risk + p.ctrl_hearts + p.ctrl_handoff + p.moon_relief + p.capped_delta;
+                        println!(
+                            "    {} {} {} {} | feed={} self={} start={} probe={} qs={} hearts={} handoff={} moon_relief={} cap={}",
+                            c, b, cont_sum, t,
+                            p.feed, p.self_capture, p.next_start, p.next_probe, p.qs_risk, p.ctrl_hearts, p.ctrl_handoff, p.moon_relief, p.capped_delta
+                        );
+                    }
+                }
             }
             Ok(CliOutcome::Handled)
         }
@@ -153,6 +202,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 CliError::MissingArgument("--explain-batch <seat> <seed_start> <count>"),
             )?;
             let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s));
+            parse_hard_cli_flags(&mut args)?;
 
             for i in 0..count {
                 let seed = seed_start + i;
@@ -186,11 +236,29 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     controller.bot_difficulty(),
                     crate::bot::BotDifficulty::FutureHard
                 ) {
+                    if let Some(flags) = hard_flags_summary() {
+                        println!("  hard-flags: {}", flags);
+                    }
                     if let Some(stats) = crate::bot::search::last_stats() {
                         println!(
                             "  hard-stats: scanned={} elapsed={}ms",
                             stats.scanned, stats.elapsed_ms
                         );
+                        if debug_logs_enabled() {
+                            println!(
+                                "    tier={:?} leverage={} util={}% limits: topk={} nextM={} ab={}",
+                                stats.tier,
+                                stats.leverage_score,
+                                stats.utilization,
+                                stats.limits_in_effect.phaseb_topk,
+                                stats.limits_in_effect.next_probe_m,
+                                stats.limits_in_effect.ab_margin,
+                            );
+                            println!(
+                                "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={}",
+                                stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil
+                            );
+                        }
                     }
                 }
                 for (card, score) in explained.iter() {
@@ -208,6 +276,18 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     println!("  hard-verbose (card base cont total):");
                     for (c, b, cont, t) in verbose {
                         println!("    {} {} {} {}", c, b, cont, t);
+                    }
+                    if std::env::var("MDH_HARD_VERBOSE_CONT").map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")).unwrap_or(false) {
+                        let parts = crate::bot::PlayPlannerHard::explain_candidates_verbose_parts(&legal, &ctx);
+                        println!("  hard-verbose-parts:");
+                        for (c, b, p, t) in parts {
+                            let cont_sum = p.feed + p.self_capture + p.next_start + p.next_probe + p.qs_risk + p.ctrl_hearts + p.ctrl_handoff + p.moon_relief + p.capped_delta;
+                            println!(
+                                "    {} {} {} {} | feed={} self={} start={} probe={} qs={} hearts={} handoff={} moon_relief={} cap={}",
+                                c, b, cont_sum, t,
+                                p.feed, p.self_capture, p.next_start, p.next_probe, p.qs_risk, p.ctrl_hearts, p.ctrl_handoff, p.moon_relief, p.capped_delta
+                            );
+                        }
                     }
                 }
             }
@@ -247,6 +327,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
                 CliError::MissingArgument("--explain-snapshot <path> <seat>"),
             )?;
+            parse_hard_cli_flags(&mut args)?;
             let json = fs::read_to_string(&path)?;
             let snapshot = MatchSnapshot::from_json(&json)?;
             let match_state = snapshot.restore();
@@ -267,6 +348,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
             ) {
+                if let Some(flags) = hard_flags_summary() {
+                    println!("  hard-flags: {}", flags);
+                }
                 if let Some(stats) = crate::bot::search::last_stats() {
                     println!(
                         "  hard-stats: scanned={} elapsed={}ms",
@@ -380,6 +464,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 .map(|s| parse_seat(&s))
                 .transpose()?
                 .ok_or(CliError::MissingArgument("--compare-once <seed> <seat>"))?;
+            parse_hard_cli_flags(&mut args)?;
 
             // Normal
             let mut normal =
@@ -430,6 +515,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 hard_top,
                 hard_expl.len()
             );
+            if let Some(flags) = hard_flags_summary() {
+                println!("  hard-flags: {}", flags);
+            }
             if let Some(stats) = crate::bot::search::last_stats() {
                 println!(
                     "  Hard stats: scanned={} elapsed={}ms",
@@ -461,7 +549,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             // Optional output path: --out <path>
             let mut out_path: Option<PathBuf> = None;
             let mut only_disagree = false;
-            // Parse optional flags: --out <path>, --only-disagree (order-agnostic)
+            // Parse optional flags: --out <path>, --only-disagree and Hard flags (order-agnostic)
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--out" => {
@@ -474,6 +562,14 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                         out_path = Some(path);
                     }
                     "--only-disagree" => only_disagree = true,
+                    other if other.starts_with("--hard-") => {
+                        // Consume the rest with the hard flags parser
+                        let mut rest = vec![other.to_string()];
+                        rest.extend(args.by_ref());
+                        let mut it = rest.into_iter();
+                        parse_hard_cli_flags(&mut it)?;
+                        break;
+                    }
                     other => return Err(CliError::UnknownCommand(other.to_string())),
                 }
             }
@@ -646,8 +742,358 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             println!("Wrote explain JSON to {}", path.display());
             Ok(CliOutcome::Handled)
         }
+        "--bench-check" => {
+            // Usage: --bench-check <difficulty> <seat> <seed_start> <count>
+            let diff_str = args
+                .next()
+                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
+            let difficulty = parse_difficulty_opt(&diff_str)
+                .ok_or(CliError::UnknownCommand(diff_str))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
+            let seed_start = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
+            let count = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
+
+            // Optional Hard flags
+            parse_hard_cli_flags(&mut args)?;
+
+            let mut samples: Vec<u128> = Vec::new();
+            for i in 0..count {
+                let seed = seed_start + i;
+                let mut controller = crate::controller::GameController::new_with_seed(
+                    Some(seed),
+                    PlayerPosition::North,
+                );
+                controller.set_bot_difficulty(difficulty);
+                if controller.in_passing_phase() {
+                    if let Some(cards) = controller.simple_pass_for(seat) {
+                        let _ = controller.submit_pass(seat, cards);
+                    }
+                    let _ = controller.submit_auto_passes_for_others(seat);
+                    let _ = controller.resolve_passes();
+                }
+                while !controller.in_passing_phase() && controller.expected_to_play() != seat {
+                    if controller.autoplay_one(seat).is_none() {
+                        break;
+                    }
+                }
+                let t0 = std::time::Instant::now();
+                let _ = controller.explain_candidates_for(seat);
+                let dt = t0.elapsed();
+                samples.push(dt.as_micros());
+            }
+            samples.sort();
+            let n = samples.len() as u128;
+            let sum: u128 = samples.iter().copied().sum();
+            let avg = if n > 0 { (sum / n) as u64 } else { 0 };
+            let p95 = if samples.is_empty() {
+                0u64
+            } else {
+                let idx = ((samples.len() as f64) * 0.95).ceil() as usize - 1;
+                samples[idx].min(u128::from(u64::MAX)) as u64
+            };
+            println!(
+                "bench-check difficulty={:?} seat={:?} count={} avg_us={} p95_us={}",
+                difficulty, seat, samples.len(), avg, p95
+            );
+            let thr = match difficulty {
+                crate::bot::BotDifficulty::FutureHard => std::env::var("MDH_BENCH_WARN_US_HARD")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok()),
+                _ => std::env::var("MDH_BENCH_WARN_US_HEUR").ok().and_then(|s| s.parse::<u64>().ok()),
+            };
+            if let Some(threshold) = thr {
+                if p95 > threshold {
+                    eprintln!(
+                        "WARNING: p95_us={} exceeds threshold {} (difficulty={:?})",
+                        p95, threshold, difficulty
+                    );
+                }
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--match-batch" => {
+            // Usage: --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"))?;
+            let seed_start = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"))?;
+            let count = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"))?;
+
+            // Optional difficulties (default A=normal, B=hard)
+            let diff_a = args.next().and_then(|s| parse_difficulty_opt(&s)).unwrap_or(crate::bot::BotDifficulty::NormalHeuristic);
+            let diff_b = args.next().and_then(|s| parse_difficulty_opt(&s)).unwrap_or(crate::bot::BotDifficulty::FutureHard);
+
+            // Optional flags: --out <path> plus Hard flags
+            let mut out_path: Option<std::path::PathBuf> = None;
+            let mut hard_tokens: Vec<String> = Vec::new();
+            // Known hard flags that expect a value next
+            let needs_value = [
+                "--hard-steps",
+                "--hard-phaseb-topk",
+                "--hard-branch-limit",
+                "--hard-next-branch-limit",
+                "--hard-time-cap-ms",
+                "--hard-cutoff",
+                "--hard-cont-boost-gap",
+                "--hard-cont-boost-factor",
+            ];
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--out" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--out <path>"))?;
+                        out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    other if other.starts_with("--hard-") => {
+                        hard_tokens.push(other.to_string());
+                        if needs_value.contains(&other) {
+                            let v = args.next().ok_or(CliError::MissingArgument("hard flag value"))?;
+                            hard_tokens.push(v);
+                        }
+                    }
+                    other => return Err(CliError::UnknownCommand(other.to_string())),
+                }
+            }
+            parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
+
+            let mut rows = Vec::new();
+            rows.push("seed,seat,diffA,diffB,a_pen,b_pen,delta".to_string());
+            for i in 0..count {
+                let seed = seed_start + i;
+                let a_pen = simulate_one_round(seed, seat, diff_a)?;
+                let b_pen = simulate_one_round(seed, seat, diff_b)?;
+                let delta = (b_pen as i32) - (a_pen as i32);
+                rows.push(format!("{}, {:?}, {:?}, {:?}, {}, {}, {}", seed, seat, diff_a, diff_b, a_pen, b_pen, delta));
+            }
+            if let Some(path) = out_path {
+                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
+                println!("Wrote match CSV to {}", path.display());
+            } else {
+                for line in rows { println!("{}", line); }
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--match-mixed" => {
+            // Usage: --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [Hard flags]
+            // <mix> is a 4-char string in order N,E,S,W using: e|n|h (easy|normal|hard)
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"))?;
+            let seed_start = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"))?;
+            let count = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"))?;
+            let mix = args
+                .next()
+                .ok_or(CliError::MissingArgument("--match-mixed requires <mix> (e|n|h for N,E,S,W)"))?;
+            if mix.len() != 4 {
+                return Err(CliError::UnknownCommand("--match-mixed <mix> must be 4 chars (N,E,S,W)".to_string()));
+            }
+            let chars: Vec<char> = mix.chars().collect();
+            let map_char = |c: char| -> Option<crate::bot::BotDifficulty> {
+                match c {
+                    'e' | 'E' => Some(crate::bot::BotDifficulty::EasyLegacy),
+                    'n' | 'N' => Some(crate::bot::BotDifficulty::NormalHeuristic),
+                    'h' | 'H' => Some(crate::bot::BotDifficulty::FutureHard),
+                    _ => None,
+                }
+            };
+            let mut diffs = [crate::bot::BotDifficulty::NormalHeuristic; 4];
+            for (i, c) in chars.into_iter().enumerate() {
+                let d = map_char(c)
+                    .ok_or(CliError::UnknownCommand("--match-mixed invalid mix char (use e|n|h)".to_string()))?;
+                diffs[i] = d;
+            }
+
+            // Optional flags: --out <path> plus Hard flags
+            let mut out_path: Option<std::path::PathBuf> = None;
+            let mut hard_tokens: Vec<String> = Vec::new();
+            let needs_value = [
+                "--hard-steps",
+                "--hard-phaseb-topk",
+                "--hard-branch-limit",
+                "--hard-next-branch-limit",
+                "--hard-time-cap-ms",
+                "--hard-cutoff",
+                "--hard-cont-boost-gap",
+                "--hard-cont-boost-factor",
+            ];
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--out" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--out <path>"))?;
+                        out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    other if other.starts_with("--hard-") => {
+                        hard_tokens.push(other.to_string());
+                        if needs_value.contains(&other) {
+                            let v = args
+                                .next()
+                                .ok_or(CliError::MissingArgument("hard flag value"))?;
+                            hard_tokens.push(v);
+                        }
+                    }
+                    other => return Err(CliError::UnknownCommand(other.to_string())),
+                }
+            }
+            parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
+
+            let mut rows = Vec::new();
+            rows.push("seed,seat,mix,pen".to_string());
+            for i in 0..count {
+                let seed = seed_start + i;
+                let pen = simulate_one_round_mixed(seed, seat, diffs)?;
+                rows.push(format!(
+                    "{}, {:?}, {}, {}",
+                    seed,
+                    seat,
+                    mix,
+                    pen
+                ));
+            }
+            if let Some(path) = out_path {
+                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
+                println!("Wrote mixed-match CSV to {}", path.display());
+            } else {
+                for line in rows { println!("{}", line); }
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--match-mixed-file" => {
+            // Usage: --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--match-mixed-file <seat> <mix> --seeds-file <path>"))?;
+            let mix = args
+                .next()
+                .ok_or(CliError::MissingArgument("--match-mixed-file requires <mix> (e|n|h for N,E,S,W)"))?;
+            if mix.len() != 4 {
+                return Err(CliError::UnknownCommand(
+                    "--match-mixed-file <mix> must be 4 chars (N,E,S,W)".to_string(),
+                ));
+            }
+
+            // Optional flags: --seeds-file <path>, --out <path>, then Hard flags
+            let mut seeds_path: Option<std::path::PathBuf> = None;
+            let mut out_path: Option<std::path::PathBuf> = None;
+            let mut hard_tokens: Vec<String> = Vec::new();
+            let needs_value = [
+                "--hard-steps",
+                "--hard-phaseb-topk",
+                "--hard-branch-limit",
+                "--hard-next-branch-limit",
+                "--hard-time-cap-ms",
+                "--hard-cutoff",
+                "--hard-cont-boost-gap",
+                "--hard-cont-boost-factor",
+            ];
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--seeds-file" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--seeds-file <path>"))?;
+                        seeds_path = Some(std::path::PathBuf::from(p));
+                    }
+                    "--out" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--out <path>"))?;
+                        out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    other if other.starts_with("--hard-") => {
+                        hard_tokens.push(other.to_string());
+                        if needs_value.contains(&other) {
+                            let v = args
+                                .next()
+                                .ok_or(CliError::MissingArgument("hard flag value"))?;
+                            hard_tokens.push(v);
+                        }
+                    }
+                    other => return Err(CliError::UnknownCommand(other.to_string())),
+                }
+            }
+            let seeds_path = seeds_path
+                .ok_or(CliError::MissingArgument("--seeds-file <path>"))?;
+            parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
+
+            // Map mix characters to difficulties
+            let chars: Vec<char> = mix.chars().collect();
+            let map_char = |c: char| -> Option<crate::bot::BotDifficulty> {
+                match c {
+                    'e' | 'E' => Some(crate::bot::BotDifficulty::EasyLegacy),
+                    'n' | 'N' => Some(crate::bot::BotDifficulty::NormalHeuristic),
+                    'h' | 'H' => Some(crate::bot::BotDifficulty::FutureHard),
+                    _ => None,
+                }
+            };
+            let mut diffs = [crate::bot::BotDifficulty::NormalHeuristic; 4];
+            for (i, c) in chars.into_iter().enumerate() {
+                let d = map_char(c).ok_or(CliError::UnknownCommand(
+                    "--match-mixed-file invalid mix char (use e|n|h)".to_string(),
+                ))?;
+                diffs[i] = d;
+            }
+
+            let mut rows = Vec::new();
+            rows.push("seed,seat,mix,pen".to_string());
+            let content = std::fs::read_to_string(&seeds_path).map_err(CliError::Io)?;
+            for line in content.lines() {
+                let s = line.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                if let Ok(seed) = s.parse::<u64>() {
+                    let pen = simulate_one_round_mixed(seed, seat, diffs)?;
+                    rows.push(format!("{}, {:?}, {}, {}", seed, seat, mix, pen));
+                }
+            }
+            if let Some(path) = out_path {
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
+                println!("Wrote mixed-match CSV to {}", path.display());
+            } else {
+                for line in rows {
+                    println!("{}", line);
+                }
+            }
+            Ok(CliOutcome::Handled)
+        }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty]\n  --explain-batch <seat> <seed_start> <count> [difficulty]\n  --explain-snapshot <path> <seat>\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat>\n  --compare-batch <seat> <seed_start> <count> [--out <path>]\n  --explain-json <seed> <seat> <path> [difficulty]\n  --help";
+            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty] [Hard flags]\n  --explain-batch <seat> <seed_start> <count> [difficulty] [Hard flags]\n  --explain-snapshot <path> <seat> [Hard flags]\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat> [Hard flags]\n  --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree] [Hard flags]\n  --explain-json <seed> <seat> <path> [difficulty] [Hard flags]\n  --bench-check <difficulty> <seat> <seed_start> <count> [Hard flags]\n  --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]\n  --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [Hard flags]\n  --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]\n\nHard flags (can follow many commands):\n  --hard-deterministic             Enable deterministic mode (step-capped)\n  --hard-steps <n>                 Deterministic step cap for Hard\n  --hard-phaseb-topk <k>           Top-K candidates for continuation scoring\n  --hard-branch-limit <n>          Candidate branch limit (base ordering)\n  --hard-next-branch-limit <n>     Next-trick probe branch limit\n  --hard-time-cap-ms <ms>          Wall-clock cap (non-deterministic mode)\n  --hard-cutoff <margin>           Early cutoff margin for choose()\n  --hard-cont-boost-gap <n>        Gap threshold to boost continuation in near ties\n  --hard-cont-boost-factor <n>     Multiplier applied to continuation in near ties\n  --hard-det | --hard-det-enable   Enable determinization sampling (env-gated)\n  --hard-det-k <n>                 Number of determinization samples (K)\n  --hard-det-probe                 Widen next-trick probe under determinization\n  --hard-verbose                   Print verbose continuation parts (requires MDH_DEBUG_LOGS=1)\n  --help";
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)
@@ -781,4 +1227,147 @@ fn popups_enabled() -> bool {
 #[cfg(windows)]
 fn encode_wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn parse_hard_cli_flags(args: &mut impl Iterator<Item = String>) -> Result<(), CliError> {
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--hard-deterministic" => unsafe { std::env::set_var("MDH_HARD_DETERMINISTIC", "1") },
+            "--hard-steps" => {
+                let v = args.next().ok_or(CliError::MissingArgument("--hard-steps <n>"))?;
+                unsafe { std::env::set_var("MDH_HARD_TEST_STEPS", v) }
+            }
+            "--hard-det" | "--hard-det-enable" => unsafe { std::env::set_var("MDH_HARD_DET_ENABLE", "1") },
+            "--hard-det-k" => {
+                let v = args.next().ok_or(CliError::MissingArgument("--hard-det-k <n>"))?;
+                unsafe { std::env::set_var("MDH_HARD_DET_SAMPLE_K", v) }
+            }
+            "--hard-det-probe" => unsafe { std::env::set_var("MDH_HARD_DET_PROBE_WIDE_LIKE", "1") },
+            "--hard-phaseb-topk" => {
+                let v = args.next().ok_or(CliError::MissingArgument("--hard-phaseb-topk <k>"))?;
+                unsafe { std::env::set_var("MDH_HARD_PHASEB_TOPK", v) }
+            }
+            "--hard-branch-limit" => {
+                let v = args.next().ok_or(CliError::MissingArgument("--hard-branch-limit <n>"))?;
+                unsafe { std::env::set_var("MDH_HARD_BRANCH_LIMIT", v) }
+            }
+            "--hard-next-branch-limit" => {
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-next-branch-limit <n>"))?;
+                unsafe { std::env::set_var("MDH_HARD_NEXT_BRANCH_LIMIT", v) }
+            }
+            "--hard-time-cap-ms" => {
+                let v = args.next().ok_or(CliError::MissingArgument("--hard-time-cap-ms <ms>"))?;
+                unsafe { std::env::set_var("MDH_HARD_TIME_CAP_MS", v) }
+            }
+            "--hard-cutoff" => {
+                let v = args.next().ok_or(CliError::MissingArgument("--hard-cutoff <margin>"))?;
+                unsafe { std::env::set_var("MDH_HARD_EARLY_CUTOFF_MARGIN", v) }
+            }
+            "--hard-cont-boost-gap" => {
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-cont-boost-gap <n>"))?;
+                unsafe { std::env::set_var("MDH_HARD_CONT_BOOST_GAP", v) }
+            }
+            "--hard-cont-boost-factor" => {
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-cont-boost-factor <n>"))?;
+                unsafe { std::env::set_var("MDH_HARD_CONT_BOOST_FACTOR", v) }
+            }
+            "--hard-verbose" => {
+                unsafe { std::env::set_var("MDH_HARD_VERBOSE_CONT", "1") }
+            }
+            other if other.starts_with("--") => return Err(CliError::UnknownCommand(other.to_string())),
+            _ => break,
+        }
+    }
+    Ok(())
+}
+
+fn simulate_one_round(
+    seed: u64,
+    seat: PlayerPosition,
+    difficulty: crate::bot::BotDifficulty,
+) -> Result<u8, CliError> {
+    let mut controller =
+        crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+    controller.set_bot_difficulty(difficulty);
+    if controller.in_passing_phase() {
+        if let Some(cards) = controller.simple_pass_for(seat) {
+            let _ = controller.submit_pass(seat, cards);
+        }
+        let _ = controller.submit_auto_passes_for_others(seat);
+        let _ = controller.resolve_passes();
+    }
+    loop {
+        let totals = controller.penalties_this_round();
+        let sum: u32 = totals.iter().map(|&v| v as u32).sum();
+        if sum >= 26 {
+            break;
+        }
+        let to_play = controller.expected_to_play();
+        let _ = controller.autoplay_one(to_play.next());
+    }
+    let totals = controller.penalties_this_round();
+    Ok(totals[seat.index()])
+}
+
+fn simulate_one_round_mixed(
+    seed: u64,
+    seat: PlayerPosition,
+    diffs: [crate::bot::BotDifficulty; 4],
+) -> Result<u8, CliError> {
+    let mut controller =
+        crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+    // Passing: apply our seat difficulty for pass; others auto-pass with their seat difficulty
+    if controller.in_passing_phase() {
+        controller.set_bot_difficulty(diffs[seat.index()]);
+        if let Some(cards) = controller.simple_pass_for(seat) {
+            let _ = controller.submit_pass(seat, cards);
+        }
+        let _ = controller.submit_auto_passes_for_others(seat);
+        let _ = controller.resolve_passes();
+    }
+    loop {
+        let totals = controller.penalties_this_round();
+        let sum: u32 = totals.iter().map(|&v| v as u32).sum();
+        if sum >= 26 { break; }
+        let to_play = controller.expected_to_play();
+        controller.set_bot_difficulty(diffs[to_play.index()]);
+        let _ = controller.autoplay_one(to_play.next());
+    }
+    let totals = controller.penalties_this_round();
+    Ok(totals[seat.index()])
+}
+
+fn hard_flags_summary() -> Option<String> {
+    let det = std::env::var("MDH_HARD_DETERMINISTIC").unwrap_or_default();
+    let steps = std::env::var("MDH_HARD_TEST_STEPS").unwrap_or_default();
+    let topk = std::env::var("MDH_HARD_PHASEB_TOPK").unwrap_or_default();
+    let bl = std::env::var("MDH_HARD_BRANCH_LIMIT").unwrap_or_default();
+    let nbl = std::env::var("MDH_HARD_NEXT_BRANCH_LIMIT").unwrap_or_default();
+    let cap = std::env::var("MDH_HARD_TIME_CAP_MS").unwrap_or_default();
+    let cutoff = std::env::var("MDH_HARD_EARLY_CUTOFF_MARGIN").unwrap_or_default();
+    let boost_gap = std::env::var("MDH_HARD_CONT_BOOST_GAP").unwrap_or_default();
+    let boost_factor = std::env::var("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or_default();
+    let parts = vec![
+        ("det", det),
+        ("steps", steps),
+        ("topk", topk),
+        ("bl", bl),
+        ("nbl", nbl),
+        ("capms", cap),
+        ("cutoff", cutoff),
+        ("boost_gap", boost_gap),
+        ("boost_factor", boost_factor),
+    ];
+    let items: Vec<_> = parts
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect();
+    if items.is_empty() { None } else { Some(items.join(" ")) }
 }

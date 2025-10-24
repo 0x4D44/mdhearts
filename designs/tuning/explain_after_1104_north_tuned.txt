@@ -1,0 +1,6 @@
+Explain-after North (seed 1104, plays 3): 4 candidates (difficulty=FutureHard)
+  hard-stats: scanned=4 elapsed=0ms
+  3C => 698
+  6C => 626
+  8C => -4941
+  AC => -5193

@@ -1,0 +1,6 @@
+north,nnhh,mean=6.693
+north,hhnn,mean=6.693
+east,nnhh,mean=6.170
+east,hhnn,mean=6.170
+south,nnhh,mean=6.750
+south,hhnn,mean=6.750

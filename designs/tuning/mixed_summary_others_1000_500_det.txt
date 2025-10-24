@@ -1,0 +1,10 @@
+north,nnhh,1000,6.572
+north,hhnn,1000,6.572
+east,nnhh,1000,6.444
+east,hhnn,1000,6.444
+east,nhnh,1000,6.444
+east,hnhn,1000,6.444
+south,nnhh,1000,6.618
+south,hhnn,1000,6.618
+south,nhnh,1000,6.618
+south,hnhn,1000,6.618

@@ -1,0 +1,8 @@
+Explain-after South (seed 1097, plays 2): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=1ms
+  3C => 688
+  4C => 664
+  6C => 616
+  10C => -5035
+  JC => -5077
+  AC => -5203

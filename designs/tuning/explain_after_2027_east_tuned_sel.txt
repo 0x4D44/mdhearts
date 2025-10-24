@@ -1,0 +1,5 @@
+Explain-after East (seed 2027, plays 1): 3 candidates (difficulty=FutureHard)
+  hard-stats: scanned=3 elapsed=0ms
+  4C => 654
+  KC => -5171
+  AC => -5213

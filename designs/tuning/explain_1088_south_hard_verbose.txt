@@ -1,0 +1,12 @@
+﻿Explain South (seed 1088):
+  2 candidates (difficulty=FutureHard)
+  hard-flags: det=1 steps=120 topk=6
+  hard-stats: scanned=2 elapsed=0ms
+  3C => 688
+  10C => -5035
+  hard-verbose (card base cont total):
+    3C 688 0 688
+    10C -5060 25 -5035
+  hard-verbose-parts:
+    3C 688 0 688 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    10C -5060 25 -5035 | feed=0 self=0 start=25 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0

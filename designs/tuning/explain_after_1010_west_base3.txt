@@ -1,0 +1,7 @@
+Explain-after West (seed 1010, plays 1): 5 candidates (difficulty=FutureHard)
+  hard-stats: scanned=5 elapsed=3ms
+  4C => 654
+  6C => -4877
+  JC => -5087
+  KC => -5171
+  AC => -5233

@@ -1,0 +1,8 @@
+Explain-after South (seed 1080, plays 3): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=0ms
+  5D => 970
+  8D => 970
+  9D => 970
+  QD => 970
+  AD => 970
+  7S => 970

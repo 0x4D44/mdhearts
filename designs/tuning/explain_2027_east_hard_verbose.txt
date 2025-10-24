@@ -1,0 +1,15 @@
+﻿Explain East (seed 2027):
+  3 candidates (difficulty=FutureHard)
+  hard-flags: det=1 steps=120 topk=6
+  hard-stats: scanned=3 elapsed=1ms
+  4C => 654
+  KC => -5171
+  AC => -5213
+  hard-verbose (card base cont total):
+    4C 654 0 654
+    KC -5196 25 -5171
+    AC -5238 25 -5213
+  hard-verbose-parts:
+    4C 654 0 654 | feed=0 self=0 start=0 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    KC -5196 25 -5171 | feed=0 self=0 start=25 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0
+    AC -5238 25 -5213 | feed=0 self=0 start=25 probe=0 qs=0 hearts=0 handoff=0 moon_relief=0 cap=0

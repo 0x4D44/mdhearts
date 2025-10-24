@@ -1,0 +1,5 @@
+West seat, deterministic, 200 seeds (1000..1199)
+NNHH avg_pen=6.66
+HHNN avg_pen=6.66
+NHNH avg_pen=6.66
+HNHN avg_pen=6.66

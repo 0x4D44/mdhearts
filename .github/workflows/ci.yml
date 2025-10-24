@@ -2,22 +2,61 @@ name: CI
 
 on:
   push:
+    branches: [ main, master ]
   pull_request:
-
-permissions:
-  contents: read
+    branches: [ main, master ]
 
 jobs:
-  build:
-    runs-on: windows-latest
+  test:
+    name: Tests (Rust stable)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     env:
-      RUSTFLAGS: -D warnings
       CARGO_TERM_COLOR: always
+      MDH_DEBUG_LOGS: "0"
+      MDH_CLI_POPUPS: "0"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cargo build (release)
-        run: cargo build --workspace --release
-      - name: Cargo test
-        run: cargo test --workspace --all-features
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build
+        run: cargo build --all --release
+      - name: Test
+        run: cargo test --all --verbose
+
+  eval-smoke:
+    name: Eval helper smoke (Linux)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      CARGO_TERM_COLOR: always
+      MDH_DEBUG_LOGS: "0"
+      MDH_HARD_DETERMINISTIC: "1"
+      MDH_HARD_TEST_STEPS: "60"
+      SEAT_START_WEST: "1000"
+      SEAT_START_SOUTH: "1080"
+      SEAT_START_EAST: "2000"
+      SEAT_START_NORTH: "1100"
+      COUNT_WEST: "5"
+      COUNT_SOUTH: "5"
+      COUNT_EAST: "5"
+      COUNT_NORTH: "5"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run eval helper (bash)
+        run: |
+          chmod +x tools/run_eval.sh
+          ./tools/run_eval.sh
 

@@ -1,0 +1,7 @@
+Explain-after North (seed 1107, plays 3): 2 candidates (difficulty=FutureHard)
+  hard-stats: scanned=2 elapsed=3ms
+  6C => -4857
+  7C => -4899
+  hard-verbose (card base cont total):
+    6C -4882 25 -4857
+    7C -4924 25 -4899

@@ -1,0 +1,7 @@
+Explain-after East (seed 2000, plays 3): 2 candidates (difficulty=FutureHard)
+  hard-stats: scanned=2 elapsed=3ms
+  8C => -4941
+  JC => -5067
+  hard-verbose (card base cont total):
+    8C -4966 25 -4941
+    JC -5092 25 -5067

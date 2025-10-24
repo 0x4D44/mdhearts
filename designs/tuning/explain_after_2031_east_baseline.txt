@@ -1,0 +1,147 @@
+﻿cargo : mdhearts: pass 5D total=-710 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=0
+At line:1 char:107
++ ... E_CONT='1'; cargo run -q -p hearts-app -- --explain-once-after 2031 e ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (mdhearts: pass ...s_played_bias=0:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+mdhearts: pass 6D total=-710 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass 9D total=-710 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass JD total=-710 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass KD total=2530 parts: high_rank_offsuit=3240 long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass AD total=2610 parts: high_rank_offsuit=3320 long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass 5S total=2490 parts: short_suit_void=2400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass 9S total=2490 parts: short_suit_void=2400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass 3H total=6050 parts: hearts_value=6360 long_suit_penalty=-400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass 4H total=6170 parts: hearts_value=6480 long_suit_penalty=-400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass 8H total=6650 parts: hearts_value=6960 long_suit_penalty=-400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass KH total=7250 parts: hearts_value=7560 long_suit_penalty=-400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass AH total=7370 parts: hearts_value=7680 long_suit_penalty=-400 unseen_bonus=90 cards_played_bias=0
+mdhearts: pass cand AH score=7370
+mdhearts: pass cand KH score=7250
+mdhearts: pass cand 8H score=6650
+mdhearts: pass cand 4H score=6170
+mdhearts: pass cand 3H score=6050
+mdhearts: pass cand AD score=2610
+mdhearts: pass 7C total=2526 parts: short_suit_void=2400 unseen_bonus=90 cards_played_bias=36
+mdhearts: pass QC total=2526 parts: short_suit_void=2400 unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 2D total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 4D total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 7D total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 10D total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 2S total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 3S total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 10S total=126 parts: unseen_bonus=90 cards_played_bias=36
+mdhearts: pass QS total=36126 parts: qs_priority=18000 spade_queen=18000 unseen_bonus=90 cards_played_bias=36
+mdhearts: pass 6H total=6846 parts: hearts_value=6720 unseen_bonus=90 cards_played_bias=36
+mdhearts: pass JH total=7446 parts: hearts_value=7320 unseen_bonus=90 cards_played_bias=36
+mdhearts: pass QH total=7566 parts: hearts_value=7440 unseen_bonus=90 cards_played_bias=36
+mdhearts: pass cand QS score=36126
+mdhearts: pass cand QH score=7566
+mdhearts: pass cand JH score=7446
+mdhearts: pass cand 6H score=6846
+mdhearts: pass cand 7C score=2526
+mdhearts: pass cand QC score=2526
+mdhearts: pass 3C total=-638 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 4C total=-638 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 6C total=-638 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 9C total=-638 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 10C total=-638 parts: long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass KC total=2602 parts: high_rank_offsuit=3240 long_suit_penalty=-800 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 8D total=3362 parts: short_suit_void=3200 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 8S total=2562 parts: short_suit_void=2400 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass KS total=12802 parts: spade_king=7000 high_rank_offsuit=3240 short_suit_void=2400 unseen_bonus=90 
+cards_played_bias=72
+mdhearts: pass 2H total=6402 parts: hearts_value=6240 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 5H total=6762 parts: hearts_value=6600 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 7H total=7002 parts: hearts_value=6840 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass 10H total=7362 parts: hearts_value=7200 unseen_bonus=90 cards_played_bias=72
+mdhearts: pass cand KS score=12802
+mdhearts: pass cand 10H score=7362
+mdhearts: pass cand 7H score=7002
+mdhearts: pass cand 5H score=6762
+mdhearts: pass cand 2H score=6402
+mdhearts: pass cand 8D score=3362
+mdhearts: pass 2C total=-4202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 two_of_clubs_keep=-4000 cards_played_bias=108
+mdhearts: pass 5C total=-202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass 8C total=-202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass JC total=-202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass AC total=3118 parts: high_rank_offsuit=3320 long_suit_penalty=-400 to_trailing_penalty_bonus=0 
+to_leader_penalty_avoid=0 unseen_bonus=90 cards_played_bias=108
+mdhearts: pass 3D total=2598 parts: short_suit_void=2400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass QD total=2598 parts: short_suit_void=2400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass 4S total=-202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass 6S total=-202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass 7S total=-202 parts: long_suit_penalty=-400 to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 
+unseen_bonus=90 cards_played_bias=108
+mdhearts: pass JS total=2298 parts: spade_jack=2500 long_suit_penalty=-400 to_trailing_penalty_bonus=0 
+to_leader_penalty_avoid=0 unseen_bonus=90 cards_played_bias=108
+mdhearts: pass AS total=8118 parts: spade_ace=5000 high_rank_offsuit=3320 long_suit_penalty=-400 
+to_trailing_penalty_bonus=0 to_leader_penalty_avoid=0 unseen_bonus=90 cards_played_bias=108
+mdhearts: pass 9H total=10478 parts: hearts_value=7080 short_suit_void=3200 to_trailing_penalty_bonus=1400 
+to_leader_penalty_avoid=-1400 unseen_bonus=90 cards_played_bias=108
+mdhearts: pass cand 9H score=10478
+mdhearts: pass cand AS score=8118
+mdhearts: pass cand AC score=3118
+mdhearts: pass cand 3D score=2598
+mdhearts: pass cand QD score=2598
+mdhearts: pass cand JS score=2298
+mdhearts: cand 7C Cautious lead=Some(Clubs) base=-4926 parts: follow_high_rank_penalty=-168 cards_played_bias=130 
+unseen_card_bonus=20 total=-4944
+mdhearts: cand QC Cautious lead=Some(Clubs) base=-5016 parts: follow_high_rank_penalty=-288 cards_played_bias=130 
+unseen_card_bonus=20 total=-5154
+mdhearts: cand AC Cautious lead=Some(Clubs) base=-5052 parts: follow_high_rank_penalty=-336 cards_played_bias=130 
+total=-5258
+mdhearts: hard cont parts card=5D feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard explain 5D base=960 cont=0 total=960
+mdhearts: hard cont parts card=6D feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard explain 6D base=960 cont=0 total=960
+mdhearts: hard cont parts card=9D feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard explain 9D base=960 cont=0 total=960
+mdhearts: hard cont parts card=JD feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard explain JD base=960 cont=0 total=960
+mdhearts: hard cont parts card=KD feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard explain KD base=960 cont=0 total=960
+mdhearts: hard cont parts card=AD feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard explain AD base=960 cont=0 total=960
+Explain-after East (seed 2031, plays 2): 6 candidates (difficulty=FutureHard)
+  hard-stats: scanned=6 elapsed=0ms
+  5D => 960
+  6D => 960
+  9D => 960
+  JD => 960
+  KD => 960
+  AD => 960
+mdhearts: hard cont parts card=5D feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard cont parts card=6D feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard cont parts card=9D feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard cont parts card=JD feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard cont parts card=KD feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+mdhearts: hard cont parts card=AD feed=0 self=0 moon_relief=0 next_start=0 next_probe=0 qs_risk=0 ctrl_hearts=0 
+ctrl_handoff=0 total=0
+  hard-verbose (card base cont total):
+    5D 960 0 960
+    6D 960 0 960
+    9D 960 0 960
+    JD 960 0 960
+    KD 960 0 960
+    AD 960 0 960

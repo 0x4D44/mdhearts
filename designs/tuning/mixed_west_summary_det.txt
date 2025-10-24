@@ -1,0 +1,8 @@
+west,nnhh,1000,6.367
+west,hhnn,1000,6.367
+west,nhnh,1000,6.367
+west,hnhn,1000,6.367
+west,nnhh,2000,5.871
+west,hhnn,2000,5.871
+west,nhnh,2000,5.871
+west,hnhn,2000,5.871

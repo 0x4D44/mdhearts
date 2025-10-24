@@ -347,6 +347,11 @@ impl GameController {
     pub fn moon_state_for_test(&self, seat: PlayerPosition) -> crate::bot::MoonState {
         self.unseen_tracker.moon_state(seat)
     }
+
+    #[cfg(test)]
+    pub fn current_trick_plays_for_test(&self) -> usize {
+        self.match_state.round().current_trick().plays().len()
+    }
 }
 
 // --- Moon tuning config ---
