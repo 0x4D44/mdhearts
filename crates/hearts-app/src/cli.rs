@@ -57,6 +57,187 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
     };
 
     match cmd.as_str() {
+        "--export-endgame" => {
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--export-endgame <seed> <seat> <out>"))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--export-endgame <seed> <seat> <out>"))?;
+            let out = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or(CliError::MissingArgument("--export-endgame <seed> <seat> <out>"))?;
+
+            let mut controller =
+                crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+            if controller.in_passing_phase() {
+                if let Some(cards) = controller.simple_pass_for(seat) {
+                    let _ = controller.submit_pass(seat, cards);
+                }
+                let _ = controller.submit_auto_passes_for_others(seat);
+                let _ = controller.resolve_passes();
+            }
+            let mut guard = 0u32;
+            loop {
+                if guard > 600 { break; }
+                guard += 1;
+                let to_play = controller.expected_to_play();
+                let round = controller.bot_context(seat).round;
+                let mut ok_small = true;
+                for s in [
+                    PlayerPosition::North,
+                    PlayerPosition::East,
+                    PlayerPosition::South,
+                    PlayerPosition::West,
+                ] {
+                    if round.hand(s).len() > 3 { ok_small = false; break; }
+                }
+                if ok_small { break; }
+                let _ = controller.autoplay_one(to_play.next());
+            }
+            let round = controller.bot_context(seat).round;
+            let obj = serde_json::json!({
+                "seed": seed,
+                "seat": format!("{:?}", seat),
+                "leader": format!("{:?}", round.current_trick().leader()),
+                "hearts_broken": round.hearts_broken(),
+                "hands": {
+                    "N": round.hand(PlayerPosition::North).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
+                    "E": round.hand(PlayerPosition::East).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
+                    "S": round.hand(PlayerPosition::South).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
+                    "W": round.hand(PlayerPosition::West).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
+                }
+            });
+            if let Some(parent) = out.parent() { let _ = std::fs::create_dir_all(parent); }
+            std::fs::write(&out, serde_json::to_string_pretty(&obj).unwrap())?;
+            println!("Wrote endgame snapshot to {}", out.display());
+            Ok(CliOutcome::Handled)
+        }
+        "--compare-dp-once" => {
+            // Usage: --compare-dp-once <seed> <seat> [Hard flags]
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--compare-dp-once <seed> <seat>"))?;
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--compare-dp-once <seed> <seat>"))?;
+            // Collect optional hard flags
+            let mut hard_tokens: Vec<String> = Vec::new();
+            let needs_value = [
+                "--hard-steps",
+                "--hard-phaseb-topk",
+                "--hard-branch-limit",
+                "--hard-next-branch-limit",
+                "--hard-time-cap-ms",
+                "--hard-cutoff",
+                "--hard-cont-boost-gap",
+                "--hard-cont-boost-factor",
+            ];
+            while let Some(flag) = args.next() {
+                if flag.starts_with("--hard-") {
+                    hard_tokens.push(flag.to_string());
+                    if needs_value.contains(&flag.as_str()) {
+                        let v = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("hard flag value"))?;
+                        hard_tokens.push(v);
+                    }
+                } else {
+                    return Err(CliError::UnknownCommand(flag));
+                }
+            }
+            parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
+
+            if let Some((legal_count, off, on)) = seek_dp_flip_for(seed, seat)? {
+                println!("dp-legal:{}", legal_count);
+                println!("dp-off:{}", off.unwrap_or_else(|| "(none)".to_string()));
+                println!("dp-on:{}", on.unwrap_or_else(|| "(none)".to_string()));
+            } else {
+                println!("dp-no-position");
+            }
+            Ok(CliOutcome::Handled)
+        }
+        "--seek-dp-flip" => {
+            // Usage: --seek-dp-flip <seat> <seed_start> <count> [--out <path>] [Hard flags]
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .ok_or(CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"))?;
+            let seed_start = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"))?;
+            let count = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .ok_or(CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"))?;
+            // Optional flags: --out <path> then Hard flags
+            let mut out_path: Option<std::path::PathBuf> = None;
+            let mut hard_tokens: Vec<String> = Vec::new();
+            let needs_value = [
+                "--hard-steps",
+                "--hard-phaseb-topk",
+                "--hard-branch-limit",
+                "--hard-next-branch-limit",
+                "--hard-time-cap-ms",
+                "--hard-cutoff",
+                "--hard-cont-boost-gap",
+                "--hard-cont-boost-factor",
+            ];
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--out" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--out <path>"))?;
+                        out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    other if other.starts_with("--hard-") => {
+                        hard_tokens.push(other.to_string());
+                        if needs_value.contains(&other) {
+                            let v = args
+                                .next()
+                                .ok_or(CliError::MissingArgument("hard flag value"))?;
+                            hard_tokens.push(v);
+                        }
+                    }
+                    other => return Err(CliError::UnknownCommand(other.to_string())),
+                }
+            }
+            parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
+
+            let mut rows = Vec::new();
+            rows.push("seed,seat,legal,top_off,top_on".to_string());
+            for i in 0..count {
+                let seed = seed_start + i;
+                if let Some((legal_count, off, on)) = seek_dp_flip_for(seed, seat)? {
+                    rows.push(format!(
+                        "{}, {:?}, {}, {}, {}",
+                        seed,
+                        seat,
+                        legal_count,
+                        off.unwrap_or_else(|| "(none)".to_string()),
+                        on.unwrap_or_else(|| "(none)".to_string())
+                    ));
+                }
+            }
+            if let Some(path) = out_path {
+                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
+                println!("Wrote DP flip seek CSV to {}", path.display());
+            } else {
+                for line in rows { println!("{}", line); }
+            }
+            Ok(CliOutcome::Handled)
+        }
         "--show-weights" => {
             // Optional: --out <path>
             let mut out: Option<std::path::PathBuf> = None;
@@ -154,8 +335,8 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             stats.limits_in_effect.ab_margin,
                         );
                         println!(
-                            "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={}",
-                            stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil, stats.next3_tiny_hits
+                            "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={} endgame_dp_hits={}",
+                            stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil, stats.next3_tiny_hits, stats.endgame_dp_hits
                         );
                     }
                 }
@@ -255,8 +436,8 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                                 stats.limits_in_effect.ab_margin,
                             );
                             println!(
-                                "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={}",
-                                stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil
+                                "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} endgame_dp_hits={}",
+                                stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil, stats.endgame_dp_hits
                             );
                         }
                     }
@@ -693,7 +874,20 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 if let Some(stats) = crate::bot::search::last_stats() {
                     stats_obj = serde_json::json!({
                         "scanned": stats.scanned,
-                        "elapsed_ms": stats.elapsed_ms
+                        "elapsed_ms": stats.elapsed_ms,
+                        "tier": format!("{:?}", stats.tier),
+                        "leverage": stats.leverage_score,
+                        "utilization": stats.utilization,
+                        "limits": {
+                            "topk": stats.limits_in_effect.phaseb_topk,
+                            "nextM": stats.limits_in_effect.next_probe_m,
+                            "ab": stats.limits_in_effect.ab_margin
+                        },
+                        "cont_cap": stats.cont_cap,
+                        "wide_boost_feed_permil": stats.wide_boost_feed_permil,
+                        "wide_boost_self_permil": stats.wide_boost_self_permil,
+                        "next3_tiny_hits": stats.next3_tiny_hits,
+                        "endgame_dp_hits": stats.endgame_dp_hits,
                     });
                 }
             }
@@ -841,8 +1035,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             let diff_a = args.next().and_then(|s| parse_difficulty_opt(&s)).unwrap_or(crate::bot::BotDifficulty::NormalHeuristic);
             let diff_b = args.next().and_then(|s| parse_difficulty_opt(&s)).unwrap_or(crate::bot::BotDifficulty::FutureHard);
 
-            // Optional flags: --out <path> plus Hard flags
+            // Optional flags: --out <path>, --stats, plus Hard flags
             let mut out_path: Option<std::path::PathBuf> = None;
+            let mut include_stats: bool = false;
             let mut hard_tokens: Vec<String> = Vec::new();
             // Known hard flags that expect a value next
             let needs_value = [
@@ -863,6 +1058,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             .ok_or(CliError::MissingArgument("--out <path>"))?;
                         out_path = Some(std::path::PathBuf::from(p));
                     }
+                    "--stats" => {
+                        include_stats = true;
+                    }
                     other if other.starts_with("--hard-") => {
                         hard_tokens.push(other.to_string());
                         if needs_value.contains(&other) {
@@ -876,13 +1074,31 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
 
             let mut rows = Vec::new();
-            rows.push("seed,seat,diffA,diffB,a_pen,b_pen,delta".to_string());
+            if include_stats {
+                rows.push("seed,seat,diffA,diffB,a_pen,b_pen,delta,scanned,elapsed_ms,dp_hits".to_string());
+            } else {
+                rows.push("seed,seat,diffA,diffB,a_pen,b_pen,delta".to_string());
+            }
             for i in 0..count {
                 let seed = seed_start + i;
                 let a_pen = simulate_one_round(seed, seat, diff_a)?;
                 let b_pen = simulate_one_round(seed, seat, diff_b)?;
                 let delta = (b_pen as i32) - (a_pen as i32);
-                rows.push(format!("{}, {:?}, {:?}, {:?}, {}, {}, {}", seed, seat, diff_a, diff_b, a_pen, b_pen, delta));
+                if include_stats {
+                    let stats = crate::bot::search::last_stats();
+                    let (scanned, elapsed, dp) = stats
+                        .map(|s| (s.scanned, s.elapsed_ms, s.endgame_dp_hits))
+                        .unwrap_or((0usize, 0u32, 0usize));
+                    rows.push(format!(
+                        "{}, {:?}, {:?}, {:?}, {}, {}, {}, {}, {}, {}",
+                        seed, seat, diff_a, diff_b, a_pen, b_pen, delta, scanned, elapsed, dp
+                    ));
+                } else {
+                    rows.push(format!(
+                        "{}, {:?}, {:?}, {:?}, {}, {}, {}",
+                        seed, seat, diff_a, diff_b, a_pen, b_pen, delta
+                    ));
+                }
             }
             if let Some(path) = out_path {
                 if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
@@ -931,8 +1147,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 diffs[i] = d;
             }
 
-            // Optional flags: --out <path> plus Hard flags
+            // Optional flags: --out <path>, --stats, plus Hard flags
             let mut out_path: Option<std::path::PathBuf> = None;
+            let mut include_stats: bool = false;
             let mut hard_tokens: Vec<String> = Vec::new();
             let needs_value = [
                 "--hard-steps",
@@ -952,6 +1169,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             .ok_or(CliError::MissingArgument("--out <path>"))?;
                         out_path = Some(std::path::PathBuf::from(p));
                     }
+                    "--stats" => {
+                        include_stats = true;
+                    }
                     other if other.starts_with("--hard-") => {
                         hard_tokens.push(other.to_string());
                         if needs_value.contains(&other) {
@@ -967,17 +1187,32 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
 
             let mut rows = Vec::new();
-            rows.push("seed,seat,mix,pen".to_string());
+            if include_stats {
+                rows.push("seed,seat,mix,pen,scanned,elapsed_ms,dp_hits".to_string());
+            } else {
+                rows.push("seed,seat,mix,pen".to_string());
+            }
             for i in 0..count {
                 let seed = seed_start + i;
                 let pen = simulate_one_round_mixed(seed, seat, diffs)?;
-                rows.push(format!(
-                    "{}, {:?}, {}, {}",
-                    seed,
-                    seat,
-                    mix,
-                    pen
-                ));
+                if include_stats {
+                    let stats = crate::bot::search::last_stats();
+                    let (scanned, elapsed, dp) = stats
+                        .map(|s| (s.scanned, s.elapsed_ms, s.endgame_dp_hits))
+                        .unwrap_or((0usize, 0u32, 0usize));
+                    rows.push(format!(
+                        "{}, {:?}, {}, {}, {}, {}, {}",
+                        seed, seat, mix, pen, scanned, elapsed, dp
+                    ));
+                } else {
+                    rows.push(format!(
+                        "{}, {:?}, {}, {}",
+                        seed,
+                        seat,
+                        mix,
+                        pen
+                    ));
+                }
             }
             if let Some(path) = out_path {
                 if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
@@ -1004,9 +1239,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 ));
             }
 
-            // Optional flags: --seeds-file <path>, --out <path>, then Hard flags
+            // Optional flags: --seeds-file <path>, --out <path>, --stats, then Hard flags
             let mut seeds_path: Option<std::path::PathBuf> = None;
             let mut out_path: Option<std::path::PathBuf> = None;
+            let mut include_stats: bool = false;
             let mut hard_tokens: Vec<String> = Vec::new();
             let needs_value = [
                 "--hard-steps",
@@ -1031,6 +1267,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             .next()
                             .ok_or(CliError::MissingArgument("--out <path>"))?;
                         out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    "--stats" => {
+                        include_stats = true;
                     }
                     other if other.starts_with("--hard-") => {
                         hard_tokens.push(other.to_string());
@@ -1067,7 +1306,11 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             }
 
             let mut rows = Vec::new();
-            rows.push("seed,seat,mix,pen".to_string());
+            if include_stats {
+                rows.push("seed,seat,mix,pen,scanned,elapsed_ms,dp_hits".to_string());
+            } else {
+                rows.push("seed,seat,mix,pen".to_string());
+            }
             let content = std::fs::read_to_string(&seeds_path).map_err(CliError::Io)?;
             for line in content.lines() {
                 let s = line.trim();
@@ -1076,7 +1319,18 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 }
                 if let Ok(seed) = s.parse::<u64>() {
                     let pen = simulate_one_round_mixed(seed, seat, diffs)?;
-                    rows.push(format!("{}, {:?}, {}, {}", seed, seat, mix, pen));
+                    if include_stats {
+                        let stats = crate::bot::search::last_stats();
+                        let (scanned, elapsed, dp) = stats
+                            .map(|s| (s.scanned, s.elapsed_ms, s.endgame_dp_hits))
+                            .unwrap_or((0usize, 0u32, 0usize));
+                        rows.push(format!(
+                            "{}, {:?}, {}, {}, {}, {}, {}",
+                            seed, seat, mix, pen, scanned, elapsed, dp
+                        ));
+                    } else {
+                        rows.push(format!("{}, {:?}, {}, {}", seed, seat, mix, pen));
+                    }
                 }
             }
             if let Some(path) = out_path {
@@ -1093,7 +1347,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             Ok(CliOutcome::Handled)
         }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty] [Hard flags]\n  --explain-batch <seat> <seed_start> <count> [difficulty] [Hard flags]\n  --explain-snapshot <path> <seat> [Hard flags]\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat> [Hard flags]\n  --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree] [Hard flags]\n  --explain-json <seed> <seat> <path> [difficulty] [Hard flags]\n  --bench-check <difficulty> <seat> <seed_start> <count> [Hard flags]\n  --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]\n  --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [Hard flags]\n  --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]\n\nHard flags (can follow many commands):\n  --hard-deterministic             Enable deterministic mode (step-capped)\n  --hard-steps <n>                 Deterministic step cap for Hard\n  --hard-phaseb-topk <k>           Top-K candidates for continuation scoring\n  --hard-branch-limit <n>          Candidate branch limit (base ordering)\n  --hard-next-branch-limit <n>     Next-trick probe branch limit\n  --hard-time-cap-ms <ms>          Wall-clock cap (non-deterministic mode)\n  --hard-cutoff <margin>           Early cutoff margin for choose()\n  --hard-cont-boost-gap <n>        Gap threshold to boost continuation in near ties\n  --hard-cont-boost-factor <n>     Multiplier applied to continuation in near ties\n  --hard-det | --hard-det-enable   Enable determinization sampling (env-gated)\n  --hard-det-k <n>                 Number of determinization samples (K)\n  --hard-det-probe                 Widen next-trick probe under determinization\n  --hard-verbose                   Print verbose continuation parts (requires MDH_DEBUG_LOGS=1)\n  --help";
+            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty] [Hard flags]\n  --explain-batch <seat> <seed_start> <count> [difficulty] [Hard flags]\n  --explain-snapshot <path> <seat> [Hard flags]\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat> [Hard flags]\n  --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree] [Hard flags]\n  --explain-json <seed> <seat> <path> [difficulty] [Hard flags]\n  --bench-check <difficulty> <seat> <seed_start> <count> [Hard flags]\n  --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]\n  --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [--stats] [Hard flags]\n  --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [--stats] [Hard flags]\n\nHard flags (can follow many commands):\n  --hard-deterministic             Enable deterministic mode (step-capped)\n  --hard-steps <n>                 Deterministic step cap for Hard\n  --hard-phaseb-topk <k>           Top-K candidates for continuation scoring\n  --hard-branch-limit <n>          Candidate branch limit (base ordering)\n  --hard-next-branch-limit <n>     Next-trick probe branch limit\n  --hard-time-cap-ms <ms>          Wall-clock cap (non-deterministic mode)\n  --hard-cutoff <margin>           Early cutoff margin for choose()\n  --hard-cont-boost-gap <n>        Gap threshold to boost continuation in near ties\n  --hard-cont-boost-factor <n>     Multiplier applied to continuation in near ties\n  --hard-det | --hard-det-enable   Enable determinization sampling (env-gated)\n  --hard-det-k <n>                 Number of determinization samples (K)\n  --hard-det-probe                 Widen next-trick probe under determinization\n  --hard-verbose                   Print verbose continuation parts (requires MDH_DEBUG_LOGS=1)\n  --help";
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)
@@ -1285,6 +1539,57 @@ fn parse_hard_cli_flags(args: &mut impl Iterator<Item = String>) -> Result<(), C
         }
     }
     Ok(())
+}
+
+fn seek_dp_flip_for(
+    seed: u64,
+    target_seat: PlayerPosition,
+) -> Result<Option<(usize, Option<String>, Option<String>)>, CliError> {
+    let mut controller =
+        crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
+    controller.set_bot_difficulty(crate::bot::BotDifficulty::FutureHard);
+    // Resolve passing
+    if controller.in_passing_phase() {
+        if let Some(cards) = controller.simple_pass_for(target_seat) {
+            let _ = controller.submit_pass(target_seat, cards);
+        }
+        let _ = controller.submit_auto_passes_for_others(target_seat);
+        let _ = controller.resolve_passes();
+    }
+    // Autoplay until it is target's turn and all hands have <= 3 cards
+    let mut guard = 0u32;
+    loop {
+        if guard > 300 { return Ok(None); }
+        guard += 1;
+        let to_play = controller.expected_to_play();
+        // Check hand sizes
+        let round = controller.bot_context(target_seat).round;
+        let mut ok_small = true;
+        for s in [
+            PlayerPosition::North,
+            PlayerPosition::East,
+            PlayerPosition::South,
+            PlayerPosition::West,
+        ] {
+            if round.hand(s).len() > 3 { ok_small = false; break; }
+        }
+        if ok_small && to_play == target_seat { break; }
+        let _ = controller.autoplay_one(to_play.next());
+    }
+    // Build legal set and context
+    let legal = controller.legal_moves(target_seat);
+    if legal.is_empty() { return Ok(None); }
+    let ctx = controller.bot_context(target_seat);
+    // Toggle DP off, pick choose() top (Hard choose path uses DP when enabled)
+    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    let off_top = crate::bot::PlayPlannerHard::choose(&legal, &ctx).map(|c| c.to_string());
+    // DP on, pick choose() top
+    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    let on_top = crate::bot::PlayPlannerHard::choose(&legal, &ctx).map(|c| c.to_string());
+    if off_top != on_top {
+        return Ok(Some((legal.len(), off_top, on_top)));
+    }
+    Ok(None)
 }
 
 fn simulate_one_round(

@@ -1,0 +1,34 @@
+Seat | Start | Count | Mix | Mean Delta
+---|---:|---:|---|---:
+| west | 1000 | 200 | nnhh | 0 |
+| west | 1000 | 200 | hhnn | 0 |
+| west | 1000 | 200 | nhnh | 0 |
+| west | 1000 | 200 | hnnh | 0 |
+| west | 2000 | 200 | nnhh | 0 |
+| west | 2000 | 200 | hhnn | 0 |
+| west | 2000 | 200 | nhnh | 0 |
+| west | 2000 | 200 | hnnh | 0 |
+| north | 1000 | 200 | nnhh | 0 |
+| north | 1000 | 200 | hhnn | 0 |
+| north | 1000 | 200 | nhnh | 0 |
+| north | 1000 | 200 | hnnh | 0 |
+| north | 2000 | 200 | nnhh | 0 |
+| north | 2000 | 200 | hhnn | 0 |
+| north | 2000 | 200 | nhnh | 0 |
+| north | 2000 | 200 | hnnh | 0 |
+| east | 1000 | 200 | nnhh | 0 |
+| east | 1000 | 200 | hhnn | 0 |
+| east | 1000 | 200 | nhnh | 0 |
+| east | 1000 | 200 | hnnh | 0 |
+| east | 2000 | 200 | nnhh | 0 |
+| east | 2000 | 200 | hhnn | 0 |
+| east | 2000 | 200 | nhnh | 0 |
+| east | 2000 | 200 | hnnh | 0 |
+| south | 1000 | 200 | nnhh | 0 |
+| south | 1000 | 200 | hhnn | 0 |
+| south | 1000 | 200 | nhnh | 0 |
+| south | 1000 | 200 | hnnh | 0 |
+| south | 2000 | 200 | nnhh | 0 |
+| south | 2000 | 200 | hhnn | 0 |
+| south | 2000 | 200 | nhnh | 0 |
+| south | 2000 | 200 | hnnh | 0 |

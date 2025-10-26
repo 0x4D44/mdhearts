@@ -62,3 +62,61 @@ Endgame micro-solver (env ON, tiny bonus)
 Endgame micro-solver BONUS=10 trial
 - Env: DP_ENABLE=1, BONUS=10 (others as above). CSVs: ..._trial_endgame10.csv for all seats/mixes.
 - Quick summary: Overall mean ~0 with CI ~0; deterministic setup suggests the current bonus magnitude under the chosen cap doesn’t shift aggregates.
+
+---
+
+Hard endgame micro-solver implementation
+- Implemented tiny DP in crates/hearts-app/src/bot/search.rs:micro_endgame_bonus (choose-only, env-gated):
+  - Triggers when all seats have = MDH_HARD_ENDGAME_MAX_CARDS (default 3).
+  - Deterministically plays out up to that many remaining tricks using the existing void-aware follow-up policy and scores each trick with small next2 continuation weights (feed-to-leader vs self-capture).
+  - Contribution is indirectly clamped by MDH_HARD_CONT_CAP in the caller.
+- Telemetry: added ENDGAME_DP_COUNT (thread-local) and Stats.endgame_dp_hits; choose records per-decision hits.
+- Docs: added docs/CLI_TOOLS_ADDENDUM.md to document the new env knobs (CLI_TOOLS.md has an encoding issue).
+- Tests: full suite green; existing hard_endgame_dp_smoke.rs covers the enabled path. Next step is a constructed =3-card golden that flips a near-tie in favor of feeding the leader.
+
+
+DP mixed-seat smoke (West)
+- NNHH 1000..1099 and HHNN 2000..2099 with DP enabled (deterministic).
+- CSV: designs/tuning/mixed_west_1000_100_nnhh_dp.csv, designs/tuning/mixed_west_2000_100_hhnn_dp.csv
+- Summary: designs/tuning/mixed_summary_2025-10-24_west_dp_smoke.md
+- Result: mean deltas both ~0 (as expected under tiny, capped continuation).
+
+
+DP mixed-seat matrix (West) deterministic:
+- Runs: starts 1000/2000; mixes NNHH/HHNN/NHNH/HNNH; n=300 each; DP enabled.
+- Summary: designs/tuning/mixed_summary_2025-10-24_west_dp_matrix.md
+- Result: means 0 across all cells under conservative continuation/caps.
+
+
+DP full-seat matrix (deterministic):
+- Seats: west/north/east/south; windows: 1000 & 2000; mixes: NNHH/HHNN/NHNH/HNNH; n=300 each.
+- Summary: designs/tuning/mixed_summary_2025-10-24_allseats_dp_matrix.md
+- Result: means all 0 under conservative endgame continuation caps.
+
+
+DP eval (cap=350, next2_feed=60), deterministic:
+- All seats, windows 1000/2000, mixes NNHH/HHNN/NHNH/HNNH, n=200 each.
+- Summary: designs/tuning/mixed_summary_2025-10-24_allseats_dp_cap350_n2f60.md
+- Result: means all 0. Current DP influence remains too conservative to show aggregate gain.
+
+Next steps (plan captured)
+- Wrote: designs/2025.10.24 - Hard Advantage Next Steps (DP + Flip).md
+- Focus: craft robust ≤3-card flipping golden; then small, endgame-only tuning with guardrails; then full-seat matrices (n≥1000/seat) and CI-style summaries.
+
+
+DP stats sample: stats run (west 1000..1049 nnhh): avg_pen=6.1 avg_scanned=0 sum_dp_hits=0
+
+
+DP stats (A/B): match-batch (west 1000..1099 normal vs hard): mean_delta=0 avg_scanned=0 sum_dp_hits=0
+
+
+Robust flipping golden plan added:
+- designs/2025.10.24 - Robust DP Flip Golden Plan.md
+- Next: reduce seed 2120 (west) to a minimal =3-card RoundState and aim to flip under current caps; if needed, apply a narrow endgame-only cap in the test.
+
+
+DP flip tools added:
+- --compare-dp-once and --export-endgame; docs updated in CLI_TOOLS_ADDENDUM.md.
+- Built minimal w2120 RoundState test (ignored) and enabled boosted seed 2120 flip test.
+- Next: iterate minimal w2120 to flip under current caps or narrowly scoped endgame cap, then enable.
+
