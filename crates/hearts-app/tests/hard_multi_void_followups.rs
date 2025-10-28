@@ -64,9 +64,15 @@ fn hard_multi_void_followups_self_capture_vs_leader_feed() {
     let our_seat = PlayerPosition::South; // plays last on this trick
     let hands = [
         // North: no clubs (void), can dump QS
-        vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Seven, Suit::Spades)],
+        vec![
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Seven, Suit::Spades),
+        ],
         // East: no clubs (void), can dump a heart
-        vec![Card::new(Rank::Five, Suit::Hearts), Card::new(Rank::King, Suit::Spades)],
+        vec![
+            Card::new(Rank::Five, Suit::Hearts),
+            Card::new(Rank::King, Suit::Spades),
+        ],
         // South (our seat): AC and 2C to decide capture vs avoid; add a small spade
         vec![
             Card::new(Rank::Ace, Suit::Clubs),
@@ -74,14 +80,20 @@ fn hard_multi_void_followups_self_capture_vs_leader_feed() {
             Card::new(Rank::Two, Suit::Spades),
         ],
         // West (leader): leads low club
-        vec![Card::new(Rank::Seven, Suit::Clubs), Card::new(Rank::Four, Suit::Diamonds)],
+        vec![
+            Card::new(Rank::Seven, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Diamonds),
+        ],
     ];
     let plays = vec![
         (PlayerPosition::West, Card::new(Rank::Seven, Suit::Clubs)),
         (PlayerPosition::North, Card::new(Rank::Queen, Suit::Spades)), // dump QS (void clubs)
         (PlayerPosition::East, Card::new(Rank::Five, Suit::Hearts)),   // dump heart (void clubs)
     ];
-    let round = build_round(starting, hands, &plays, false /* hearts not necessarily broken; off-suit dump allowed when void */);
+    let round = build_round(
+        starting, hands, &plays,
+        false, /* hearts not necessarily broken; off-suit dump allowed when void */
+    );
     let scores = build_scores([40, 50, 55, 80]); // West is scoreboard leader
 
     let mut tracker = UnseenTracker::new();
@@ -111,19 +123,35 @@ fn hard_multi_void_followups_self_capture_vs_leader_feed() {
     let mut ac = None;
     let mut c2 = None;
     for (c, base, cont, total) in verbose.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Clubs) { ac = Some((base, cont, total)); }
-        if c == Card::new(Rank::Two, Suit::Clubs) { c2 = Some((base, cont, total)); }
+        if c == Card::new(Rank::Ace, Suit::Clubs) {
+            ac = Some((base, cont, total));
+        }
+        if c == Card::new(Rank::Two, Suit::Clubs) {
+            c2 = Some((base, cont, total));
+        }
     }
     let (_ac_base, ac_cont, ac_total) = ac.expect("AC present");
     let (_c2_base, c2_cont, c2_total) = c2.expect("2C present");
 
     // Continuation should penalize AC (self-capture of QS+heart) and prefer 2C (feed to leader West)
-    assert!(ac_cont < 0, "AC continuation should be negative (self-capture), got {}", ac_cont);
-    assert!(c2_cont >= 0, "2C continuation should be non-negative (feed to leader), got {}", c2_cont);
-    assert!(c2_total >= ac_total, "2C total {} should be >= AC total {}", c2_total, ac_total);
+    assert!(
+        ac_cont < 0,
+        "AC continuation should be negative (self-capture), got {}",
+        ac_cont
+    );
+    assert!(
+        c2_cont >= 0,
+        "2C continuation should be non-negative (feed to leader), got {}",
+        c2_cont
+    );
+    assert!(
+        c2_total >= ac_total,
+        "2C total {} should be >= AC total {}",
+        c2_total,
+        ac_total
+    );
 
     // And Hard should choose 2C here
     let choice = PlayPlannerHard::choose(&legal, &ctx).unwrap();
     assert_eq!(choice, Card::new(Rank::Two, Suit::Clubs));
 }
-

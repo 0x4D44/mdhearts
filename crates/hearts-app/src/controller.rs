@@ -56,6 +56,7 @@ impl GameController {
         };
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
+        crate::telemetry::hard::reset();
         let this = Self {
             match_state,
             last_trick: None,
@@ -74,6 +75,7 @@ impl GameController {
     pub fn new_from_match_state(match_state: hearts_core::game::match_state::MatchState) -> Self {
         let mut unseen_tracker = UnseenTracker::new();
         unseen_tracker.reset_for_round(match_state.round());
+        crate::telemetry::hard::reset();
         let this = Self {
             match_state,
             last_trick: None,
@@ -172,6 +174,9 @@ impl GameController {
         if let PlayOutcome::TrickCompleted { winner, penalties } = out {
             let mut plays = pre_plays;
             plays.push((seat, card));
+            let hearts_broken = self.match_state.round().hearts_broken();
+            self.unseen_tracker
+                .note_trick_completion(&plays, winner, penalties, hearts_broken);
             self.last_trick = Some(TrickSummary { winner, plays });
             // Update moon state heuristics for the winner and others.
             self.update_moon_states_after_trick(winner, penalties);
@@ -297,6 +302,10 @@ impl GameController {
 
     pub fn standings(&self) -> [u32; 4] {
         *self.match_state.scores().standings()
+    }
+
+    pub fn round_number(&self) -> u32 {
+        self.match_state.round_number()
     }
 
     pub fn penalties_this_round(&self) -> [u8; 4] {

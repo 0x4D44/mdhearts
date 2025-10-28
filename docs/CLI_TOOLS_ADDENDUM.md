@@ -11,7 +11,7 @@ Notes
 
 Additional CSV stats (mixed/match commands)
 - Both mixed-seat and A/B match commands accept an optional `--stats` flag to include Hard planner stats in CSV outputs:
-  - Columns: `scanned`, `elapsed_ms`, `dp_hits` (from the most recent Hard decision).
+  - Columns: `scanned`, `elapsed_ms`, `dp_hits`, `nudge_hits` (from the most recent Hard decision).
   - Examples:
     - `--match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [--stats] [Hard flags]`
     - `--match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [--stats] [Hard flags]`
@@ -30,3 +30,25 @@ DP Flip tools
 
 - `--export-endgame <seed> <seat> <out>`
   - Simulates to a late endgame state (≤ 3 cards/hand) and writes a JSON snapshot containing hands, leader, and hearts-broken flag to aid constructing minimal RoundState tests.
+
+Telemetry command and retention
+- `--show-hard-telemetry [--out <path>]`
+  - Writes the accumulated Hard decision telemetry to NDJSON (default location `designs/tuning/telemetry/`) and prints summary aggregates (record count, average belief entropy, cache hit rate).
+- `MDH_HARD_BELIEF_CACHE_SIZE=<n>` - sets the Hard belief cache capacity (default 128).
+- `MDH_HARD_TELEMETRY_KEEP=<n>` - rotates telemetry exports, keeping the most recent `n` files (default 20).
+
+- MDH_HARD_BELIEF_TOPK=<n> / MDH_HARD_BELIEF_DIVERSITY=<n> / MDH_HARD_BELIEF_FILTER=1 - configure Hard belief-sampler prioritisation (top-k emphasis, diversity depth, and zero-probability filtering).
+
+Play dataset export
+- `--export-play-dataset <seat> <seed_start> <count> <difficulty> <out> [Hard flags]`
+  - Streams per-decision snapshots (seed, trick context, candidate list, continuation parts, adviser bias) to NDJSON for offline analysis or tuning.
+  - Example: `mdhearts --export-play-dataset west 1000 50 hard designs/tuning/play_samples.ndjson`
+  - Honours the usual Hard planner flags (`MDH_HARD_*`) plus CLI overrides parsed earlier in the command.
+- Adviser bias toggles:
+  - `MDH_HARD_ADVISER_PLAY=1` enables applying the loaded bias values during Hard candidate ranking.
+  - `MDH_ADVISER_PLAY_PATH=<path>` points to a JSON file (defaults to `assets/adviser/play.json`) with entries like `"QC": 2500`.
+- Planner nudge toggles:
+  - `MDH_HARD_PLANNER_LEADER_FEED_NUDGE=<n>` - per-penalty planner nudge applied when feeding a unique score leader on a penalty trick (defaults to 12).
+  - `MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE=<n>` - guard to skip the nudge when the existing base per-penalty leader-feed score exceeds this value (defaults to 220).
+  - `MDH_HARD_PLANNER_NUDGE_NEAR100=<score>` - skip the nudge when the leader is at or above this score (defaults to 90).
+  - `MDH_HARD_PLANNER_NUDGE_GAP_MIN=<gap>` - minimum score gap required for the nudge to apply (defaults to 4).

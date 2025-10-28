@@ -105,4 +105,3 @@ fn endgame_feed_hearts_to_leader_when_void() {
     let choice = PlayPlanner::choose(&legal, &ctx).unwrap();
     assert_eq!(choice, Card::new(Rank::Five, Suit::Hearts));
 }
-

@@ -57,14 +57,23 @@ fn build_midtrick_round_west_to_play() -> (RoundState, ScoreBoard) {
 
     // Current trick: South has led 10♦; West to act next (second), then East (void), North (void)
     let mut current = hearts_core::model::trick::Trick::new(leader);
-    current.play(PlayerPosition::South, Card::new(Rank::Ten, Suit::Diamonds)).unwrap();
+    current
+        .play(PlayerPosition::South, Card::new(Rank::Ten, Suit::Diamonds))
+        .unwrap();
 
     // Seed a previous trick to avoid first-trick constraints; hearts broken so dumps are legal
     let mut prev = hearts_core::model::trick::Trick::new(leader);
-    prev.play(leader, Card::new(Rank::Two, Suit::Clubs)).unwrap();
-    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next().next(), Card::new(Rank::Five, Suit::Clubs)).unwrap();
+    prev.play(leader, Card::new(Rank::Two, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Five, Suit::Clubs),
+    )
+    .unwrap();
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -134,8 +143,12 @@ fn hard_determinization_flips_neartie_constructed() {
     let mut off_a = i32::MIN;
     let mut off_2 = i32::MIN;
     for (c, _b, _cont, t) in verbose_off.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { off_a = t; }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { off_2 = t; }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            off_a = t;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            off_2 = t;
+        }
     }
 
     // Determinization ON: K>1 and probe widen; follower replies vary and should alter totals
@@ -156,8 +169,12 @@ fn hard_determinization_flips_neartie_constructed() {
     let mut on_a = i32::MIN;
     let mut on_2 = i32::MIN;
     for (c, _b, _cont, t) in verbose_on.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { on_a = t; }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { on_2 = t; }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            on_a = t;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            on_2 = t;
+        }
     }
 
     // Assert determinization changes totals. Flip is hard to guarantee here because the follow-up
@@ -166,7 +183,10 @@ fn hard_determinization_flips_neartie_constructed() {
     assert!(
         on_a != off_a || on_2 != off_2,
         "Expected determinization to change continuation totals: off A={} 2={}, on A={} 2={}",
-        off_a, off_2, on_a, on_2
+        off_a,
+        off_2,
+        on_a,
+        on_2
     );
 
     // Cleanup env to avoid impacting other tests

@@ -36,7 +36,9 @@ fn build_round_not_first_trick(starting: PlayerPosition, hands_vec: [Vec<Card>; 
     )
 }
 
-fn empty_scores() -> ScoreBoard { ScoreBoard::new() }
+fn empty_scores() -> ScoreBoard {
+    ScoreBoard::new()
+}
 
 #[test]
 fn hard_tie_break_boosts_continuation_totals_when_enabled() {
@@ -93,7 +95,12 @@ fn hard_tie_break_boosts_continuation_totals_when_enabled() {
     use std::collections::HashMap;
     let mut before: HashMap<Card, (i32, i32, i32)> = HashMap::new();
     for (c, base, cont, total) in verbose.iter().copied() {
-        assert_eq!(base + cont, total, "no-boost totals should equal base+cont for {}", c);
+        assert_eq!(
+            base + cont,
+            total,
+            "no-boost totals should equal base+cont for {}",
+            c
+        );
         before.insert(c, (base, cont, total));
     }
 
@@ -106,8 +113,18 @@ fn hard_tie_break_boosts_continuation_totals_when_enabled() {
     for (c, base2, cont2, total2) in verbose2.iter().copied() {
         let (base1, cont1, _total1) = before.get(&c).copied().expect("card existed before");
         assert_eq!(base1, base2, "base should be unchanged by boost for {}", c);
-        assert_eq!(cont1 * 3, cont2, "continuation should be multiplied by factor for {}", c);
-        assert_eq!(base2 + cont2, total2, "boosted totals should equal base+cont for {}", c);
+        assert_eq!(
+            cont1 * 3,
+            cont2,
+            "continuation should be multiplied by factor for {}",
+            c
+        );
+        assert_eq!(
+            base2 + cont2,
+            total2,
+            "boosted totals should equal base+cont for {}",
+            c
+        );
     }
 
     // Cleanup env so other tests are unaffected

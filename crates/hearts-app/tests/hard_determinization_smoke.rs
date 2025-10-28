@@ -48,4 +48,3 @@ fn hard_determinization_smoke() {
         std::env::remove_var("MDH_HARD_TEST_STEPS");
     }
 }
-

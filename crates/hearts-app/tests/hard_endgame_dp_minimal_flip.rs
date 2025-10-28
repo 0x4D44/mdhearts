@@ -11,10 +11,22 @@ use hearts_core::model::suit::Suit;
 fn build_two_trick_minimal(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     // East leads; 2 cards per hand; hearts broken.
     // East has A♣ and 2♥; North (leader) can capture next hearts trick with K♥.
-    let east = vec![Card::new(Rank::Ace, Suit::Clubs), Card::new(Rank::Two, Suit::Hearts)];
-    let north = vec![Card::new(Rank::King, Suit::Hearts), Card::new(Rank::Three, Suit::Clubs)];
-    let south = vec![Card::new(Rank::Five, Suit::Hearts), Card::new(Rank::Jack, Suit::Clubs)];
-    let west = vec![Card::new(Rank::Four, Suit::Hearts), Card::new(Rank::Queen, Suit::Clubs)];
+    let east = vec![
+        Card::new(Rank::Ace, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Hearts),
+    ];
+    let north = vec![
+        Card::new(Rank::King, Suit::Hearts),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let south = vec![
+        Card::new(Rank::Five, Suit::Hearts),
+        Card::new(Rank::Jack, Suit::Clubs),
+    ];
+    let west = vec![
+        Card::new(Rank::Four, Suit::Hearts),
+        Card::new(Rank::Queen, Suit::Clubs),
+    ];
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north);
     hands[PlayerPosition::East.index()] = Hand::with_cards(east);
@@ -26,7 +38,10 @@ fn build_two_trick_minimal(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     let _ = prev.play(seat, Card::new(Rank::Nine, Suit::Diamonds));
     let _ = prev.play(seat.next(), Card::new(Rank::Ten, Suit::Diamonds));
     let _ = prev.play(seat.next().next(), Card::new(Rank::Jack, Suit::Diamonds));
-    let _ = prev.play(seat.next().next().next(), Card::new(Rank::Queen, Suit::Diamonds));
+    let _ = prev.play(
+        seat.next().next().next(),
+        Card::new(Rank::Queen, Suit::Diamonds),
+    );
     let round = RoundState::from_hands_with_state(
         hands,
         seat,
@@ -78,12 +93,19 @@ fn hard_endgame_dp_minimal_flip() {
         .collect::<Vec<_>>();
     assert_eq!(legal.len(), 2);
     // OFF
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off = PlayPlannerHard::choose(&legal, &ctx);
     // ON
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on = PlayPlannerHard::choose(&legal, &ctx);
-    assert_ne!(off, on, "expected DP to flip top under boosts in a minimal endgame");
+    assert_ne!(
+        off, on,
+        "expected DP to flip top under boosts in a minimal endgame"
+    );
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");
         std::env::remove_var("MDH_HARD_TEST_STEPS");

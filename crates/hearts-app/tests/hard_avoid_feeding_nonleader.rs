@@ -57,7 +57,10 @@ fn hard_avoids_feeding_nonleader_when_penalties_on_table() {
     let starting = PlayerPosition::West;
     let hands = [
         vec![Card::new(Rank::Six, Suit::Spades)], // North
-        vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Five, Suit::Clubs)], // East (our seat), void hearts
+        vec![
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Five, Suit::Clubs),
+        ], // East (our seat), void hearts
         vec![Card::new(Rank::Four, Suit::Spades)], // South
         vec![Card::new(Rank::Ace, Suit::Spades)], // West (leader)
     ];
@@ -71,18 +74,28 @@ fn hard_avoids_feeding_nonleader_when_penalties_on_table() {
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
     let seat = PlayerPosition::East;
-    let ctx = BotContext::new(seat, &round, &scores, PassingDirection::Hold, &tracker, BotDifficulty::FutureHard);
+    let ctx = BotContext::new(
+        seat,
+        &round,
+        &scores,
+        PassingDirection::Hold,
+        &tracker,
+        BotDifficulty::FutureHard,
+    );
     let legal = {
         round
             .hand(seat)
             .iter()
             .copied()
-            .filter(|c| { let mut p = round.clone(); p.play_card(seat, *c).is_ok() })
+            .filter(|c| {
+                let mut p = round.clone();
+                p.play_card(seat, *c).is_ok()
+            })
             .collect::<Vec<_>>()
     };
     assert!(
-        legal.contains(&Card::new(Rank::Queen, Suit::Spades)) &&
-        legal.contains(&Card::new(Rank::Five, Suit::Clubs))
+        legal.contains(&Card::new(Rank::Queen, Suit::Spades))
+            && legal.contains(&Card::new(Rank::Five, Suit::Clubs))
     );
     let choice = PlayPlannerHard::choose(&legal, &ctx).unwrap();
     assert_eq!(

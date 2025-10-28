@@ -10,7 +10,9 @@ use hearts_core::model::suit::Suit;
 
 fn build_round_not_first_trick(starting: PlayerPosition, hands_vec: [Vec<Card>; 4]) -> RoundState {
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
-    for (idx, cards) in hands_vec.into_iter().enumerate() { hands[idx] = Hand::with_cards(cards); }
+    for (idx, cards) in hands_vec.into_iter().enumerate() {
+        hands[idx] = Hand::with_cards(cards);
+    }
     let mut prev = hearts_core::model::trick::Trick::new(starting);
     let mut seat = starting;
     for card in [
@@ -18,14 +20,24 @@ fn build_round_not_first_trick(starting: PlayerPosition, hands_vec: [Vec<Card>; 
         Card::new(Rank::Three, Suit::Clubs),
         Card::new(Rank::Four, Suit::Clubs),
         Card::new(Rank::Five, Suit::Clubs),
-    ] { prev.play(seat, card).unwrap(); seat = seat.next(); }
+    ] {
+        prev.play(seat, card).unwrap();
+        seat = seat.next();
+    }
     RoundState::from_hands_with_state(
-        hands, starting, PassingDirection::Hold, RoundPhase::Playing,
-        hearts_core::model::trick::Trick::new(starting), vec![prev], false,
+        hands,
+        starting,
+        PassingDirection::Hold,
+        RoundPhase::Playing,
+        hearts_core::model::trick::Trick::new(starting),
+        vec![prev],
+        false,
     )
 }
 
-fn empty_scores() -> ScoreBoard { ScoreBoard::new() }
+fn empty_scores() -> ScoreBoard {
+    ScoreBoard::new()
+}
 
 #[test]
 fn hard_budget_deterministic_explain_and_choose_are_stable() {
@@ -50,11 +62,24 @@ fn hard_budget_deterministic_explain_and_choose_are_stable() {
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
     let scores = empty_scores();
-    let ctx = BotContext::new(starting, &round, &scores, PassingDirection::Hold, &tracker, BotDifficulty::FutureHard);
+    let ctx = BotContext::new(
+        starting,
+        &round,
+        &scores,
+        PassingDirection::Hold,
+        &tracker,
+        BotDifficulty::FutureHard,
+    );
     let legal = {
-        round.hand(starting).iter().copied().filter(|card| {
-            let mut probe = round.clone(); probe.play_card(starting, *card).is_ok()
-        }).collect::<Vec<_>>()
+        round
+            .hand(starting)
+            .iter()
+            .copied()
+            .filter(|card| {
+                let mut probe = round.clone();
+                probe.play_card(starting, *card).is_ok()
+            })
+            .collect::<Vec<_>>()
     };
     assert!(!legal.is_empty());
 
@@ -72,4 +97,3 @@ fn hard_budget_deterministic_explain_and_choose_are_stable() {
         std::env::remove_var("MDH_HARD_TEST_STEPS");
     }
 }
-

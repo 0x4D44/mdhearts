@@ -30,9 +30,18 @@ fn debug_weights_surface_new_knobs() {
         hard.contains("wide_boost_self_permil=555"),
         "hard weights should show wide_boost_self_permil"
     );
-    assert!(hard.contains("det_enable=1"), "hard weights should include det_enable");
-    assert!(hard.contains("det_k=7"), "hard weights should include det_k");
-    assert!(hard.contains("det_ms=12"), "hard weights should include det_ms");
+    assert!(
+        hard.contains("det_enable=1"),
+        "hard weights should include det_enable"
+    );
+    assert!(
+        hard.contains("det_k=7"),
+        "hard weights should include det_k"
+    );
+    assert!(
+        hard.contains("det_ms=12"),
+        "hard weights should include det_ms"
+    );
 
     // Cleanup env
     unsafe {

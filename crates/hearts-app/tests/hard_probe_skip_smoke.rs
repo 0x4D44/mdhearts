@@ -1,5 +1,5 @@
-use hearts_app::controller::GameController;
 use hearts_app::bot::BotDifficulty;
+use hearts_app::controller::GameController;
 use hearts_core::model::player::PlayerPosition;
 
 #[test]
@@ -18,12 +18,16 @@ fn hard_probe_skip_reduces_scans_under_margin() {
     controller.set_bot_difficulty(BotDifficulty::FutureHard);
 
     if controller.in_passing_phase() {
-        if let Some(cards) = controller.simple_pass_for(seat) { let _ = controller.submit_pass(seat, cards); }
+        if let Some(cards) = controller.simple_pass_for(seat) {
+            let _ = controller.submit_pass(seat, cards);
+        }
         let _ = controller.submit_auto_passes_for_others(seat);
         let _ = controller.resolve_passes();
     }
     while !controller.in_passing_phase() && controller.expected_to_play() != seat {
-        if controller.autoplay_one(seat).is_none() { break; }
+        if controller.autoplay_one(seat).is_none() {
+            break;
+        }
     }
     let legal = controller.legal_moves(seat);
     let ctx = controller.bot_context(seat);
@@ -33,11 +37,18 @@ fn hard_probe_skip_reduces_scans_under_margin() {
     let base = hearts_app::bot::search::last_stats().expect("baseline stats");
 
     // Enable probe AB margin and choose again
-    unsafe { std::env::set_var("MDH_HARD_PROBE_AB_MARGIN", "40"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_PROBE_AB_MARGIN", "40");
+    }
     let _ = hearts_app::bot::PlayPlannerHard::choose(&legal, &ctx);
     let ab = hearts_app::bot::search::last_stats().expect("ab stats");
 
-    assert!(ab.scanned <= base.scanned, "probe-AB scanned={} should be <= baseline {}", ab.scanned, base.scanned);
+    assert!(
+        ab.scanned <= base.scanned,
+        "probe-AB scanned={} should be <= baseline {}",
+        ab.scanned,
+        base.scanned
+    );
 
     // Cleanup
     unsafe {
@@ -47,4 +58,3 @@ fn hard_probe_skip_reduces_scans_under_margin() {
         std::env::remove_var("MDH_HARD_PROBE_AB_MARGIN");
     }
 }
-

@@ -4,9 +4,9 @@ use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::{PlayOutcome, RoundState};
 use hearts_core::model::suit::Suit;
 use once_cell::sync::Lazy;
+use std::cell::Cell;
 use std::sync::Mutex;
 use std::time::Instant;
-use std::cell::Cell;
 
 // Stage 3 scaffold: Hard planner with configurable branch limit and (future) depth/time caps.
 // For now, it orders by heuristic and considers the top N branches.
@@ -62,17 +62,42 @@ impl PlayPlannerHard {
         }
     }
 
+    fn apply_play_adviser_bias(entries: &mut Vec<(Card, i32)>, ctx: &BotContext<'_>) {
+        if entries.is_empty() {
+            return;
+        }
+        let mut touched = false;
+        for (card, score) in entries.iter_mut() {
+            let bias = super::play_bias(*card, ctx);
+            if bias != 0 {
+                *score = score.saturating_add(bias);
+                touched = true;
+            }
+        }
+        if touched && debug_enabled() {
+            eprintln!(
+                "mdhearts: adviser bias applied ({} candidates)",
+                entries.len()
+            );
+        }
+    }
+
     pub fn choose(legal: &[Card], ctx: &BotContext<'_>) -> Option<Card> {
         if legal.is_empty() {
             return None;
         }
+        crate::telemetry::hard::record_pre_decision(ctx.seat, ctx.tracker);
         let cfg = Self::config();
         let deterministic = std::env::var("MDH_HARD_DETERMINISTIC")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
             .unwrap_or(false);
-        let step_cap = std::env::var("MDH_HARD_TEST_STEPS").ok().and_then(|s| s.parse::<usize>().ok());
+        let step_cap = std::env::var("MDH_HARD_TEST_STEPS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok());
         // Rank by heuristic (fast), keep top-N, then apply a tiny continuation bonus via a 1-ply trick rollout.
         let mut explained = PlayPlanner::explain_candidates(legal, ctx);
+        Self::apply_play_adviser_bias(&mut explained, ctx);
+        let planner_nudge_hits = super::play::take_hard_nudge_hits();
         explained.sort_by(|a, b| b.1.cmp(&a.1));
         let best_base = explained.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
@@ -90,7 +115,11 @@ impl PlayPlannerHard {
         // capture tiny-next3 counter delta for this decision
         let n3_before = NEXT3_TINY_COUNT.with(|c| c.get());
         let dp_before = ENDGAME_DP_COUNT.with(|c| c.get());
-        let mut iter = explained.into_iter().take(cfg.branch_limit).enumerate().peekable();
+        let mut iter = explained
+            .into_iter()
+            .take(cfg.branch_limit)
+            .enumerate()
+            .peekable();
         while let Some((idx, (card, base))) = iter.next() {
             if budget.should_stop() {
                 break;
@@ -99,7 +128,10 @@ impl PlayPlannerHard {
                 if let Some((_, alpha)) = best {
                     if base + ab_margin < alpha {
                         if debug_enabled() {
-                            eprintln!("mdhearts: hard ab-skip {} base={} < alpha-{}", card, base, ab_margin);
+                            eprintln!(
+                                "mdhearts: hard ab-skip {} base={} < alpha-{}",
+                                card, base, ab_margin
+                            );
                         }
                         scanned += 1;
                         budget.tick();
@@ -111,10 +143,19 @@ impl PlayPlannerHard {
                 phase_b_candidates = phase_b_candidates.saturating_add(1);
                 let before = budget.probe_calls;
                 let allow_next3 = matches!(tier, Tier::Wide);
-                let v = Self::rollout_current_trick(card, ctx, snapshot.max_player, &mut budget, start, allow_next3);
+                let v = Self::rollout_current_trick(
+                    card,
+                    ctx,
+                    snapshot.max_player,
+                    &mut budget,
+                    start,
+                    allow_next3,
+                );
                 phase_c_probes += budget.probe_calls.saturating_sub(before);
                 v
-            } else { 0 };
+            } else {
+                0
+            };
             let cont = if boost_gap > 0 && boost_factor > 1 && (best_base - base) <= boost_gap {
                 cont_raw.saturating_mul(boost_factor)
             } else {
@@ -145,7 +186,11 @@ impl PlayPlannerHard {
             if let Some((_, best_total)) = best {
                 if let Some((_, (next_card, next_base))) = iter.peek() {
                     let safe_cap = weights().cont_cap;
-                    let safety_margin = if safe_cap > 0 { safe_cap } else { cfg.early_cutoff_margin };
+                    let safety_margin = if safe_cap > 0 {
+                        safe_cap
+                    } else {
+                        cfg.early_cutoff_margin
+                    };
                     if *next_base + safety_margin < best_total {
                         if debug_enabled() {
                             eprintln!(
@@ -181,10 +226,12 @@ impl PlayPlannerHard {
             limits_in_effect: limits,
             utilization,
             wide_boost_feed_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(0),
-            wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(0),
+            wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP")
+                .unwrap_or(0),
             cont_cap: weights().cont_cap,
             next3_tiny_hits: n3_after.saturating_sub(n3_before),
             endgame_dp_hits: dp_after.saturating_sub(dp_before),
+            planner_nudge_hits,
         });
         best.map(|(c, _)| c)
     }
@@ -194,8 +241,12 @@ impl PlayPlannerHard {
         let deterministic = std::env::var("MDH_HARD_DETERMINISTIC")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
             .unwrap_or(false);
-        let step_cap = std::env::var("MDH_HARD_TEST_STEPS").ok().and_then(|s| s.parse::<usize>().ok());
+        let step_cap = std::env::var("MDH_HARD_TEST_STEPS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok());
         let mut v = PlayPlanner::explain_candidates(legal, ctx);
+        Self::apply_play_adviser_bias(&mut v, ctx);
+        let planner_nudge_hits = super::play::take_hard_nudge_hits();
         v.sort_by(|a, b| b.1.cmp(&a.1));
         let best_base = v.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
@@ -210,14 +261,25 @@ impl PlayPlannerHard {
         let mut phase_b_candidates = 0usize;
         let mut phase_c_probes = 0usize;
         for (idx, (card, base)) in v.into_iter().take(cfg.branch_limit).enumerate() {
-            if budget.should_stop() { break; }
+            if budget.should_stop() {
+                break;
+            }
             let cont_raw = if phaseb_topk == 0 || idx < phaseb_topk {
                 phase_b_candidates = phase_b_candidates.saturating_add(1);
                 let before = budget.probe_calls;
-                let v = Self::rollout_current_trick(card, ctx, snapshot.max_player, &mut budget, start, false);
+                let v = Self::rollout_current_trick(
+                    card,
+                    ctx,
+                    snapshot.max_player,
+                    &mut budget,
+                    start,
+                    false,
+                );
                 phase_c_probes += budget.probe_calls.saturating_sub(before);
-                v 
-            } else { 0 };
+                v
+            } else {
+                0
+            };
             let cont = if boost_gap > 0 && boost_factor > 1 && (best_base - base) <= boost_gap {
                 cont_raw.saturating_mul(boost_factor)
             } else {
@@ -255,10 +317,12 @@ impl PlayPlannerHard {
             limits_in_effect: limits,
             utilization,
             wide_boost_feed_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(0),
-            wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(0),
+            wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP")
+                .unwrap_or(0),
             cont_cap: weights().cont_cap,
             next3_tiny_hits: 0,
             endgame_dp_hits: 0,
+            planner_nudge_hits,
         });
         out
     }
@@ -273,8 +337,12 @@ impl PlayPlannerHard {
         let deterministic = std::env::var("MDH_HARD_DETERMINISTIC")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
             .unwrap_or(false);
-        let step_cap = std::env::var("MDH_HARD_TEST_STEPS").ok().and_then(|s| s.parse::<usize>().ok());
+        let step_cap = std::env::var("MDH_HARD_TEST_STEPS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok());
         let mut v = PlayPlanner::explain_candidates(legal, ctx);
+        Self::apply_play_adviser_bias(&mut v, ctx);
+        let planner_nudge_hits = super::play::take_hard_nudge_hits();
         v.sort_by(|a, b| b.1.cmp(&a.1));
         let best_base = v.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
@@ -287,10 +355,21 @@ impl PlayPlannerHard {
         let phaseb_topk = limits.phaseb_topk;
         let mut scanned = 0usize;
         for (idx, (card, base)) in v.into_iter().take(cfg.branch_limit).enumerate() {
-            if budget.should_stop() { break; }
+            if budget.should_stop() {
+                break;
+            }
             let cont_raw = if phaseb_topk == 0 || idx < phaseb_topk {
-                Self::rollout_current_trick(card, ctx, snapshot.max_player, &mut budget, start, false) 
-            } else { 0 };
+                Self::rollout_current_trick(
+                    card,
+                    ctx,
+                    snapshot.max_player,
+                    &mut budget,
+                    start,
+                    false,
+                )
+            } else {
+                0
+            };
             let cont = if boost_gap > 0 && boost_factor > 1 && (best_base - base) <= boost_gap {
                 cont_raw.saturating_mul(boost_factor)
             } else {
@@ -315,10 +394,12 @@ impl PlayPlannerHard {
             limits_in_effect: limits,
             utilization: budget.utilization_percent(start),
             wide_boost_feed_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(0),
-            wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(0),
+            wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP")
+                .unwrap_or(0),
             cont_cap: weights().cont_cap,
             next3_tiny_hits: 0,
             endgame_dp_hits: 0,
+            planner_nudge_hits,
         });
         out
     }
@@ -331,8 +412,11 @@ impl PlayPlannerHard {
         let deterministic = std::env::var("MDH_HARD_DETERMINISTIC")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
             .unwrap_or(false);
-        let step_cap = std::env::var("MDH_HARD_TEST_STEPS").ok().and_then(|s| s.parse::<usize>().ok());
+        let step_cap = std::env::var("MDH_HARD_TEST_STEPS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok());
         let mut v = PlayPlanner::explain_candidates(legal, ctx);
+        Self::apply_play_adviser_bias(&mut v, ctx);
         v.sort_by(|a, b| b.1.cmp(&a.1));
         let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
@@ -341,14 +425,27 @@ impl PlayPlannerHard {
         let (_, _, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
         for (idx, (card, base)) in v.into_iter().take(cfg.branch_limit).enumerate() {
-            if budget.should_stop() { break; }
+            if budget.should_stop() {
+                break;
+            }
             let (cont, parts) = if phaseb_topk == 0 || idx < phaseb_topk {
-                Self::rollout_current_trick_with_parts(card, ctx, snapshot.max_player, &mut budget, start, false)
-            } else { (0, ContParts::default()) };
+                Self::rollout_current_trick_with_parts(
+                    card,
+                    ctx,
+                    snapshot.max_player,
+                    &mut budget,
+                    start,
+                    false,
+                )
+            } else {
+                (0, ContParts::default())
+            };
             let total = base + cont;
             out.push((card, base, parts, total));
             budget.tick();
-            if budget.timed_out(start) { break; }
+            if budget.timed_out(start) {
+                break;
+            }
         }
         out
     }
@@ -365,8 +462,17 @@ impl PlayPlannerHard {
             let mut acc = 0i32;
             let k = det_sample_k().max(1);
             for _ in 0..k {
-                if budget.should_stop() || budget.timed_out(start) { break; }
-                acc += Self::rollout_current_trick_core(card, ctx, leader_target, budget, start, next3_allowed);
+                if budget.should_stop() || budget.timed_out(start) {
+                    break;
+                }
+                acc += Self::rollout_current_trick_core(
+                    card,
+                    ctx,
+                    leader_target,
+                    budget,
+                    start,
+                    next3_allowed,
+                );
             }
             if k > 0 { acc / (k as i32) } else { 0 }
         } else {
@@ -392,10 +498,19 @@ impl PlayPlannerHard {
         };
         budget.tick();
         while !matches!(outcome, PlayOutcome::TrickCompleted { .. }) {
-            if budget.should_stop() || budget.timed_out(start) { break; }
+            if budget.should_stop() || budget.timed_out(start) {
+                break;
+            }
             let next = next_to_play(&sim);
             let reply = if det_enabled_for(ctx) {
-                choose_followup_search_sampled(&sim, next, Some(ctx.tracker), seat, Some(leader_target), budget)
+                choose_followup_search_sampled(
+                    &sim,
+                    next,
+                    Some(ctx.tracker),
+                    seat,
+                    Some(leader_target),
+                    budget,
+                )
             } else {
                 choose_followup_search(&sim, next, Some(ctx.tracker), seat, Some(leader_target))
             };
@@ -412,16 +527,26 @@ impl PlayPlannerHard {
                 let mut cont = 0;
                 // Determine tier for potential Wide-tier boost (env-gated; defaults 0)
                 let (tier_here, _lev, _lim) = effective_limits(ctx);
-                let wide_boost_feed = if matches!(tier_here, Tier::Wide) { parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(300) } else { 0 };
-                let wide_boost_self = if matches!(tier_here, Tier::Wide) { parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(180) } else { 0 };
+                let wide_boost_feed = if matches!(tier_here, Tier::Wide) {
+                    parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(300)
+                } else {
+                    0
+                };
+                let wide_boost_self = if matches!(tier_here, Tier::Wide) {
+                    parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(180)
+                } else {
+                    0
+                };
                 if winner == leader_target && p > 0 {
                     let base = weights().cont_feed_perpen * p;
-                    let scale = 1000 + (weights().scale_feed_permil.max(0) * p) + wide_boost_feed.max(0);
+                    let scale =
+                        1000 + (weights().scale_feed_permil.max(0) * p) + wide_boost_feed.max(0);
                     cont += (base * scale) / 1000;
                 }
                 if winner == seat && p > 0 {
                     let base = weights().cont_self_capture_perpen * p;
-                    let scale = 1000 + (weights().scale_self_permil.max(0) * p) + wide_boost_self.max(0);
+                    let scale =
+                        1000 + (weights().scale_self_permil.max(0) * p) + wide_boost_self.max(0);
                     cont -= (base * scale) / 1000;
                 }
                 // Next-trick start probe: if we lead next, small bonus for void creation potential.
@@ -430,7 +555,7 @@ impl PlayPlannerHard {
                     budget.probe_calls = budget.probe_calls.saturating_add(1);
                     cont += next_trick_probe(&sim, seat, ctx, leader_target, next3_allowed);
                     // Tiny extras (defaults 0):
-                    // - QS exposure risk: leading with high spades control may attract QS; penalize slightly when holding A♠.
+                    // - QS exposure risk: leading with high spades control may attract QS; penalize slightly when holding AÃƒÂ¢Ã¢â€žÂ¢Ã‚Â .
                     if weights().qs_risk_per != 0 {
                         let has_ace_spades = sim
                             .hand(seat)
@@ -452,7 +577,11 @@ impl PlayPlannerHard {
                     // - Moon relief: if our moon state is active, offset some penalty capture pressure when we win.
                     if weights().moon_relief_perpen != 0 {
                         let state = ctx.tracker.moon_state(seat);
-                        if matches!(state, crate::bot::MoonState::Considering | crate::bot::MoonState::Committed) && p > 0 {
+                        if matches!(
+                            state,
+                            crate::bot::MoonState::Considering | crate::bot::MoonState::Committed
+                        ) && p > 0
+                        {
                             cont += weights().moon_relief_perpen * p;
                         }
                     }
@@ -464,8 +593,12 @@ impl PlayPlannerHard {
                 // Hard cap on continuation magnitude (symmetric), default 0 (off).
                 let cap = weights().cont_cap;
                 if cap > 0 {
-                    if cont > cap { cont = cap; }
-                    if cont < -cap { cont = -cap; }
+                    if cont > cap {
+                        cont = cap;
+                    }
+                    if cont < -cap {
+                        cont = -cap;
+                    }
                 }
                 cont
             }
@@ -487,8 +620,17 @@ impl PlayPlannerHard {
             let mut acc_parts = ContParts::default();
             let k = det_sample_k().max(1);
             for _ in 0..k {
-                if budget.should_stop() || budget.timed_out(start) { break; }
-                let (v, p) = Self::rollout_current_trick_with_parts_core(card, ctx, leader_target, budget, start, next3_allowed);
+                if budget.should_stop() || budget.timed_out(start) {
+                    break;
+                }
+                let (v, p) = Self::rollout_current_trick_with_parts_core(
+                    card,
+                    ctx,
+                    leader_target,
+                    budget,
+                    start,
+                    next3_allowed,
+                );
                 acc += v;
                 acc_parts.feed += p.feed;
                 acc_parts.self_capture += p.self_capture;
@@ -512,9 +654,18 @@ impl PlayPlannerHard {
                 acc_parts.moon_relief /= div;
                 acc_parts.capped_delta /= div;
                 (acc / div, acc_parts)
-            } else { (0, ContParts::default()) }
+            } else {
+                (0, ContParts::default())
+            }
         } else {
-            Self::rollout_current_trick_with_parts_core(card, ctx, leader_target, budget, start, next3_allowed)
+            Self::rollout_current_trick_with_parts_core(
+                card,
+                ctx,
+                leader_target,
+                budget,
+                start,
+                next3_allowed,
+            )
         }
     }
 
@@ -537,10 +688,19 @@ impl PlayPlannerHard {
         };
         budget.tick();
         while !matches!(outcome, PlayOutcome::TrickCompleted { .. }) {
-            if budget.should_stop() || budget.timed_out(start) { break; }
+            if budget.should_stop() || budget.timed_out(start) {
+                break;
+            }
             let next = next_to_play(&sim);
             let reply = if det_enabled() {
-                choose_followup_search_sampled(&sim, next, Some(ctx.tracker), seat, Some(leader_target), budget)
+                choose_followup_search_sampled(
+                    &sim,
+                    next,
+                    Some(ctx.tracker),
+                    seat,
+                    Some(leader_target),
+                    budget,
+                )
             } else {
                 choose_followup_search(&sim, next, Some(ctx.tracker), seat, Some(leader_target))
             };
@@ -554,19 +714,29 @@ impl PlayPlannerHard {
         if let PlayOutcome::TrickCompleted { winner, penalties } = outcome {
             let p = penalties as i32;
             let (tier_here, _lev, _lim) = effective_limits(ctx);
-            let wide_boost_feed = if matches!(tier_here, Tier::Wide) { parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(300) } else { 0 };
-            let wide_boost_self = if matches!(tier_here, Tier::Wide) { parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(180) } else { 0 };
+            let wide_boost_feed = if matches!(tier_here, Tier::Wide) {
+                parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(300)
+            } else {
+                0
+            };
+            let wide_boost_self = if matches!(tier_here, Tier::Wide) {
+                parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(180)
+            } else {
+                0
+            };
             if winner == leader_target && p > 0 {
                 let base = weights().cont_feed_perpen * p;
-                let scale = 1000 + (weights().scale_feed_permil.max(0) * p) + wide_boost_feed.max(0);
+                let scale =
+                    1000 + (weights().scale_feed_permil.max(0) * p) + wide_boost_feed.max(0);
                 let v = (base * scale) / 1000;
                 parts.feed = v;
                 cont += v;
             }
             if winner == seat && p > 0 {
                 let base = weights().cont_self_capture_perpen * p;
-                let scale = 1000 + (weights().scale_self_permil.max(0) * p) + wide_boost_self.max(0);
-                let v = - (base * scale) / 1000;
+                let scale =
+                    1000 + (weights().scale_self_permil.max(0) * p) + wide_boost_self.max(0);
+                let v = -(base * scale) / 1000;
                 parts.self_capture = v;
                 cont += v;
             }
@@ -600,7 +770,10 @@ impl PlayPlannerHard {
                 }
                 if weights().moon_relief_perpen != 0 && p > 0 {
                     let state = ctx.tracker.moon_state(seat);
-                    if matches!(state, crate::bot::MoonState::Considering | crate::bot::MoonState::Committed) {
+                    if matches!(
+                        state,
+                        crate::bot::MoonState::Considering | crate::bot::MoonState::Committed
+                    ) {
                         let v = weights().moon_relief_perpen * p;
                         parts.moon_relief = v;
                         cont += v;
@@ -614,8 +787,14 @@ impl PlayPlannerHard {
         }
         let cap = weights().cont_cap;
         if cap > 0 {
-            if cont > cap { parts.capped_delta = cap - cont; cont = cap; }
-            if cont < -cap { parts.capped_delta = -cap - cont; cont = -cap; }
+            if cont > cap {
+                parts.capped_delta = cap - cont;
+                cont = cap;
+            }
+            if cont < -cap {
+                parts.capped_delta = -cap - cont;
+                cont = -cap;
+            }
         }
         (cont, parts)
     }
@@ -693,7 +872,9 @@ fn choose_followup_search(
                     non_penalties.sort_by_key(|c| c.rank.value());
                     let idx = if non_penalties.len() >= 3 {
                         non_penalties.len() / 2
-                    } else { 0 };
+                    } else {
+                        0
+                    };
                     return non_penalties[idx];
                 }
                 // If forced to give points, choose the smallest penalty (low hearts before QS).
@@ -722,7 +903,9 @@ fn choose_followup_search(
                 non_penalties.sort_by_key(|c| c.rank.value());
                 let idx = if non_penalties.len() >= 3 {
                     non_penalties.len() / 2
-                } else { 0 };
+                } else {
+                    0
+                };
                 return non_penalties[idx];
             }
             if !hearts_void {
@@ -746,7 +929,7 @@ fn choose_followup_search(
         .expect("legal non-empty")
 }
 
-// Determinization helper: choose canonical or alternate off-suit dump deterministically using a cheap bit from budget state.
+// Belief-guided deterministic follow-up selection when opponents are void.
 fn choose_followup_search_sampled(
     round: &RoundState,
     seat: PlayerPosition,
@@ -755,40 +938,112 @@ fn choose_followup_search_sampled(
     leader_target: Option<PlayerPosition>,
     budget: &mut Budget,
 ) -> Card {
-    // Canonical first
     let canon = choose_followup_search(round, seat, tracker, origin, leader_target);
-    // Only consider alternate when off-suit is happening; otherwise canonical is fine
-    if let Some(lead) = round.current_trick().lead_suit() {
-        let legal = legal_moves_for(round, seat);
-        let can_follow = legal.iter().any(|c| c.suit == lead);
-        if !can_follow {
-            // Alternate = max penalty off-suit if not equal to canonical
-            if let Some(alt) = legal
-                .iter()
-                .copied()
-                .max_by_key(|c| (c.penalty_value(), c.rank.value()))
-            {
-                if alt != canon {
-                    // Derive a deterministic sample bit from simple state
-                    let bit = sample_bit_for(round, seat, budget);
-                    if bit { return alt; }
-                }
-            }
+    let legal = legal_moves_for(round, seat);
+    if legal.is_empty() {
+        return canon;
+    }
+    let Some(tracker) = tracker else {
+        return canon;
+    };
+    let Some(lead) = round.current_trick().lead_suit() else {
+        return canon;
+    };
+    if legal.iter().any(|c| c.suit == lead) {
+        return canon;
+    }
+    let _ = tracker.snapshot_beliefs_for_round(round);
+    let belief = tracker.belief_state(seat);
+    let cfg = super::tracker::BeliefSamplerConfig::from_env();
+    let mut scored: Vec<(Card, f32)> = legal
+        .iter()
+        .copied()
+        .map(|card| {
+            let prob = belief.card_probability(card);
+            let penalty = card.penalty_value() as f32;
+            let weight = if cfg.filter_zero && prob == 0.0 {
+                0.0
+            } else {
+                prob.max(1e-6) * (1.0 + penalty)
+            };
+            (card, weight)
+        })
+        .collect();
+    if cfg.filter_zero {
+        scored.retain(|(_, w)| *w > 0.0);
+        if scored.is_empty() {
+            scored = legal.iter().copied().map(|c| (c, 1.0)).collect();
+        }
+    }
+    scored.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                (b.0.penalty_value(), b.0.rank.value())
+                    .cmp(&(a.0.penalty_value(), a.0.rank.value()))
+            })
+    });
+    let primary_len = cfg.top_k.min(scored.len()).max(1);
+    let use_diversity = cfg.diversity > 0 && sample_bit_for(round, seat, budget);
+    let pool_len = if use_diversity {
+        (primary_len + cfg.diversity).min(scored.len())
+    } else {
+        primary_len
+    };
+    let idx = sample_index_for(round, seat, budget, pool_len);
+    let chosen = scored[idx].0;
+    if chosen != canon {
+        return chosen;
+    }
+    for (card, _) in scored.iter().take(pool_len) {
+        if *card != canon {
+            return *card;
         }
     }
     canon
 }
 
 fn sample_bit_for(round: &RoundState, seat: PlayerPosition, budget: &Budget) -> bool {
-    // Cheap hash over a few integers; stable within process for the same sequence
     let trick = round.current_trick();
     let plays = trick.plays().len() as u64;
     let lead = trick.leader() as u8 as u64;
     let seatv = seat as u8 as u64;
     let steps = budget.steps as u64;
-    let base = steps.wrapping_mul(0x9E37_79B9_7F4A_7C15).wrapping_add(plays << 3).wrapping_add((lead << 1) ^ seatv);
+    let base = steps
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(plays << 3)
+        .wrapping_add((lead << 1) ^ seatv);
     let x = base ^ (base >> 33) ^ (base << 17);
     (x & 1) == 1
+}
+
+fn sample_index_for(
+    round: &RoundState,
+    seat: PlayerPosition,
+    budget: &Budget,
+    len: usize,
+) -> usize {
+    if len <= 1 {
+        return 0;
+    }
+    let trick = round.current_trick();
+    let plays = trick.plays().len() as u64;
+    let lead = trick.leader() as u8 as u64;
+    let seatv = seat as u8 as u64;
+    let steps = budget.steps as u64;
+    let base = steps
+        .wrapping_mul(0xD1B5_4A32_C3D2_EF95)
+        .wrapping_add((plays << 4) ^ (lead << 2) ^ seatv);
+    let mut x = base ^ 0xA5A5_5A5A_C3C3_3C3C;
+    x = xorshift64(x);
+    (x % len as u64) as usize
+}
+
+fn xorshift64(mut x: u64) -> u64 {
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    x
 }
 
 fn legal_moves_for(round: &RoundState, seat: PlayerPosition) -> Vec<Card> {
@@ -849,7 +1104,7 @@ struct HardWeights {
     ctrl_handoff_pen: i32,
     cont_cap: i32,
     moon_relief_perpen: i32,
-    // Adaptive scaling (per‑mille per penalty; defaults 0):
+    // Adaptive scaling (perÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœmille per penalty; defaults 0):
     scale_feed_permil: i32,
     scale_self_permil: i32,
 }
@@ -920,6 +1175,7 @@ pub struct Stats {
     pub cont_cap: i32,
     pub next3_tiny_hits: usize,
     pub endgame_dp_hits: usize,
+    pub planner_nudge_hits: usize,
 }
 
 static LAST_STATS: Lazy<Mutex<Option<Stats>>> = Lazy::new(|| Mutex::new(None));
@@ -962,8 +1218,14 @@ fn next_trick_probe(
     ordered.sort_by(|a, b| b.1.cmp(&a.1));
     let start = Instant::now();
     let mut bonus = 0;
-    let mut next_limit = if limits.next_probe_m > 0 { limits.next_probe_m } else { cfg.next_branch_limit };
-    if next3_allowed { next_limit = next_limit.saturating_add(3); }
+    let mut next_limit = if limits.next_probe_m > 0 {
+        limits.next_probe_m
+    } else {
+        cfg.next_branch_limit
+    };
+    if next3_allowed {
+        next_limit = next_limit.saturating_add(3);
+    }
     // Determinization wide-like probe widening (env-gated)
     if bool_env("MDH_HARD_DET_ENABLE") && bool_env("MDH_HARD_DET_PROBE_WIDE_LIKE") {
         next_limit = next_limit.saturating_add(2);
@@ -1054,14 +1316,20 @@ fn next_trick_probe(
                     Err(_) => continue,
                 };
                 // Optionally branch on third opponent reply (env-gated), otherwise finish canonically.
-                let next3_enabled_env = bool_env("MDH_HARD_NEXT3_ENABLE") || (det_enabled_for(ctx) && bool_env("MDH_HARD_DET_NEXT3_ENABLE"));
+                let next3_enabled_env = bool_env("MDH_HARD_NEXT3_ENABLE")
+                    || (det_enabled_for(ctx) && bool_env("MDH_HARD_DET_NEXT3_ENABLE"));
                 let (tier_here, _, _) = effective_limits(ctx);
-                let tiny_next3_normal = matches!(tier_here, Tier::Normal) && bool_env("MDH_HARD_NEXT3_TINY_NORMAL");
-                if tiny_next3_normal { NEXT3_TINY_COUNT.with(|c| c.set(c.get().saturating_add(1))); }
+                let tiny_next3_normal =
+                    matches!(tier_here, Tier::Normal) && bool_env("MDH_HARD_NEXT3_TINY_NORMAL");
+                if tiny_next3_normal {
+                    NEXT3_TINY_COUNT.with(|c| c.set(c.get().saturating_add(1)));
+                }
                 let next3_enabled = next3_allowed || next3_enabled_env || tiny_next3_normal;
                 if next3_enabled {
                     // Build third-opponent reply set: canonical + optional max-penalty off-suit dump
-                    if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms { break; }
+                    if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms {
+                        break;
+                    }
                     // Identify third opponent (the next to play now)
                     let third_opponent = next_to_play(&branch2);
                     let mut replies3: Vec<Card> = Vec::new();
@@ -1077,7 +1345,10 @@ fn next_trick_probe(
                         let legal3 = legal_moves_for(&branch2, third_opponent);
                         let can_follow3 = legal3.iter().any(|c| c.suit == lead_suit3);
                         if !can_follow3 {
-                            if let Some(alt3) = legal3.into_iter().max_by_key(|c| (c.penalty_value(), c.rank.value())) {
+                            if let Some(alt3) = legal3
+                                .into_iter()
+                                .max_by_key(|c| (c.penalty_value(), c.rank.value()))
+                            {
                                 if alt3 != canon3 {
                                     replies3.push(alt3);
                                 }
@@ -1085,8 +1356,12 @@ fn next_trick_probe(
                         }
                     }
                     for reply3 in replies3.into_iter() {
-                        if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms { break; }
-                        if probe_ab_margin > 0 && local_best >= probe_ab_margin { break; }
+                        if start.elapsed().as_millis() as u32 >= cfg.time_cap_ms {
+                            break;
+                        }
+                        if probe_ab_margin > 0 && local_best >= probe_ab_margin {
+                            break;
+                        }
                         let mut branch3 = branch2.clone();
                         let mut outcome3 = match branch3.play_card(third_opponent, reply3) {
                             Ok(o) => o,
@@ -1109,11 +1384,17 @@ fn next_trick_probe(
                         if let PlayOutcome::TrickCompleted { winner, penalties } = outcome3 {
                             let p = penalties as i32;
                             let mut cont = 0;
-                            if winner == leader_target && p > 0 { cont += weights().next2_feed_perpen * p; }
-                            if winner == leader && p > 0 { cont -= weights().next2_self_capture_perpen * p; }
+                            if winner == leader_target && p > 0 {
+                                cont += weights().next2_feed_perpen * p;
+                            }
+                            if winner == leader && p > 0 {
+                                cont -= weights().next2_self_capture_perpen * p;
+                            }
                             // Endgame micro-solver (choose-only; env-gated)
                             cont += micro_endgame_bonus(&branch3, ctx, leader, leader_target);
-                            if cont > local_best { local_best = cont; }
+                            if cont > local_best {
+                                local_best = cont;
+                            }
                         }
                     }
                 } else {
@@ -1135,11 +1416,17 @@ fn next_trick_probe(
                     if let PlayOutcome::TrickCompleted { winner, penalties } = outcome2 {
                         let p = penalties as i32;
                         let mut cont = 0;
-                        if winner == leader_target && p > 0 { cont += weights().next2_feed_perpen * p; }
-                        if winner == leader && p > 0 { cont -= weights().next2_self_capture_perpen * p; }
+                        if winner == leader_target && p > 0 {
+                            cont += weights().next2_feed_perpen * p;
+                        }
+                        if winner == leader && p > 0 {
+                            cont -= weights().next2_self_capture_perpen * p;
+                        }
                         // Endgame micro-solver (choose-only; env-gated)
                         cont += micro_endgame_bonus(&branch2, ctx, leader, leader_target);
-                        if cont > local_best { local_best = cont; }
+                        if cont > local_best {
+                            local_best = cont;
+                        }
                     }
                 }
             }
@@ -1164,30 +1451,52 @@ fn micro_endgame_enabled() -> bool {
 }
 
 fn micro_endgame_max_cards() -> usize {
-    std::env::var("MDH_HARD_ENDGAME_MAX_CARDS").ok().and_then(|s| s.parse().ok()).unwrap_or(3)
+    std::env::var("MDH_HARD_ENDGAME_MAX_CARDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3)
 }
 
-fn micro_endgame_bonus(sim: &RoundState, ctx: &BotContext<'_>, leader: PlayerPosition, leader_target: PlayerPosition) -> i32 {
-    if !micro_endgame_enabled() { return 0; }
+fn micro_endgame_bonus(
+    sim: &RoundState,
+    ctx: &BotContext<'_>,
+    leader: PlayerPosition,
+    leader_target: PlayerPosition,
+) -> i32 {
+    if !micro_endgame_enabled() {
+        return 0;
+    }
     // Quick trigger check: all seats at or below max cards
     let maxn = micro_endgame_max_cards();
     let mut ok = true;
-    for seat in [PlayerPosition::North, PlayerPosition::East, PlayerPosition::South, PlayerPosition::West] {
-        if sim.hand(seat).len() > maxn { ok = false; break; }
+    for seat in [
+        PlayerPosition::North,
+        PlayerPosition::East,
+        PlayerPosition::South,
+        PlayerPosition::West,
+    ] {
+        if sim.hand(seat).len() > maxn {
+            ok = false;
+            break;
+        }
     }
-    if !ok { return 0; }
+    if !ok {
+        return 0;
+    }
     // Deterministic tiny DP: finish current trick if in progress, then simulate up to maxn remaining
     // tricks using our void-aware canonical follow-ups. Score per-trick outcomes with small next2 weights.
     let mut round = sim.clone();
     let mut total: i32 = 0;
     let mut tricks_simulated = 0usize;
     // Finish the current trick if it's mid-play
-    if !matches!(round.current_trick().lead_suit(), None) && round.current_trick().plays().len() > 0 {
+    if !matches!(round.current_trick().lead_suit(), None) && round.current_trick().plays().len() > 0
+    {
         let mut outcome: Option<PlayOutcome> = None; // will hold TrickCompleted
         // Play until this trick completes
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
             let nxt = next_to_play(&round);
-            let r = choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target));
+            let r =
+                choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target));
             outcome = match round.play_card(nxt, r) {
                 Ok(o) => Some(o),
                 Err(_) => break,
@@ -1196,8 +1505,12 @@ fn micro_endgame_bonus(sim: &RoundState, ctx: &BotContext<'_>, leader: PlayerPos
         if let Some(PlayOutcome::TrickCompleted { winner, penalties }) = outcome {
             let p = penalties as i32;
             if p > 0 {
-                if winner == leader_target { total += weights().next2_feed_perpen * p; }
-                if winner == leader { total -= weights().next2_self_capture_perpen * p; }
+                if winner == leader_target {
+                    total += weights().next2_feed_perpen * p;
+                }
+                if winner == leader {
+                    total -= weights().next2_self_capture_perpen * p;
+                }
             }
             tricks_simulated = tricks_simulated.saturating_add(1);
         }
@@ -1206,30 +1519,53 @@ fn micro_endgame_bonus(sim: &RoundState, ctx: &BotContext<'_>, leader: PlayerPos
     while tricks_simulated < maxn {
         // If any hand is empty, stop
         let mut any_cards = false;
-        for seat in [PlayerPosition::North, PlayerPosition::East, PlayerPosition::South, PlayerPosition::West] {
-            if !round.hand(seat).is_empty() { any_cards = true; break; }
+        for seat in [
+            PlayerPosition::North,
+            PlayerPosition::East,
+            PlayerPosition::South,
+            PlayerPosition::West,
+        ] {
+            if !round.hand(seat).is_empty() {
+                any_cards = true;
+                break;
+            }
         }
-        if !any_cards { break; }
+        if !any_cards {
+            break;
+        }
         // Determine who leads now
         let lead = next_to_play(&round);
         // Lead the lowest-ranked legal card for determinism
         let mut legal = legal_moves_for(&round, lead);
-        if legal.is_empty() { break; }
+        if legal.is_empty() {
+            break;
+        }
         legal.sort_by_key(|c| (c.suit as u8, c.rank.value()));
         let lead_card = legal[0];
-        let _ = match round.play_card(lead, lead_card) { Ok(o) => o, Err(_) => break };
+        let _ = match round.play_card(lead, lead_card) {
+            Ok(o) => o,
+            Err(_) => break,
+        };
         // Finish trick canonically
         let mut outcome: Option<PlayOutcome> = None; // will hold TrickCompleted
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
             let nxt = next_to_play(&round);
-            let r = choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target));
-            outcome = match round.play_card(nxt, r) { Ok(o) => Some(o), Err(_) => break };
+            let r =
+                choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target));
+            outcome = match round.play_card(nxt, r) {
+                Ok(o) => Some(o),
+                Err(_) => break,
+            };
         }
         if let Some(PlayOutcome::TrickCompleted { winner, penalties }) = outcome {
             let p = penalties as i32;
             if p > 0 {
-                if winner == leader_target { total += weights().next2_feed_perpen * p; }
-                if winner == leader { total -= weights().next2_self_capture_perpen * p; }
+                if winner == leader_target {
+                    total += weights().next2_feed_perpen * p;
+                }
+                if winner == leader {
+                    total -= weights().next2_self_capture_perpen * p;
+                }
             }
             tricks_simulated = tricks_simulated.saturating_add(1);
         } else {
@@ -1249,7 +1585,10 @@ pub fn debug_hard_weights_string() -> String {
     // Wide-tier continuation permille boosts (env-only; default 0)
     let wide_boost_feed = parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_FEED").unwrap_or(0);
     let wide_boost_self = parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP").unwrap_or(0);
-    let phaseb_topk = std::env::var("MDH_HARD_PHASEB_TOPK").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    let phaseb_topk = std::env::var("MDH_HARD_PHASEB_TOPK")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
     let det = std::env::var("MDH_HARD_DETERMINISTIC").unwrap_or_default();
     let steps = std::env::var("MDH_HARD_TEST_STEPS").unwrap_or_default();
     let det_enable = std::env::var("MDH_HARD_DET_ENABLE").unwrap_or_default();
@@ -1320,7 +1659,13 @@ struct Budget {
 
 impl Budget {
     fn new(time_cap_ms: u32, deterministic: bool, step_cap: Option<usize>) -> Self {
-        Self { time_cap_ms, deterministic, step_cap, steps: 0, probe_calls: 0 }
+        Self {
+            time_cap_ms,
+            deterministic,
+            step_cap,
+            steps: 0,
+            probe_calls: 0,
+        }
     }
     fn tick(&mut self) {
         if self.deterministic {
@@ -1334,27 +1679,38 @@ impl Budget {
         false
     }
     fn timed_out(&self, start: Instant) -> bool {
-        if self.deterministic { return self.should_stop(); }
+        if self.deterministic {
+            return self.should_stop();
+        }
         start.elapsed().as_millis() as u32 >= self.time_cap_ms
     }
     fn utilization_percent(&self, start: Instant) -> u8 {
         if self.deterministic {
             if let Some(cap) = self.step_cap {
-                return (((self.steps as f32) / (cap as f32)) * 100.0).round().clamp(0.0, 100.0) as u8;
+                return (((self.steps as f32) / (cap as f32)) * 100.0)
+                    .round()
+                    .clamp(0.0, 100.0) as u8;
             }
             return 0;
         }
         let used = start.elapsed().as_millis() as u32;
-        if self.time_cap_ms == 0 { return 0; }
-        (((used as f32) / (self.time_cap_ms as f32)) * 100.0).round().clamp(0.0, 100.0) as u8
+        if self.time_cap_ms == 0 {
+            return 0;
+        }
+        (((used as f32) / (self.time_cap_ms as f32)) * 100.0)
+            .round()
+            .clamp(0.0, 100.0) as u8
     }
 }
-
 
 // ----- Leverage tiers and effective limits -----
 
 #[derive(Debug, Clone, Copy)]
-pub enum Tier { Narrow, Normal, Wide }
+pub enum Tier {
+    Narrow,
+    Normal,
+    Wide,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
@@ -1374,21 +1730,44 @@ fn effective_limits(ctx: &BotContext<'_>) -> (Tier, u8, Limits) {
     let tier_for_hard = matches!(ctx.difficulty, super::BotDifficulty::FutureHard);
     let tiers_on = tier_for_hard || bool_env("MDH_HARD_TIERS_ENABLE");
     if !tiers_on {
-        let phaseb_topk = std::env::var("MDH_HARD_PHASEB_TOPK").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+        let phaseb_topk = std::env::var("MDH_HARD_PHASEB_TOPK")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
         let ab_margin = parse_env_i32("MDH_HARD_AB_MARGIN").unwrap_or(0);
         let next_probe_m = PlayPlannerHard::config().next_branch_limit;
-        return (Tier::Normal, 0, Limits { phaseb_topk, next_probe_m, ab_margin });
+        return (
+            Tier::Normal,
+            0,
+            Limits {
+                phaseb_topk,
+                next_probe_m,
+                ab_margin,
+            },
+        );
     }
     let (tier, score) = compute_leverage(ctx);
     // Respect explicit env overrides if present (global and Wide-tier specific)
-    let explicit_topk = std::env::var("MDH_HARD_PHASEB_TOPK").ok().and_then(|s| s.parse::<usize>().ok());
-    let explicit_next = std::env::var("MDH_HARD_NEXT_BRANCH_LIMIT").ok().and_then(|s| s.parse::<usize>().ok());
+    let explicit_topk = std::env::var("MDH_HARD_PHASEB_TOPK")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    let explicit_next = std::env::var("MDH_HARD_NEXT_BRANCH_LIMIT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
     let wide_topk_only = if matches!(tier, Tier::Wide) {
-        std::env::var("MDH_HARD_WIDE_PHASEB_TOPK").ok().and_then(|s| s.parse::<usize>().ok())
-    } else { None };
+        std::env::var("MDH_HARD_WIDE_PHASEB_TOPK")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+    } else {
+        None
+    };
     let wide_next_only = if matches!(tier, Tier::Wide) {
-        std::env::var("MDH_HARD_WIDE_NEXT_BRANCH_LIMIT").ok().and_then(|s| s.parse::<usize>().ok())
-    } else { None };
+        std::env::var("MDH_HARD_WIDE_NEXT_BRANCH_LIMIT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+    } else {
+        None
+    };
     let explicit_ab = parse_env_i32("MDH_HARD_AB_MARGIN");
     let (def_topk, def_next, def_ab) = match tier {
         Tier::Narrow => (4usize, 1usize, 100i32),
@@ -1410,39 +1789,77 @@ fn compute_leverage(ctx: &BotContext<'_>) -> (Tier, u8) {
     let lead_score = snap.max_score as i32;
     let mut s: i32 = 0;
     // Proximity to 100
-    s += if lead_score >= 90 { 40 } else if lead_score >= 80 { 25 } else { 10 };
+    s += if lead_score >= 90 {
+        40
+    } else if lead_score >= 80 {
+        25
+    } else {
+        10
+    };
     // We are not leader and trail by gap
     if snap.max_player != ctx.seat {
         let gap = (lead_score - my).max(0);
-        if gap >= 15 { s += 25; } else if gap >= 8 { s += 15; } else if gap >= 4 { s += 8; }
+        if gap >= 15 {
+            s += 25;
+        } else if gap >= 8 {
+            s += 15;
+        } else if gap >= 4 {
+            s += 8;
+        }
     }
     // Penalties on table and targeting leader provisional winner
     let cur = ctx.round.current_trick();
     let pen = cur.penalty_total() as i32;
-    if pen > 0 { s += 10; }
+    if pen > 0 {
+        s += 10;
+    }
     if let Some(pw) = provisional_winner(ctx.round) {
-        if pw == snap.max_player { s += 10; }
-        if pw == ctx.seat { s += 5; }
+        if pw == snap.max_player {
+            s += 10;
+        }
+        if pw == ctx.seat {
+            s += 5;
+        }
     }
     // Clamp 0..100
     let s = s.clamp(0, 100) as u8;
     // Map to tiers using thresholds
-    let th_narrow = std::env::var("MDH_HARD_LEVERAGE_THRESH_NARROW").ok().and_then(|v| v.parse::<u8>().ok()).unwrap_or(20);
-    let th_normal = std::env::var("MDH_HARD_LEVERAGE_THRESH_NORMAL").ok().and_then(|v| v.parse::<u8>().ok()).unwrap_or(50);
-    let tier = if s < th_narrow { Tier::Narrow } else if s < th_normal { Tier::Normal } else { Tier::Wide };
+    let th_narrow = std::env::var("MDH_HARD_LEVERAGE_THRESH_NARROW")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(20);
+    let th_normal = std::env::var("MDH_HARD_LEVERAGE_THRESH_NORMAL")
+        .ok()
+        .and_then(|v| v.parse::<u8>().ok())
+        .unwrap_or(50);
+    let tier = if s < th_narrow {
+        Tier::Narrow
+    } else if s < th_normal {
+        Tier::Normal
+    } else {
+        Tier::Wide
+    };
     (tier, s)
 }
 
-
 // ----- Determinization (Phase 2 scaffold; env/Hard-gated) -----
-fn det_enabled() -> bool { bool_env("MDH_HARD_DET_ENABLE") }
+fn det_enabled() -> bool {
+    bool_env("MDH_HARD_DET_ENABLE")
+}
 fn det_enabled_for(ctx: &BotContext<'_>) -> bool {
-    if det_enabled() { return true; }
-    if matches!(ctx.difficulty, super::BotDifficulty::FutureHard) && bool_env("MDH_HARD_DET_DEFAULT_ON") {
+    if det_enabled() {
+        return true;
+    }
+    if matches!(ctx.difficulty, super::BotDifficulty::FutureHard)
+        && bool_env("MDH_HARD_DET_DEFAULT_ON")
+    {
         return true;
     }
     false
 }
 fn det_sample_k() -> usize {
-    std::env::var("MDH_HARD_DET_SAMPLE_K").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(0)
+    std::env::var("MDH_HARD_DET_SAMPLE_K")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0)
 }

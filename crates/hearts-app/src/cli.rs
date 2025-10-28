@@ -1,3 +1,4 @@
+use crate::endgame_export::EndgameExport;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::game::serialization::MatchSnapshot;
 use hearts_core::model::player::PlayerPosition;
@@ -57,20 +58,111 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
     };
 
     match cmd.as_str() {
-        "--export-endgame" => {
-            let seed = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--export-endgame <seed> <seat> <out>"))?;
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--export-endgame <seed> <seat> <out>"))?;
+        "--show-hard-telemetry" => {
+            let mut out_path: Option<PathBuf> = None;
+            while let Some(arg) = args.next() {
+                if arg == "--out" {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .ok_or(CliError::MissingArgument(
+                            "--show-hard-telemetry --out <path>",
+                        ))?;
+                    out_path = Some(path);
+                } else {
+                    return Err(CliError::UnknownCommand(arg));
+                }
+            }
+            let (path, summary) = crate::telemetry::hard::export(out_path)?;
+            println!("Telemetry written to {}", path.display());
+            println!(
+                "Records: {} | avg entropy {:.4} | cache hit rate {:.2}%",
+                summary.record_count,
+                summary.avg_entropy,
+                summary.cache_hit_rate * 100.0
+            );
+            Ok(CliOutcome::Handled)
+        }
+        "--export-play-dataset" => {
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument(
+                    "--export-play-dataset <seat> <seed_start> <count> <difficulty> <out>",
+                ),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument(
+                    "--export-play-dataset <seat> <seed_start> <count> <difficulty> <out>",
+                ),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument(
+                    "--export-play-dataset <seat> <seed_start> <count> <difficulty> <out>",
+                ),
+            )?;
+            let difficulty = args.next().and_then(|s| parse_difficulty_opt(&s)).ok_or(
+                CliError::MissingArgument(
+                    "--export-play-dataset <seat> <seed_start> <count> <difficulty> <out>",
+                ),
+            )?;
             let out = args
                 .next()
                 .map(PathBuf::from)
-                .ok_or(CliError::MissingArgument("--export-endgame <seed> <seat> <out>"))?;
+                .ok_or(CliError::MissingArgument(
+                    "--export-play-dataset <seat> <seed_start> <count> <difficulty> <out>",
+                ))?;
+            parse_hard_cli_flags(&mut args)?;
+            if let Some(parent) = out.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            let mut file = std::fs::File::create(&out)?;
+            let mut written = 0usize;
+            for offset in 0..count {
+                let seed = seed_start + offset;
+                let mut controller = crate::controller::GameController::new_with_seed(
+                    Some(seed),
+                    PlayerPosition::North,
+                );
+                controller.set_bot_difficulty(difficulty);
+                if controller.in_passing_phase() {
+                    if let Some(cards) = controller.simple_pass_for(seat) {
+                        let _ = controller.submit_pass(seat, cards);
+                    }
+                    let _ = controller.submit_auto_passes_for_others(seat);
+                    let _ = controller.resolve_passes();
+                }
+                let mut guard = 0u32;
+                while controller.expected_to_play() != seat {
+                    if controller.autoplay_one(seat).is_none() {
+                        break;
+                    }
+                    guard += 1;
+                    if guard > 600 {
+                        break;
+                    }
+                }
+                if let Some(sample) = crate::dataset::collect_play_sample(&controller, seat, seed) {
+                    let line = serde_json::to_string(&sample)?;
+                    use std::io::Write as _;
+                    writeln!(file, "{}", line)?;
+                    written += 1;
+                }
+            }
+            println!("Wrote {} play samples to {}", written, out.display());
+            Ok(CliOutcome::Handled)
+        }
+        "--export-endgame" => {
+            let seed = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--export-endgame <seed> <seat> <out>"),
+            )?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--export-endgame <seed> <seat> <out>"),
+            )?;
+            let out = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or(CliError::MissingArgument(
+                    "--export-endgame <seed> <seat> <out>",
+                ))?;
 
             let mut controller =
                 crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
@@ -83,7 +175,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             }
             let mut guard = 0u32;
             loop {
-                if guard > 600 { break; }
+                if guard > 600 {
+                    break;
+                }
                 guard += 1;
                 let to_play = controller.expected_to_play();
                 let round = controller.bot_context(seat).round;
@@ -94,26 +188,22 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     PlayerPosition::South,
                     PlayerPosition::West,
                 ] {
-                    if round.hand(s).len() > 3 { ok_small = false; break; }
+                    if round.hand(s).len() > 3 {
+                        ok_small = false;
+                        break;
+                    }
                 }
-                if ok_small { break; }
+                if ok_small && to_play == seat {
+                    break;
+                }
                 let _ = controller.autoplay_one(to_play.next());
             }
-            let round = controller.bot_context(seat).round;
-            let obj = serde_json::json!({
-                "seed": seed,
-                "seat": format!("{:?}", seat),
-                "leader": format!("{:?}", round.current_trick().leader()),
-                "hearts_broken": round.hearts_broken(),
-                "hands": {
-                    "N": round.hand(PlayerPosition::North).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
-                    "E": round.hand(PlayerPosition::East).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
-                    "S": round.hand(PlayerPosition::South).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
-                    "W": round.hand(PlayerPosition::West).iter().map(|c| c.to_string()).collect::<Vec<_>>(),
-                }
-            });
-            if let Some(parent) = out.parent() { let _ = std::fs::create_dir_all(parent); }
-            std::fs::write(&out, serde_json::to_string_pretty(&obj).unwrap())?;
+            let export = EndgameExport::capture(&controller, seat, Some(seed));
+            if let Some(parent) = out.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let json = serde_json::to_string_pretty(&export)?;
+            std::fs::write(&out, json)?;
             println!("Wrote endgame snapshot to {}", out.display());
             Ok(CliOutcome::Handled)
         }
@@ -166,19 +256,15 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
         }
         "--seek-dp-flip" => {
             // Usage: --seek-dp-flip <seat> <seed_start> <count> [--out <path>] [Hard flags]
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"))?;
-            let seed_start = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"))?;
-            let count = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--seek-dp-flip <seat> <seed_start> <count>"),
+            )?;
             // Optional flags: --out <path> then Hard flags
             let mut out_path: Option<std::path::PathBuf> = None;
             let mut hard_tokens: Vec<String> = Vec::new();
@@ -230,11 +316,15 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 }
             }
             if let Some(path) = out_path {
-                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
                 println!("Wrote DP flip seek CSV to {}", path.display());
             } else {
-                for line in rows { println!("{}", line); }
+                for line in rows {
+                    println!("{}", line);
+                }
             }
             Ok(CliOutcome::Handled)
         }
@@ -258,7 +348,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 norm, hard
             );
             if let Some(path) = out {
-                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 std::fs::write(&path, &msg).map_err(CliError::Io)?;
                 println!("Wrote weights to {}", path.display());
             } else {
@@ -335,8 +427,13 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             stats.limits_in_effect.ab_margin,
                         );
                         println!(
-                            "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={} endgame_dp_hits={}",
-                            stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil, stats.next3_tiny_hits, stats.endgame_dp_hits
+                            "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={} endgame_dp_hits={} planner_nudge_hits={}",
+                            stats.cont_cap,
+                            stats.wide_boost_feed_permil,
+                            stats.wide_boost_self_permil,
+                            stats.next3_tiny_hits,
+                            stats.endgame_dp_hits,
+                            stats.planner_nudge_hits
                         );
                     }
                 }
@@ -357,15 +454,40 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 for (c, b, cont, t) in verbose {
                     println!("    {} {} {} {}", c, b, cont, t);
                 }
-                if std::env::var("MDH_HARD_VERBOSE_CONT").map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")).unwrap_or(false) {
-                    let parts = crate::bot::PlayPlannerHard::explain_candidates_verbose_parts(&legal, &ctx);
+                if std::env::var("MDH_HARD_VERBOSE_CONT")
+                    .map(|v| {
+                        v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")
+                    })
+                    .unwrap_or(false)
+                {
+                    let parts =
+                        crate::bot::PlayPlannerHard::explain_candidates_verbose_parts(&legal, &ctx);
                     println!("  hard-verbose-parts:");
                     for (c, b, p, t) in parts {
-                        let cont_sum = p.feed + p.self_capture + p.next_start + p.next_probe + p.qs_risk + p.ctrl_hearts + p.ctrl_handoff + p.moon_relief + p.capped_delta;
+                        let cont_sum = p.feed
+                            + p.self_capture
+                            + p.next_start
+                            + p.next_probe
+                            + p.qs_risk
+                            + p.ctrl_hearts
+                            + p.ctrl_handoff
+                            + p.moon_relief
+                            + p.capped_delta;
                         println!(
                             "    {} {} {} {} | feed={} self={} start={} probe={} qs={} hearts={} handoff={} moon_relief={} cap={}",
-                            c, b, cont_sum, t,
-                            p.feed, p.self_capture, p.next_start, p.next_probe, p.qs_risk, p.ctrl_hearts, p.ctrl_handoff, p.moon_relief, p.capped_delta
+                            c,
+                            b,
+                            cont_sum,
+                            t,
+                            p.feed,
+                            p.self_capture,
+                            p.next_start,
+                            p.next_probe,
+                            p.qs_risk,
+                            p.ctrl_hearts,
+                            p.ctrl_handoff,
+                            p.moon_relief,
+                            p.capped_delta
                         );
                     }
                 }
@@ -436,8 +558,12 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                                 stats.limits_in_effect.ab_margin,
                             );
                             println!(
-                                "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} endgame_dp_hits={}",
-                                stats.cont_cap, stats.wide_boost_feed_permil, stats.wide_boost_self_permil, stats.endgame_dp_hits
+                                "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} endgame_dp_hits={} planner_nudge_hits={}",
+                                stats.cont_cap,
+                                stats.wide_boost_feed_permil,
+                                stats.wide_boost_self_permil,
+                                stats.endgame_dp_hits,
+                                stats.planner_nudge_hits
                             );
                         }
                     }
@@ -458,15 +584,43 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     for (c, b, cont, t) in verbose {
                         println!("    {} {} {} {}", c, b, cont, t);
                     }
-                    if std::env::var("MDH_HARD_VERBOSE_CONT").map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")).unwrap_or(false) {
-                        let parts = crate::bot::PlayPlannerHard::explain_candidates_verbose_parts(&legal, &ctx);
+                    if std::env::var("MDH_HARD_VERBOSE_CONT")
+                        .map(|v| {
+                            v == "1"
+                                || v.eq_ignore_ascii_case("true")
+                                || v.eq_ignore_ascii_case("on")
+                        })
+                        .unwrap_or(false)
+                    {
+                        let parts = crate::bot::PlayPlannerHard::explain_candidates_verbose_parts(
+                            &legal, &ctx,
+                        );
                         println!("  hard-verbose-parts:");
                         for (c, b, p, t) in parts {
-                            let cont_sum = p.feed + p.self_capture + p.next_start + p.next_probe + p.qs_risk + p.ctrl_hearts + p.ctrl_handoff + p.moon_relief + p.capped_delta;
+                            let cont_sum = p.feed
+                                + p.self_capture
+                                + p.next_start
+                                + p.next_probe
+                                + p.qs_risk
+                                + p.ctrl_hearts
+                                + p.ctrl_handoff
+                                + p.moon_relief
+                                + p.capped_delta;
                             println!(
                                 "    {} {} {} {} | feed={} self={} start={} probe={} qs={} hearts={} handoff={} moon_relief={} cap={}",
-                                c, b, cont_sum, t,
-                                p.feed, p.self_capture, p.next_start, p.next_probe, p.qs_risk, p.ctrl_hearts, p.ctrl_handoff, p.moon_relief, p.capped_delta
+                                c,
+                                b,
+                                cont_sum,
+                                t,
+                                p.feed,
+                                p.self_capture,
+                                p.next_start,
+                                p.next_probe,
+                                p.qs_risk,
+                                p.ctrl_hearts,
+                                p.ctrl_handoff,
+                                p.moon_relief,
+                                p.capped_delta
                             );
                         }
                     }
@@ -734,12 +888,12 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--out" => {
-                        let path = args
-                            .next()
-                            .map(PathBuf::from)
-                            .ok_or(CliError::MissingArgument(
-                                "--compare-batch <seat> <seed_start> <count> --out <path>",
-                            ))?;
+                        let path =
+                            args.next()
+                                .map(PathBuf::from)
+                                .ok_or(CliError::MissingArgument(
+                                    "--compare-batch <seat> <seed_start> <count> --out <path>",
+                                ))?;
                         out_path = Some(path);
                     }
                     "--only-disagree" => only_disagree = true,
@@ -888,6 +1042,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                         "wide_boost_self_permil": stats.wide_boost_self_permil,
                         "next3_tiny_hits": stats.next3_tiny_hits,
                         "endgame_dp_hits": stats.endgame_dp_hits,
+                        "planner_nudge_hits": stats.planner_nudge_hits,
                     });
                 }
             }
@@ -938,24 +1093,20 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
         }
         "--bench-check" => {
             // Usage: --bench-check <difficulty> <seat> <seed_start> <count>
-            let diff_str = args
-                .next()
-                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
-            let difficulty = parse_difficulty_opt(&diff_str)
-                .ok_or(CliError::UnknownCommand(diff_str))?;
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
-            let seed_start = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
-            let count = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"))?;
+            let diff_str = args.next().ok_or(CliError::MissingArgument(
+                "--bench-check <difficulty> <seat> <seed_start> <count>",
+            ))?;
+            let difficulty =
+                parse_difficulty_opt(&diff_str).ok_or(CliError::UnknownCommand(diff_str))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--bench-check <difficulty> <seat> <seed_start> <count>"),
+            )?;
 
             // Optional Hard flags
             parse_hard_cli_flags(&mut args)?;
@@ -997,13 +1148,19 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             };
             println!(
                 "bench-check difficulty={:?} seat={:?} count={} avg_us={} p95_us={}",
-                difficulty, seat, samples.len(), avg, p95
+                difficulty,
+                seat,
+                samples.len(),
+                avg,
+                p95
             );
             let thr = match difficulty {
                 crate::bot::BotDifficulty::FutureHard => std::env::var("MDH_BENCH_WARN_US_HARD")
                     .ok()
                     .and_then(|s| s.parse::<u64>().ok()),
-                _ => std::env::var("MDH_BENCH_WARN_US_HEUR").ok().and_then(|s| s.parse::<u64>().ok()),
+                _ => std::env::var("MDH_BENCH_WARN_US_HEUR")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok()),
             };
             if let Some(threshold) = thr {
                 if p95 > threshold {
@@ -1017,23 +1174,25 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
         }
         "--match-batch" => {
             // Usage: --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"))?;
-            let seed_start = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"))?;
-            let count = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--match-batch <seat> <seed_start> <count>"),
+            )?;
 
             // Optional difficulties (default A=normal, B=hard)
-            let diff_a = args.next().and_then(|s| parse_difficulty_opt(&s)).unwrap_or(crate::bot::BotDifficulty::NormalHeuristic);
-            let diff_b = args.next().and_then(|s| parse_difficulty_opt(&s)).unwrap_or(crate::bot::BotDifficulty::FutureHard);
+            let diff_a = args
+                .next()
+                .and_then(|s| parse_difficulty_opt(&s))
+                .unwrap_or(crate::bot::BotDifficulty::NormalHeuristic);
+            let diff_b = args
+                .next()
+                .and_then(|s| parse_difficulty_opt(&s))
+                .unwrap_or(crate::bot::BotDifficulty::FutureHard);
 
             // Optional flags: --out <path>, --stats, plus Hard flags
             let mut out_path: Option<std::path::PathBuf> = None;
@@ -1064,7 +1223,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     other if other.starts_with("--hard-") => {
                         hard_tokens.push(other.to_string());
                         if needs_value.contains(&other) {
-                            let v = args.next().ok_or(CliError::MissingArgument("hard flag value"))?;
+                            let v = args
+                                .next()
+                                .ok_or(CliError::MissingArgument("hard flag value"))?;
                             hard_tokens.push(v);
                         }
                     }
@@ -1075,7 +1236,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
 
             let mut rows = Vec::new();
             if include_stats {
-                rows.push("seed,seat,diffA,diffB,a_pen,b_pen,delta,scanned,elapsed_ms,dp_hits".to_string());
+                rows.push(
+                    "seed,seat,diffA,diffB,a_pen,b_pen,delta,scanned,elapsed_ms,dp_hits,nudge_hits"
+                        .to_string(),
+                );
             } else {
                 rows.push("seed,seat,diffA,diffB,a_pen,b_pen,delta".to_string());
             }
@@ -1086,12 +1250,29 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 let delta = (b_pen as i32) - (a_pen as i32);
                 if include_stats {
                     let stats = crate::bot::search::last_stats();
-                    let (scanned, elapsed, dp) = stats
-                        .map(|s| (s.scanned, s.elapsed_ms, s.endgame_dp_hits))
-                        .unwrap_or((0usize, 0u32, 0usize));
+                    let (scanned, elapsed, dp, nudges) = stats
+                        .map(|s| {
+                            (
+                                s.scanned,
+                                s.elapsed_ms,
+                                s.endgame_dp_hits,
+                                s.planner_nudge_hits,
+                            )
+                        })
+                        .unwrap_or((0usize, 0u32, 0usize, 0usize));
                     rows.push(format!(
-                        "{}, {:?}, {:?}, {:?}, {}, {}, {}, {}, {}, {}",
-                        seed, seat, diff_a, diff_b, a_pen, b_pen, delta, scanned, elapsed, dp
+                        "{}, {:?}, {:?}, {:?}, {}, {}, {}, {}, {}, {}, {}",
+                        seed,
+                        seat,
+                        diff_a,
+                        diff_b,
+                        a_pen,
+                        b_pen,
+                        delta,
+                        scanned,
+                        elapsed,
+                        dp,
+                        nudges
                     ));
                 } else {
                     rows.push(format!(
@@ -1101,35 +1282,37 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 }
             }
             if let Some(path) = out_path {
-                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
                 println!("Wrote match CSV to {}", path.display());
             } else {
-                for line in rows { println!("{}", line); }
+                for line in rows {
+                    println!("{}", line);
+                }
             }
             Ok(CliOutcome::Handled)
         }
         "--match-mixed" => {
             // Usage: --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [Hard flags]
             // <mix> is a 4-char string in order N,E,S,W using: e|n|h (easy|normal|hard)
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"))?;
-            let seed_start = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"))?;
-            let count = args
-                .next()
-                .and_then(|s| s.parse::<u64>().ok())
-                .ok_or(CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"))?;
-            let mix = args
-                .next()
-                .ok_or(CliError::MissingArgument("--match-mixed requires <mix> (e|n|h for N,E,S,W)"))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"),
+            )?;
+            let seed_start = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"),
+            )?;
+            let count = args.next().and_then(|s| s.parse::<u64>().ok()).ok_or(
+                CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"),
+            )?;
+            let mix = args.next().ok_or(CliError::MissingArgument(
+                "--match-mixed requires <mix> (e|n|h for N,E,S,W)",
+            ))?;
             if mix.len() != 4 {
-                return Err(CliError::UnknownCommand("--match-mixed <mix> must be 4 chars (N,E,S,W)".to_string()));
+                return Err(CliError::UnknownCommand(
+                    "--match-mixed <mix> must be 4 chars (N,E,S,W)".to_string(),
+                ));
             }
             let chars: Vec<char> = mix.chars().collect();
             let map_char = |c: char| -> Option<crate::bot::BotDifficulty> {
@@ -1142,8 +1325,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             };
             let mut diffs = [crate::bot::BotDifficulty::NormalHeuristic; 4];
             for (i, c) in chars.into_iter().enumerate() {
-                let d = map_char(c)
-                    .ok_or(CliError::UnknownCommand("--match-mixed invalid mix char (use e|n|h)".to_string()))?;
+                let d = map_char(c).ok_or(CliError::UnknownCommand(
+                    "--match-mixed invalid mix char (use e|n|h)".to_string(),
+                ))?;
                 diffs[i] = d;
             }
 
@@ -1188,7 +1372,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
 
             let mut rows = Vec::new();
             if include_stats {
-                rows.push("seed,seat,mix,pen,scanned,elapsed_ms,dp_hits".to_string());
+                rows.push("seed,seat,mix,pen,scanned,elapsed_ms,dp_hits,nudge_hits".to_string());
             } else {
                 rows.push("seed,seat,mix,pen".to_string());
             }
@@ -1197,42 +1381,45 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 let pen = simulate_one_round_mixed(seed, seat, diffs)?;
                 if include_stats {
                     let stats = crate::bot::search::last_stats();
-                    let (scanned, elapsed, dp) = stats
-                        .map(|s| (s.scanned, s.elapsed_ms, s.endgame_dp_hits))
-                        .unwrap_or((0usize, 0u32, 0usize));
+                    let (scanned, elapsed, dp, nudges) = stats
+                        .map(|s| {
+                            (
+                                s.scanned,
+                                s.elapsed_ms,
+                                s.endgame_dp_hits,
+                                s.planner_nudge_hits,
+                            )
+                        })
+                        .unwrap_or((0usize, 0u32, 0usize, 0usize));
                     rows.push(format!(
-                        "{}, {:?}, {}, {}, {}, {}, {}",
-                        seed, seat, mix, pen, scanned, elapsed, dp
+                        "{}, {:?}, {}, {}, {}, {}, {}, {}",
+                        seed, seat, mix, pen, scanned, elapsed, dp, nudges
                     ));
                 } else {
-                    rows.push(format!(
-                        "{}, {:?}, {}, {}",
-                        seed,
-                        seat,
-                        mix,
-                        pen
-                    ));
+                    rows.push(format!("{}, {:?}, {}, {}", seed, seat, mix, pen));
                 }
             }
             if let Some(path) = out_path {
-                if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
+                if let Some(parent) = path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
                 std::fs::write(&path, rows.join("\n")).map_err(CliError::Io)?;
                 println!("Wrote mixed-match CSV to {}", path.display());
             } else {
-                for line in rows { println!("{}", line); }
+                for line in rows {
+                    println!("{}", line);
+                }
             }
             Ok(CliOutcome::Handled)
         }
         "--match-mixed-file" => {
             // Usage: --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]
-            let seat = args
-                .next()
-                .map(|s| parse_seat(&s))
-                .transpose()?
-                .ok_or(CliError::MissingArgument("--match-mixed-file <seat> <mix> --seeds-file <path>"))?;
-            let mix = args
-                .next()
-                .ok_or(CliError::MissingArgument("--match-mixed-file requires <mix> (e|n|h for N,E,S,W)"))?;
+            let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
+                CliError::MissingArgument("--match-mixed-file <seat> <mix> --seeds-file <path>"),
+            )?;
+            let mix = args.next().ok_or(CliError::MissingArgument(
+                "--match-mixed-file requires <mix> (e|n|h for N,E,S,W)",
+            ))?;
             if mix.len() != 4 {
                 return Err(CliError::UnknownCommand(
                     "--match-mixed-file <mix> must be 4 chars (N,E,S,W)".to_string(),
@@ -1283,8 +1470,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     other => return Err(CliError::UnknownCommand(other.to_string())),
                 }
             }
-            let seeds_path = seeds_path
-                .ok_or(CliError::MissingArgument("--seeds-file <path>"))?;
+            let seeds_path = seeds_path.ok_or(CliError::MissingArgument("--seeds-file <path>"))?;
             parse_hard_cli_flags(&mut hard_tokens.into_iter())?;
 
             // Map mix characters to difficulties
@@ -1307,7 +1493,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
 
             let mut rows = Vec::new();
             if include_stats {
-                rows.push("seed,seat,mix,pen,scanned,elapsed_ms,dp_hits".to_string());
+                rows.push("seed,seat,mix,pen,scanned,elapsed_ms,dp_hits,nudge_hits".to_string());
             } else {
                 rows.push("seed,seat,mix,pen".to_string());
             }
@@ -1321,12 +1507,19 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     let pen = simulate_one_round_mixed(seed, seat, diffs)?;
                     if include_stats {
                         let stats = crate::bot::search::last_stats();
-                        let (scanned, elapsed, dp) = stats
-                            .map(|s| (s.scanned, s.elapsed_ms, s.endgame_dp_hits))
-                            .unwrap_or((0usize, 0u32, 0usize));
+                        let (scanned, elapsed, dp, nudges) = stats
+                            .map(|s| {
+                                (
+                                    s.scanned,
+                                    s.elapsed_ms,
+                                    s.endgame_dp_hits,
+                                    s.planner_nudge_hits,
+                                )
+                            })
+                            .unwrap_or((0usize, 0u32, 0usize, 0usize));
                         rows.push(format!(
-                            "{}, {:?}, {}, {}, {}, {}, {}",
-                            seed, seat, mix, pen, scanned, elapsed, dp
+                            "{}, {:?}, {}, {}, {}, {}, {}, {}",
+                            seed, seat, mix, pen, scanned, elapsed, dp, nudges
                         ));
                     } else {
                         rows.push(format!("{}, {:?}, {}, {}", seed, seat, mix, pen));
@@ -1488,21 +1681,31 @@ fn parse_hard_cli_flags(args: &mut impl Iterator<Item = String>) -> Result<(), C
         match flag.as_str() {
             "--hard-deterministic" => unsafe { std::env::set_var("MDH_HARD_DETERMINISTIC", "1") },
             "--hard-steps" => {
-                let v = args.next().ok_or(CliError::MissingArgument("--hard-steps <n>"))?;
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-steps <n>"))?;
                 unsafe { std::env::set_var("MDH_HARD_TEST_STEPS", v) }
             }
-            "--hard-det" | "--hard-det-enable" => unsafe { std::env::set_var("MDH_HARD_DET_ENABLE", "1") },
+            "--hard-det" | "--hard-det-enable" => unsafe {
+                std::env::set_var("MDH_HARD_DET_ENABLE", "1")
+            },
             "--hard-det-k" => {
-                let v = args.next().ok_or(CliError::MissingArgument("--hard-det-k <n>"))?;
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-det-k <n>"))?;
                 unsafe { std::env::set_var("MDH_HARD_DET_SAMPLE_K", v) }
             }
             "--hard-det-probe" => unsafe { std::env::set_var("MDH_HARD_DET_PROBE_WIDE_LIKE", "1") },
             "--hard-phaseb-topk" => {
-                let v = args.next().ok_or(CliError::MissingArgument("--hard-phaseb-topk <k>"))?;
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-phaseb-topk <k>"))?;
                 unsafe { std::env::set_var("MDH_HARD_PHASEB_TOPK", v) }
             }
             "--hard-branch-limit" => {
-                let v = args.next().ok_or(CliError::MissingArgument("--hard-branch-limit <n>"))?;
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-branch-limit <n>"))?;
                 unsafe { std::env::set_var("MDH_HARD_BRANCH_LIMIT", v) }
             }
             "--hard-next-branch-limit" => {
@@ -1512,11 +1715,15 @@ fn parse_hard_cli_flags(args: &mut impl Iterator<Item = String>) -> Result<(), C
                 unsafe { std::env::set_var("MDH_HARD_NEXT_BRANCH_LIMIT", v) }
             }
             "--hard-time-cap-ms" => {
-                let v = args.next().ok_or(CliError::MissingArgument("--hard-time-cap-ms <ms>"))?;
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-time-cap-ms <ms>"))?;
                 unsafe { std::env::set_var("MDH_HARD_TIME_CAP_MS", v) }
             }
             "--hard-cutoff" => {
-                let v = args.next().ok_or(CliError::MissingArgument("--hard-cutoff <margin>"))?;
+                let v = args
+                    .next()
+                    .ok_or(CliError::MissingArgument("--hard-cutoff <margin>"))?;
                 unsafe { std::env::set_var("MDH_HARD_EARLY_CUTOFF_MARGIN", v) }
             }
             "--hard-cont-boost-gap" => {
@@ -1531,10 +1738,10 @@ fn parse_hard_cli_flags(args: &mut impl Iterator<Item = String>) -> Result<(), C
                     .ok_or(CliError::MissingArgument("--hard-cont-boost-factor <n>"))?;
                 unsafe { std::env::set_var("MDH_HARD_CONT_BOOST_FACTOR", v) }
             }
-            "--hard-verbose" => {
-                unsafe { std::env::set_var("MDH_HARD_VERBOSE_CONT", "1") }
+            "--hard-verbose" => unsafe { std::env::set_var("MDH_HARD_VERBOSE_CONT", "1") },
+            other if other.starts_with("--") => {
+                return Err(CliError::UnknownCommand(other.to_string()));
             }
-            other if other.starts_with("--") => return Err(CliError::UnknownCommand(other.to_string())),
             _ => break,
         }
     }
@@ -1559,7 +1766,9 @@ fn seek_dp_flip_for(
     // Autoplay until it is target's turn and all hands have <= 3 cards
     let mut guard = 0u32;
     loop {
-        if guard > 300 { return Ok(None); }
+        if guard > 300 {
+            return Ok(None);
+        }
         guard += 1;
         let to_play = controller.expected_to_play();
         // Check hand sizes
@@ -1571,20 +1780,31 @@ fn seek_dp_flip_for(
             PlayerPosition::South,
             PlayerPosition::West,
         ] {
-            if round.hand(s).len() > 3 { ok_small = false; break; }
+            if round.hand(s).len() > 3 {
+                ok_small = false;
+                break;
+            }
         }
-        if ok_small && to_play == target_seat { break; }
+        if ok_small && to_play == target_seat {
+            break;
+        }
         let _ = controller.autoplay_one(to_play.next());
     }
     // Build legal set and context
     let legal = controller.legal_moves(target_seat);
-    if legal.is_empty() { return Ok(None); }
+    if legal.is_empty() {
+        return Ok(None);
+    }
     let ctx = controller.bot_context(target_seat);
     // Toggle DP off, pick choose() top (Hard choose path uses DP when enabled)
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off_top = crate::bot::PlayPlannerHard::choose(&legal, &ctx).map(|c| c.to_string());
     // DP on, pick choose() top
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on_top = crate::bot::PlayPlannerHard::choose(&legal, &ctx).map(|c| c.to_string());
     if off_top != on_top {
         return Ok(Some((legal.len(), off_top, on_top)));
@@ -1639,7 +1859,9 @@ fn simulate_one_round_mixed(
     loop {
         let totals = controller.penalties_this_round();
         let sum: u32 = totals.iter().map(|&v| v as u32).sum();
-        if sum >= 26 { break; }
+        if sum >= 26 {
+            break;
+        }
         let to_play = controller.expected_to_play();
         controller.set_bot_difficulty(diffs[to_play.index()]);
         let _ = controller.autoplay_one(to_play.next());
@@ -1674,5 +1896,9 @@ fn hard_flags_summary() -> Option<String> {
         .filter(|(_, v)| !v.is_empty())
         .map(|(k, v)| format!("{}={}", k, v))
         .collect();
-    if items.is_empty() { None } else { Some(items.join(" ")) }
+    if items.is_empty() {
+        None
+    } else {
+        Some(items.join(" "))
+    }
 }

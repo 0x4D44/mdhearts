@@ -13,10 +13,22 @@ fn build_two_trick_endgame(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     // 2 cards per hand; hearts broken. East leads a fresh trick.
     // East: [A♣, 2♥]. Others have clubs to avoid feeding now when A♣ is led.
     // Next trick (after A♣ wins), East leads 2♥ and North (leader) holds K♥ to capture p>0 (DP should add positive).
-    let east = vec![Card::new(Rank::Ace, Suit::Clubs), Card::new(Rank::Two, Suit::Hearts)];
-    let north = vec![Card::new(Rank::King, Suit::Hearts), Card::new(Rank::Three, Suit::Clubs)];
-    let south = vec![Card::new(Rank::Five, Suit::Hearts), Card::new(Rank::Jack, Suit::Clubs)];
-    let west = vec![Card::new(Rank::Four, Suit::Hearts), Card::new(Rank::Queen, Suit::Clubs)];
+    let east = vec![
+        Card::new(Rank::Ace, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Hearts),
+    ];
+    let north = vec![
+        Card::new(Rank::King, Suit::Hearts),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let south = vec![
+        Card::new(Rank::Five, Suit::Hearts),
+        Card::new(Rank::Jack, Suit::Clubs),
+    ];
+    let west = vec![
+        Card::new(Rank::Four, Suit::Hearts),
+        Card::new(Rank::Queen, Suit::Clubs),
+    ];
 
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north);
@@ -30,7 +42,10 @@ fn build_two_trick_endgame(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     let _ = prev.play(seat, Card::new(Rank::Nine, Suit::Diamonds));
     let _ = prev.play(seat.next(), Card::new(Rank::Ten, Suit::Diamonds));
     let _ = prev.play(seat.next().next(), Card::new(Rank::Jack, Suit::Diamonds));
-    let _ = prev.play(seat.next().next().next(), Card::new(Rank::Queen, Suit::Diamonds));
+    let _ = prev.play(
+        seat.next().next().next(),
+        Card::new(Rank::Queen, Suit::Diamonds),
+    );
 
     let round = RoundState::from_hands_with_state(
         hands,

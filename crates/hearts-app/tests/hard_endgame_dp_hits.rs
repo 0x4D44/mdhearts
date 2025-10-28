@@ -11,11 +11,23 @@ use hearts_core::model::suit::Suit;
 fn build_tiny_endgame_lead(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     // 2 cards per hand, hearts broken, seat leads a fresh trick
     // East: A♣, 2♥ (can win with A♣, then lead hearts next)
-    let east_cards = vec![Card::new(Rank::Ace, Suit::Clubs), Card::new(Rank::Two, Suit::Hearts)];
+    let east_cards = vec![
+        Card::new(Rank::Ace, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Hearts),
+    ];
     // North (leader_target) has high heart K♥ and a small club to follow
-    let north_cards = vec![Card::new(Rank::King, Suit::Hearts), Card::new(Rank::Three, Suit::Clubs)];
-    let west_cards = vec![Card::new(Rank::Queen, Suit::Clubs), Card::new(Rank::Four, Suit::Hearts)];
-    let south_cards = vec![Card::new(Rank::Jack, Suit::Clubs), Card::new(Rank::Five, Suit::Hearts)];
+    let north_cards = vec![
+        Card::new(Rank::King, Suit::Hearts),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let west_cards = vec![
+        Card::new(Rank::Queen, Suit::Clubs),
+        Card::new(Rank::Four, Suit::Hearts),
+    ];
+    let south_cards = vec![
+        Card::new(Rank::Jack, Suit::Clubs),
+        Card::new(Rank::Five, Suit::Hearts),
+    ];
 
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north_cards);
@@ -29,7 +41,10 @@ fn build_tiny_endgame_lead(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     let _ = prev.play(seat, Card::new(Rank::Five, Suit::Hearts));
     let _ = prev.play(seat.next(), Card::new(Rank::Six, Suit::Hearts));
     let _ = prev.play(seat.next().next(), Card::new(Rank::Seven, Suit::Hearts));
-    let _ = prev.play(seat.next().next().next(), Card::new(Rank::Eight, Suit::Hearts));
+    let _ = prev.play(
+        seat.next().next().next(),
+        Card::new(Rank::Eight, Suit::Hearts),
+    );
     let round = RoundState::from_hands_with_state(
         hands,
         seat,

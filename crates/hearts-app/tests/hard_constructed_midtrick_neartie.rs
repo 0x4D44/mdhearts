@@ -25,9 +25,18 @@ fn build_midtrick_round_west_to_play() -> (RoundState, ScoreBoard) {
         Card::new(Rank::Six, Suit::Hearts),
     ];
 
-    let north_cards = vec![Card::new(Rank::Two, Suit::Clubs), Card::new(Rank::Three, Suit::Clubs)];
-    let east_cards = vec![Card::new(Rank::Two, Suit::Spades), Card::new(Rank::Three, Suit::Spades)];
-    let south_cards = vec![Card::new(Rank::Two, Suit::Diamonds), Card::new(Rank::Three, Suit::Diamonds)];
+    let north_cards = vec![
+        Card::new(Rank::Two, Suit::Clubs),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let east_cards = vec![
+        Card::new(Rank::Two, Suit::Spades),
+        Card::new(Rank::Three, Suit::Spades),
+    ];
+    let south_cards = vec![
+        Card::new(Rank::Two, Suit::Diamonds),
+        Card::new(Rank::Three, Suit::Diamonds),
+    ];
 
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north_cards);
@@ -48,10 +57,17 @@ fn build_midtrick_round_west_to_play() -> (RoundState, ScoreBoard) {
 
     // Seed a previous trick to avoid first-trick constraints; hearts broken
     let mut prev = hearts_core::model::trick::Trick::new(leader);
-    prev.play(leader, Card::new(Rank::Two, Suit::Clubs)).unwrap();
-    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next().next(), Card::new(Rank::Five, Suit::Clubs)).unwrap();
+    prev.play(leader, Card::new(Rank::Two, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Five, Suit::Clubs),
+    )
+    .unwrap();
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -119,8 +135,14 @@ fn hard_constructed_midtrick_neartie_continuation_decides() {
     let mut total_a = 0;
     let mut total_2 = 0;
     for (c, base, _cont, total) in verbose.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { base_a = base; total_a = total; }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { base_2 = base; total_2 = total; }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            base_a = base;
+            total_a = total;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            base_2 = base;
+            total_2 = total;
+        }
     }
     // Base should favor not capturing (2♦) over capturing (A♦)
     assert!(

@@ -13,7 +13,9 @@ fn top_card_for(controller: &mut GameController, seat: PlayerPosition) -> Card {
         let _ = controller.resolve_passes();
     }
     while !controller.in_passing_phase() && controller.expected_to_play() != seat {
-        if controller.autoplay_one(seat).is_none() { break; }
+        if controller.autoplay_one(seat).is_none() {
+            break;
+        }
     }
     let explained = controller.explain_candidates_for(seat);
     explained
@@ -36,7 +38,11 @@ fn west_seed_1082_normal_10s_hard_2s() {
     hard.set_bot_difficulty(hearts_app::bot::BotDifficulty::FutureHard);
     let h_top = top_card_for(&mut hard, seat);
 
-    assert_ne!(n_top, h_top, "Expected disagreement at seed {} {:?}", seed, seat);
+    assert_ne!(
+        n_top, h_top,
+        "Expected disagreement at seed {} {:?}",
+        seed, seat
+    );
     assert_eq!(n_top, Card::new(Rank::Ten, Suit::Spades));
     assert_eq!(h_top, Card::new(Rank::Two, Suit::Spades));
 }
@@ -54,8 +60,11 @@ fn west_seed_1097_normal_8s_hard_jd() {
     hard.set_bot_difficulty(hearts_app::bot::BotDifficulty::FutureHard);
     let h_top = top_card_for(&mut hard, seat);
 
-    assert_ne!(n_top, h_top, "Expected disagreement at seed {} {:?}", seed, seat);
+    assert_ne!(
+        n_top, h_top,
+        "Expected disagreement at seed {} {:?}",
+        seed, seat
+    );
     assert_eq!(n_top, Card::new(Rank::Eight, Suit::Spades));
     assert_eq!(h_top, Card::new(Rank::Jack, Suit::Diamonds));
 }
-

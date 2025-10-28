@@ -36,10 +36,20 @@ fn hard_vs_normal_disagree_on_seed_1141_west() {
     let seat = PlayerPosition::West;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let three_spades = Card { rank: Rank::Three, suit: Suit::Spades };
-    let ace_diamonds = Card { rank: Rank::Ace, suit: Suit::Diamonds };
+    let three_spades = Card {
+        rank: Rank::Three,
+        suit: Suit::Spades,
+    };
+    let ace_diamonds = Card {
+        rank: Rank::Ace,
+        suit: Suit::Diamonds,
+    };
     assert_eq!(
         normal_top, three_spades,
         "Normal top changed for seed {}; update golden if intended",
@@ -59,12 +69,30 @@ fn hard_vs_normal_disagree_on_seed_1219_west() {
     let seat = PlayerPosition::West;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let nine_spades = Card { rank: Rank::Nine, suit: Suit::Spades };
-    let ace_diamonds = Card { rank: Rank::Ace, suit: Suit::Diamonds };
-    assert_eq!(normal_top, nine_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, ace_diamonds, "Hard top changed for seed {}; update golden if intended", seed);
+    let nine_spades = Card {
+        rank: Rank::Nine,
+        suit: Suit::Spades,
+    };
+    let ace_diamonds = Card {
+        rank: Rank::Ace,
+        suit: Suit::Diamonds,
+    };
+    assert_eq!(
+        normal_top, nine_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, ace_diamonds,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -74,12 +102,30 @@ fn hard_vs_normal_disagree_on_seed_1097_west() {
     let seat = PlayerPosition::West;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let eight_spades = Card { rank: Rank::Eight, suit: Suit::Spades };
-    let jack_diamonds = Card { rank: Rank::Jack, suit: Suit::Diamonds };
-    assert_eq!(normal_top, eight_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, jack_diamonds, "Hard top changed for seed {}; update golden if intended", seed);
+    let eight_spades = Card {
+        rank: Rank::Eight,
+        suit: Suit::Spades,
+    };
+    let jack_diamonds = Card {
+        rank: Rank::Jack,
+        suit: Suit::Diamonds,
+    };
+    assert_eq!(
+        normal_top, eight_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, jack_diamonds,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -89,12 +135,30 @@ fn hard_vs_normal_disagree_on_seed_1145_north() {
     let seat = PlayerPosition::North;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let jack_spades = Card { rank: Rank::Jack, suit: Suit::Spades };
-    let ace_diamonds = Card { rank: Rank::Ace, suit: Suit::Diamonds };
-    assert_eq!(normal_top, jack_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, ace_diamonds, "Hard top changed for seed {}; update golden if intended", seed);
+    let jack_spades = Card {
+        rank: Rank::Jack,
+        suit: Suit::Spades,
+    };
+    let ace_diamonds = Card {
+        rank: Rank::Ace,
+        suit: Suit::Diamonds,
+    };
+    assert_eq!(
+        normal_top, jack_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, ace_diamonds,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -104,12 +168,30 @@ fn hard_vs_normal_disagree_on_seed_1241_east() {
     let seat = PlayerPosition::East;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let ten_spades = Card { rank: Rank::Ten, suit: Suit::Spades };
-    let five_spades = Card { rank: Rank::Five, suit: Suit::Spades };
-    assert_eq!(normal_top, ten_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, five_spades, "Hard top changed for seed {}; update golden if intended", seed);
+    let ten_spades = Card {
+        rank: Rank::Ten,
+        suit: Suit::Spades,
+    };
+    let five_spades = Card {
+        rank: Rank::Five,
+        suit: Suit::Spades,
+    };
+    assert_eq!(
+        normal_top, ten_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, five_spades,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -119,12 +201,30 @@ fn hard_vs_normal_disagree_on_seed_1162_north() {
     let seat = PlayerPosition::North;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let ten_spades = Card { rank: Rank::Ten, suit: Suit::Spades };
-    let four_spades = Card { rank: Rank::Four, suit: Suit::Spades };
-    assert_eq!(normal_top, ten_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, four_spades, "Hard top changed for seed {}; update golden if intended", seed);
+    let ten_spades = Card {
+        rank: Rank::Ten,
+        suit: Suit::Spades,
+    };
+    let four_spades = Card {
+        rank: Rank::Four,
+        suit: Suit::Spades,
+    };
+    assert_eq!(
+        normal_top, ten_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, four_spades,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -134,12 +234,30 @@ fn hard_vs_normal_disagree_on_seed_1159_north() {
     let seat = PlayerPosition::North;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let five_spades = Card { rank: Rank::Five, suit: Suit::Spades };
-    let queen_diamonds = Card { rank: Rank::Queen, suit: Suit::Diamonds };
-    assert_eq!(normal_top, five_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, queen_diamonds, "Hard top changed for seed {}; update golden if intended", seed);
+    let five_spades = Card {
+        rank: Rank::Five,
+        suit: Suit::Spades,
+    };
+    let queen_diamonds = Card {
+        rank: Rank::Queen,
+        suit: Suit::Diamonds,
+    };
+    assert_eq!(
+        normal_top, five_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, queen_diamonds,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -149,12 +267,30 @@ fn hard_vs_normal_disagree_on_seed_1363_east() {
     let seat = PlayerPosition::East;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let jack_spades = Card { rank: Rank::Jack, suit: Suit::Spades };
-    let five_spades = Card { rank: Rank::Five, suit: Suit::Spades };
-    assert_eq!(normal_top, jack_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, five_spades, "Hard top changed for seed {}; update golden if intended", seed);
+    let jack_spades = Card {
+        rank: Rank::Jack,
+        suit: Suit::Spades,
+    };
+    let five_spades = Card {
+        rank: Rank::Five,
+        suit: Suit::Spades,
+    };
+    assert_eq!(
+        normal_top, jack_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, five_spades,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -164,12 +300,30 @@ fn hard_vs_normal_disagree_on_seed_1367_east() {
     let seat = PlayerPosition::East;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let jack_spades = Card { rank: Rank::Jack, suit: Suit::Spades };
-    let seven_spades = Card { rank: Rank::Seven, suit: Suit::Spades };
-    assert_eq!(normal_top, jack_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, seven_spades, "Hard top changed for seed {}; update golden if intended", seed);
+    let jack_spades = Card {
+        rank: Rank::Jack,
+        suit: Suit::Spades,
+    };
+    let seven_spades = Card {
+        rank: Rank::Seven,
+        suit: Suit::Spades,
+    };
+    assert_eq!(
+        normal_top, jack_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, seven_spades,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }
 
 #[test]
@@ -179,10 +333,28 @@ fn hard_vs_normal_disagree_on_seed_1195_north() {
     let seat = PlayerPosition::North;
     let normal_top = top_for(seed, seat, false);
     let hard_top = top_for(seed, seat, true);
-    assert_ne!(normal_top, hard_top, "Expected disagreement on seed {} {:?}", seed, seat);
+    assert_ne!(
+        normal_top, hard_top,
+        "Expected disagreement on seed {} {:?}",
+        seed, seat
+    );
 
-    let ten_spades = Card { rank: Rank::Ten, suit: Suit::Spades };
-    let seven_spades = Card { rank: Rank::Seven, suit: Suit::Spades };
-    assert_eq!(normal_top, ten_spades, "Normal top changed for seed {}; update golden if intended", seed);
-    assert_eq!(hard_top, seven_spades, "Hard top changed for seed {}; update golden if intended", seed);
+    let ten_spades = Card {
+        rank: Rank::Ten,
+        suit: Suit::Spades,
+    };
+    let seven_spades = Card {
+        rank: Rank::Seven,
+        suit: Suit::Spades,
+    };
+    assert_eq!(
+        normal_top, ten_spades,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, seven_spades,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
 }

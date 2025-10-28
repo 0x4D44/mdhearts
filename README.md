@@ -14,6 +14,7 @@ CI: see GitHub Actions workflow in `.github/workflows/ci.yml` (builds/tests on W
 - `mdhearts.exe --export-snapshot snapshots/test.json [seed] [seat]`
 - `mdhearts.exe --import-snapshot snapshots/test.json`
 - `mdhearts.exe --show-weights` (prints active AI weights)
+- `mdhearts.exe --show-hard-telemetry [--out <path>]` (writes the latest Hard decision telemetry to NDJSON and prints summary aggregates)
 - `mdhearts.exe --explain-once <seed> <seat>` (prints candidate scores at first decision for that seat)
 - `mdhearts.exe --explain-batch <seat> <seed_start> <count>` (prints candidates across a range of seeds)
 - `mdhearts.exe --explain-snapshot <path> <seat>` (prints candidates for a seat from a saved snapshot)
@@ -27,6 +28,7 @@ CI: see GitHub Actions workflow in `.github/workflows/ci.yml` (builds/tests on W
 - `mdhearts.exe --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]` (simulate one round per seed with two difficulties and emit CSV of penalties for the given seat)
 - `mdhearts.exe --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]` (simulate one round per seed with two difficulties and emit CSV of penalties for the given seat)
 - `mdhearts.exe --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]` (run mixed-seat evaluations using a seed file; `<mix>` is 4 chars for N,E,S,W using `e|n|h`)
+- `mdhearts.exe --export-play-dataset <seat> <seed_start> <count> <difficulty> <out> [Hard flags]` (stream NDJSON records with candidates, continuation parts, beliefs, and adviser bias for downstream analysis)
 
 Hard (FutureHard) flags (for explain/compare/json)
 - Append flags to control Hard without env vars:
@@ -34,8 +36,15 @@ Hard (FutureHard) flags (for explain/compare/json)
 - CLI prints a one-line `hard-flags:` summary for quick visibility.
 
 Advanced (env): tiering and stats
-- `MDH_HARD_TIERS_ENABLE=1` — enable leverage-based tiering of Hard limits (defaults off).
+- `MDH_HARD_TIERS_ENABLE=1` - enable leverage-based tiering of Hard limits (defaults off).
 - Thresholds: `MDH_HARD_LEVERAGE_THRESH_NARROW` (default 20), `MDH_HARD_LEVERAGE_THRESH_NORMAL` (default 50).
+- `MDH_HARD_BELIEF_CACHE_SIZE=<n>` - capacity of the Hard-mode belief cache (default 128 entries).
+- `MDH_HARD_TELEMETRY_KEEP=<n>` - maximum number of telemetry exports retained on disk (default 20).
+- `MDH_HARD_BELIEF_TOPK=<n>` - number of highest-probability cards to prioritize when sampling void follow-ups (default 3).
+- `MDH_HARD_BELIEF_DIVERSITY=<n>` - additional candidates beyond top-K to allow diversity sampling (default 2).
+- `MDH_HARD_BELIEF_FILTER=1` - drop zero-probability cards from sampling pools (default off).
+- `MDH_HARD_ADVISER_PLAY=1` - enable adviser bias application for Hard candidates (defaults off). Use `MDH_ADVISER_PLAY_PATH=<path>` to point to a JSON file (defaults to `assets/adviser/play.json`) mapping card strings such as `"QC"` to bias values.
+- MDH_HARD_PLANNER_LEADER_FEED_NUDGE=<n> - per-penalty planner nudge for Hard when feeding a unique score leader on a penalty trick (defaults to 12). Guarded by MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE (default 220), MDH_HARD_PLANNER_NUDGE_NEAR100 (default 90), and MDH_HARD_PLANNER_NUDGE_GAP_MIN (default 4).
 - With `MDH_DEBUG_LOGS=1`, `--explain-once` prints extended Hard stats (tier, leverage, utilization, and effective limits).
 
 Additional references:

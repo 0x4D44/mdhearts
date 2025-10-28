@@ -30,7 +30,7 @@ fn hard_determinization_strict_flip_wip() {
         Card::new(Rank::Four, Suit::Clubs),   // safe baseline discard
     ];
     let north_cards = vec![
-        Card::new(Rank::Five, Suit::Clubs),   // safe baseline discard
+        Card::new(Rank::Five, Suit::Clubs), // safe baseline discard
         Card::new(Rank::Six, Suit::Clubs),
         Card::new(Rank::Seven, Suit::Clubs),
     ];
@@ -43,7 +43,9 @@ fn hard_determinization_strict_flip_wip() {
     hands[PlayerPosition::West.index()] = Hand::with_cards(west_cards);
 
     let mut current = hearts_core::model::trick::Trick::new(leader);
-    current.play(leader, Card::new(Rank::Ten, Suit::Diamonds)).unwrap();
+    current
+        .play(leader, Card::new(Rank::Ten, Suit::Diamonds))
+        .unwrap();
 
     let prev = hearts_core::model::trick::Trick::new(leader); // empty prev (not first trick logically via hearts_broken)
     let round = RoundState::from_hands_with_state(
@@ -94,8 +96,12 @@ fn hard_determinization_strict_flip_wip() {
     let off = PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
     let (mut off_a, mut off_2) = (i32::MIN, i32::MIN);
     for (c, _b, _cont, t) in off.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { off_a = t; }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { off_2 = t; }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            off_a = t;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            off_2 = t;
+        }
     }
 
     // Determinized (K>1): sampling enabled; weights are cached from baseline (OnceLock). Flip relies on
@@ -110,12 +116,24 @@ fn hard_determinization_strict_flip_wip() {
     let on = PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
     let (mut on_a, mut on_2) = (i32::MIN, i32::MIN);
     for (c, _b, _cont, t) in on.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { on_a = t; }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { on_2 = t; }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            on_a = t;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            on_2 = t;
+        }
     }
 
     // Target: off_a > off_2 && on_a < on_2 (ordering flip). To be finalized.
-    assert_ne!(off_a > off_2, on_a > on_2, "Expected ordering flip: off A={} 2={}, on A={} 2={}", off_a, off_2, on_a, on_2);
+    assert_ne!(
+        off_a > off_2,
+        on_a > on_2,
+        "Expected ordering flip: off A={} 2={}, on A={} 2={}",
+        off_a,
+        off_2,
+        on_a,
+        on_2
+    );
 
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");

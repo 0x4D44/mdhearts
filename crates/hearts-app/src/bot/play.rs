@@ -1,10 +1,12 @@
-﻿use super::{
+use super::{
     BotContext, BotStyle, card_sort_key, count_cards_in_suit, determine_style, snapshot_scores,
 };
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
+use hearts_core::model::rank::Rank;
 use hearts_core::model::round::{PlayOutcome, RoundState};
 use hearts_core::model::suit::Suit;
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -14,6 +16,26 @@ fn debug_enabled() -> bool {
         std::env::var("MDH_DEBUG_LOGS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
             .unwrap_or(false)
+    })
+}
+
+thread_local! {
+    static HARD_NUDGE_HITS: Cell<usize> = Cell::new(0);
+}
+
+pub(crate) fn reset_hard_nudge_hits() {
+    HARD_NUDGE_HITS.with(|cell| cell.set(0));
+}
+
+pub(crate) fn record_hard_nudge_hit() {
+    HARD_NUDGE_HITS.with(|cell| cell.set(cell.get().saturating_add(1)));
+}
+
+pub(crate) fn take_hard_nudge_hits() -> usize {
+    HARD_NUDGE_HITS.with(|cell| {
+        let value = cell.get();
+        cell.set(0);
+        value
     })
 }
 
@@ -141,6 +163,7 @@ impl PlayPlanner {
         if legal.is_empty() {
             return Vec::new();
         }
+        reset_hard_nudge_hits();
         let style = determine_style(ctx);
         let snapshot = snapshot_scores(ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
@@ -297,6 +320,40 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
     score
 }
 
+#[derive(Clone, Copy, Debug)]
+struct HardPlannerNudgeConfig {
+    per_penalty: i32,
+    max_base_for_nudge: i32,
+    near_100_guard: u32,
+    min_gap: u32,
+}
+
+fn hard_planner_nudge_config() -> HardPlannerNudgeConfig {
+    let per_penalty = parse_env_i32("MDH_HARD_PLANNER_LEADER_FEED_NUDGE").unwrap_or(12);
+    let max_base_for_nudge = parse_env_i32("MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE").unwrap_or(220);
+    let near_100_guard = parse_env_i32("MDH_HARD_PLANNER_NUDGE_NEAR100")
+        .unwrap_or(90)
+        .clamp(0, 100) as u32;
+    let min_gap = parse_env_i32("MDH_HARD_PLANNER_NUDGE_GAP_MIN")
+        .unwrap_or(4)
+        .max(0) as u32;
+    HardPlannerNudgeConfig {
+        per_penalty,
+        max_base_for_nudge,
+        near_100_guard,
+        min_gap,
+    }
+}
+
+fn queen_of_spades() -> Card {
+    Card::new(Rank::Queen, Suit::Spades)
+}
+
+fn trick_contains_qs(trick: &hearts_core::model::trick::Trick) -> bool {
+    let target = queen_of_spades();
+    trick.plays().iter().any(|p| p.card == target)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn base_score(
     ctx: &BotContext<'_>,
@@ -358,66 +415,49 @@ fn base_score(
         BotStyle::Cautious => {}
     }
 
+    let leader_gap = snapshot
+        .max_score
+        .saturating_sub(ctx.scores.score(ctx.seat));
+    let gap_units = (leader_gap.min(30) / 10) as i32; // 0..=3
+    let leader_feed_per = weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10;
+    let leader_count = PlayerPosition::LOOP
+        .iter()
+        .filter(|seat| ctx.scores.score(**seat) == snapshot.max_score)
+        .count();
+    let unique_leader = snapshot.leader_unique && leader_count == 1;
+
     // Planner-level leader targeting: small positive even before near-100 scenarios.
     if snapshot.max_player != ctx.seat
         && !will_capture
         && penalties > 0
         && winner == snapshot.max_player
     {
-        let gap = snapshot
-            .max_score
-            .saturating_sub(ctx.scores.score(ctx.seat)) as i32;
-        let gap_units = (gap.min(30) / 10).max(0); // 0..=3
-        score += penalties_i32
-            * (weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10);
+        score += penalties_i32 * leader_feed_per;
     }
-    // Phase B (Hard-only default): tiny extra leader-feed nudge on penalty tricks.
+
+    // Hard-specific leader-feed nudge (wide-tier-inspired) with strict guards.
+    let nudge_cfg = hard_planner_nudge_config();
     if matches!(ctx.difficulty, super::BotDifficulty::FutureHard)
-        && !will_capture
         && penalties > 0
+        && !will_capture
         && winner == snapshot.max_player
+        && snapshot.max_player != ctx.seat
+        && unique_leader
+        && snapshot.leader_gap >= nudge_cfg.min_gap
+        && snapshot.max_score < nudge_cfg.near_100_guard
         && penalties_on_table_now > 0
         && !ctx.round.is_first_trick()
     {
-        // small safe nudge per penalty (kept conservative to preserve goldens)
-        score += penalties_i32 * 30;
-        // Wide-tier-like conditions: larger gap or high leader score -> slightly stronger nudge
-        let gap = snapshot
-            .max_score
-            .saturating_sub(ctx.scores.score(ctx.seat)) as i32;
-        if snapshot.max_score >= 90 || gap >= 15 {
-            score += penalties_i32 * 20;
-        }
-    }
-    // H2 (env-gated): Tiny planner nudges to complement Hard continuation without changing defaults.
-    if std::env::var("MDH_HARD_PLANNER_NUDGES").map(|v| v=="1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")).unwrap_or(false) {
-        // Apply only when not in the first trick to avoid interfering with 2♣ logic and early constraints.
-        if !ctx.round.is_first_trick() {
-            // Leader-feed nudge: if base per-penalty leader-feed is small, add a tiny extra per penalty when feeding leader.
-            if snapshot.max_player != ctx.seat
-                && !will_capture
-                && penalties > 0
-                && winner == snapshot.max_player
-                && penalties_on_table_now > 0
-            {
-                let gap = snapshot
-                    .max_score
-                    .saturating_sub(ctx.scores.score(ctx.seat)) as i32;
-                let gap_units = (gap.min(30) / 10).max(0);
-                let per = weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10;
-                let cap = parse_env_i32("MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE").unwrap_or(0);
-                if cap <= 0 || per < cap {
-                    let nudge = parse_env_i32("MDH_HARD_PLANNER_LEADER_FEED_NUDGE").unwrap_or(0);
-                    if nudge != 0 {
-                        score += penalties_i32 * nudge;
-                    }
-                }
-            }
-            // Self-capture nudge near 100: add a tiny extra penalty to capturing points when we're high.
-            if will_capture && ctx.scores.score(ctx.seat) >= 85 && penalties_on_table_now > 0 {
-                let nudge = parse_env_i32("MDH_HARD_PLANNER_SELF_CAPTURE_NUDGE").unwrap_or(0);
-                if nudge != 0 {
-                    score -= penalties_i32 * nudge;
+        if nudge_cfg.per_penalty != 0 {
+            let hearts_ready = ctx.round.hearts_broken()
+                || trick_contains_qs(ctx.round.current_trick())
+                || card == queen_of_spades();
+            if hearts_ready {
+                if nudge_cfg.max_base_for_nudge <= 0
+                    || leader_feed_per < nudge_cfg.max_base_for_nudge
+                {
+                    score += penalties_i32 * nudge_cfg.per_penalty;
+                    record_hard_nudge_hit();
                 }
             }
         }
@@ -1318,4 +1358,3 @@ mod tests {
         assert_eq!(choice, Card::new(Rank::Queen, Suit::Hearts));
     }
 }
-

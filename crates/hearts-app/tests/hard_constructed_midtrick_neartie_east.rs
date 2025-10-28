@@ -13,9 +13,18 @@ fn build_midtrick_round_east_to_play() -> (RoundState, ScoreBoard) {
     // East holds options to capture (K♣) vs lose (4♣). Capturing yields lead next with some singletons.
     let leader = PlayerPosition::South;
 
-    let north = vec![Card::new(Rank::Three, Suit::Clubs), Card::new(Rank::Two, Suit::Spades)];
-    let west = vec![Card::new(Rank::Two, Suit::Clubs), Card::new(Rank::Two, Suit::Diamonds)];
-    let south = vec![Card::new(Rank::Nine, Suit::Clubs), Card::new(Rank::Two, Suit::Hearts)];
+    let north = vec![
+        Card::new(Rank::Three, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Spades),
+    ];
+    let west = vec![
+        Card::new(Rank::Two, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Diamonds),
+    ];
+    let south = vec![
+        Card::new(Rank::Nine, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Hearts),
+    ];
     let east = vec![
         Card::new(Rank::King, Suit::Clubs), // capture option
         Card::new(Rank::Four, Suit::Clubs), // lose option
@@ -42,10 +51,17 @@ fn build_midtrick_round_east_to_play() -> (RoundState, ScoreBoard) {
 
     // Seed a previous trick to avoid first-trick constraints; hearts broken
     let mut prev = hearts_core::model::trick::Trick::new(leader);
-    prev.play(leader, Card::new(Rank::Two, Suit::Clubs)).unwrap();
-    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next().next(), Card::new(Rank::Five, Suit::Clubs)).unwrap();
+    prev.play(leader, Card::new(Rank::Two, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Five, Suit::Clubs),
+    )
+    .unwrap();
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -111,8 +127,14 @@ fn hard_constructed_midtrick_neartie_east_continuation_decides() {
     let mut total_cap = 0;
     let mut total_lose = 0;
     for (c, base, _cont, total) in verbose.iter().copied() {
-        if c == Card::new(Rank::King, Suit::Clubs) { base_cap = base; total_cap = total; }
-        if c == Card::new(Rank::Four, Suit::Clubs) { base_lose = base; total_lose = total; }
+        if c == Card::new(Rank::King, Suit::Clubs) {
+            base_cap = base;
+            total_cap = total;
+        }
+        if c == Card::new(Rank::Four, Suit::Clubs) {
+            base_lose = base;
+            total_lose = total;
+        }
     }
     // Base should prefer losing (4♣) over capturing (K♣)
     assert!(
@@ -139,4 +161,3 @@ fn hard_constructed_midtrick_neartie_east_continuation_decides() {
         std::env::remove_var("MDH_HARD_CTRL_HANDOFF_PEN");
     }
 }
-

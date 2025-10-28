@@ -12,10 +12,22 @@ fn build_constructed_endgame(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     // Constructed minimal endgame (2 cards each), hearts broken.
     // Goal: Without DP, base prefers to avoid capturing (play hearts 2H);
     // With DP, winning with AC now sets up a next-trick heart feed to the leader (North).
-    let east = vec![Card::new(Rank::Ace, Suit::Clubs), Card::new(Rank::Two, Suit::Hearts)];
-    let north = vec![Card::new(Rank::Three, Suit::Clubs), Card::new(Rank::King, Suit::Hearts)];
-    let south = vec![Card::new(Rank::Jack, Suit::Clubs), Card::new(Rank::Five, Suit::Hearts)];
-    let west = vec![Card::new(Rank::Queen, Suit::Clubs), Card::new(Rank::Four, Suit::Hearts)];
+    let east = vec![
+        Card::new(Rank::Ace, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Hearts),
+    ];
+    let north = vec![
+        Card::new(Rank::Three, Suit::Clubs),
+        Card::new(Rank::King, Suit::Hearts),
+    ];
+    let south = vec![
+        Card::new(Rank::Jack, Suit::Clubs),
+        Card::new(Rank::Five, Suit::Hearts),
+    ];
+    let west = vec![
+        Card::new(Rank::Queen, Suit::Clubs),
+        Card::new(Rank::Four, Suit::Hearts),
+    ];
 
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north);
@@ -29,7 +41,10 @@ fn build_constructed_endgame(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     let _ = prev.play(seat, Card::new(Rank::Nine, Suit::Diamonds));
     let _ = prev.play(seat.next(), Card::new(Rank::Ten, Suit::Diamonds));
     let _ = prev.play(seat.next().next(), Card::new(Rank::Jack, Suit::Diamonds));
-    let _ = prev.play(seat.next().next().next(), Card::new(Rank::Queen, Suit::Diamonds));
+    let _ = prev.play(
+        seat.next().next().next(),
+        Card::new(Rank::Queen, Suit::Diamonds),
+    );
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -95,10 +110,14 @@ fn hard_endgame_dp_minimal_constructed_flip() {
     }
 
     // DP OFF first
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off = PlayPlannerHard::choose(&legal, &ctx);
     // DP ON
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on = PlayPlannerHard::choose(&legal, &ctx);
 
     assert_ne!(off, on, "expected DP to flip choice in constructed endgame");

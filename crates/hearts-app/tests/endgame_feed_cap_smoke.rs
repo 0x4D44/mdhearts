@@ -61,10 +61,13 @@ fn endgame_feed_cap_does_not_break_choice() {
     let starting = PlayerPosition::East;
     let our_seat = PlayerPosition::South;
     let hands = [
-        vec![Card::new(Rank::Two, Suit::Hearts)],              // North
-        vec![Card::new(Rank::Ace, Suit::Clubs)],               // East (leader)
-        vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Five, Suit::Hearts)], // South
-        vec![Card::new(Rank::King, Suit::Diamonds)],           // West
+        vec![Card::new(Rank::Two, Suit::Hearts)], // North
+        vec![Card::new(Rank::Ace, Suit::Clubs)],  // East (leader)
+        vec![
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Five, Suit::Hearts),
+        ], // South
+        vec![Card::new(Rank::King, Suit::Diamonds)], // West
     ];
     let round = build_round(
         starting,
@@ -107,4 +110,3 @@ fn endgame_feed_cap_does_not_break_choice() {
     assert_eq!(choice_capped, Card::new(Rank::Queen, Suit::Spades));
     unsafe { std::env::remove_var("MDH_W_ENDGAME_FEED_CAP") };
 }
-

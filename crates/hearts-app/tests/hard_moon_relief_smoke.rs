@@ -8,7 +8,11 @@ use hearts_core::model::round::{RoundPhase, RoundState};
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
 
-fn round_with_spade_lead_qs_follows(starting: PlayerPosition, leader_play: Card, hands_vec: [Vec<Card>; 4]) -> RoundState {
+fn round_with_spade_lead_qs_follows(
+    starting: PlayerPosition,
+    leader_play: Card,
+    hands_vec: [Vec<Card>; 4],
+) -> RoundState {
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     for (idx, cards) in hands_vec.into_iter().enumerate() {
         hands[idx] = Hand::with_cards(cards);
@@ -59,13 +63,24 @@ fn hard_continuation_moon_relief_appears_when_committed() {
         Card::new(Rank::Three, Suit::Diamonds),
     ];
 
-    let round = round_with_spade_lead_qs_follows(starting, Card::new(Rank::Seven, Suit::Spades), [north, east, south, west]);
+    let round = round_with_spade_lead_qs_follows(
+        starting,
+        Card::new(Rank::Seven, Suit::Spades),
+        [north, east, south, west],
+    );
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
     // Mark moon state as Committed for our seat
     tracker.set_moon_state(our_seat, hearts_app::bot::MoonState::Committed);
     let scores = ScoreBoard::new();
-    let ctx = BotContext::new(our_seat, &round, &scores, PassingDirection::Hold, &tracker, BotDifficulty::FutureHard);
+    let ctx = BotContext::new(
+        our_seat,
+        &round,
+        &scores,
+        PassingDirection::Hold,
+        &tracker,
+        BotDifficulty::FutureHard,
+    );
 
     // Legal plays for our seat should include AS
     let legal = {
@@ -102,4 +117,3 @@ fn hard_continuation_moon_relief_appears_when_committed() {
         std::env::remove_var("MDH_HARD_MOON_RELIEF_PERPEN");
     }
 }
-

@@ -1,6 +1,6 @@
-use hearts_core::model::player::PlayerPosition;
-use hearts_app::controller::GameController;
 use hearts_app::bot::{BotDifficulty, PlayPlannerHard};
+use hearts_app::controller::GameController;
+use hearts_core::model::player::PlayerPosition;
 
 #[test]
 fn hard_verbose_parts_sum_matches_continuation() {

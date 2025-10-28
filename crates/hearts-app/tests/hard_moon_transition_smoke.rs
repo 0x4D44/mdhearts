@@ -8,7 +8,11 @@ use hearts_core::model::round::{RoundPhase, RoundState};
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
 
-fn round_with_lead(starting: PlayerPosition, leader_play: Card, hands_vec: [Vec<Card>; 4]) -> RoundState {
+fn round_with_lead(
+    starting: PlayerPosition,
+    leader_play: Card,
+    hands_vec: [Vec<Card>; 4],
+) -> RoundState {
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     for (idx, cards) in hands_vec.into_iter().enumerate() {
         hands[idx] = Hand::with_cards(cards);
@@ -38,11 +42,27 @@ fn hard_moon_transition_considering_to_committed_keeps_relief_positive() {
 
     let starting = PlayerPosition::West; // Leader plays a spade; we hold AS to win
     let our_seat = PlayerPosition::North;
-    let north = vec![Card::new(Rank::Ace, Suit::Spades), Card::new(Rank::Two, Suit::Clubs)];
-    let east = vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Three, Suit::Clubs)];
-    let south = vec![Card::new(Rank::Four, Suit::Spades), Card::new(Rank::Four, Suit::Clubs)];
-    let west = vec![Card::new(Rank::Two, Suit::Diamonds), Card::new(Rank::Three, Suit::Diamonds)];
-    let round = round_with_lead(starting, Card::new(Rank::Seven, Suit::Spades), [north, east, south, west]);
+    let north = vec![
+        Card::new(Rank::Ace, Suit::Spades),
+        Card::new(Rank::Two, Suit::Clubs),
+    ];
+    let east = vec![
+        Card::new(Rank::Queen, Suit::Spades),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let south = vec![
+        Card::new(Rank::Four, Suit::Spades),
+        Card::new(Rank::Four, Suit::Clubs),
+    ];
+    let west = vec![
+        Card::new(Rank::Two, Suit::Diamonds),
+        Card::new(Rank::Three, Suit::Diamonds),
+    ];
+    let round = round_with_lead(
+        starting,
+        Card::new(Rank::Seven, Suit::Spades),
+        [north, east, south, west],
+    );
 
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
@@ -107,4 +127,3 @@ fn hard_moon_transition_considering_to_committed_keeps_relief_positive() {
         std::env::remove_var("MDH_HARD_MOON_RELIEF_PERPEN");
     }
 }
-

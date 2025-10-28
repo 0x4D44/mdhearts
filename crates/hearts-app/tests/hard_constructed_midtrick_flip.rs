@@ -51,16 +51,29 @@ fn build_midtrick_round_west_to_play() -> (RoundState, ScoreBoard) {
 
     // Build a current trick with 3 plays already
     let mut current = hearts_core::model::trick::Trick::new(leader);
-    current.play(PlayerPosition::North, Card::new(Rank::Ten, Suit::Diamonds)).unwrap();
-    current.play(PlayerPosition::East, Card::new(Rank::King, Suit::Diamonds)).unwrap();
-    current.play(PlayerPosition::South, Card::new(Rank::Four, Suit::Diamonds)).unwrap();
+    current
+        .play(PlayerPosition::North, Card::new(Rank::Ten, Suit::Diamonds))
+        .unwrap();
+    current
+        .play(PlayerPosition::East, Card::new(Rank::King, Suit::Diamonds))
+        .unwrap();
+    current
+        .play(PlayerPosition::South, Card::new(Rank::Four, Suit::Diamonds))
+        .unwrap();
 
     // One previous trick to avoid first-trick rules; also set hearts_broken=true explicitly.
     let mut prev = hearts_core::model::trick::Trick::new(leader);
-    prev.play(leader, Card::new(Rank::Two, Suit::Clubs)).unwrap();
-    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next().next(), Card::new(Rank::Five, Suit::Clubs)).unwrap();
+    prev.play(leader, Card::new(Rank::Two, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Five, Suit::Clubs),
+    )
+    .unwrap();
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -124,8 +137,12 @@ fn hard_constructed_midtrick_flips_vs_normal() {
     let mut cont_ace = None;
     let mut cont_two = None;
     for (c, _b, cont, _t) in verbose.into_iter() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { cont_ace = Some(cont); }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { cont_two = Some(cont); }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            cont_ace = Some(cont);
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            cont_two = Some(cont);
+        }
     }
     let cont_ace = cont_ace.expect("A♦ present");
     let cont_two = cont_two.expect("2♦ present");

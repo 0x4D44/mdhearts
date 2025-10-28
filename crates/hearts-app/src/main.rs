@@ -1,4 +1,4 @@
-#![cfg_attr(all(not(test), windows), windows_subsystem = "windows")]
+﻿#![cfg_attr(all(not(test), windows), windows_subsystem = "windows")]
 #![cfg_attr(windows, deny(warnings))]
 
 use std::backtrace::Backtrace;
@@ -17,7 +17,10 @@ use windows::core::{PCWSTR, w};
 mod bot;
 mod cli;
 mod controller;
+mod dataset;
+mod endgame_export;
 mod platform;
+mod telemetry;
 
 #[cfg(windows)]
 fn install_panic_hook() {
@@ -50,14 +53,9 @@ fn install_panic_hook() {
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
                 let _ = writeln!(
                     file,
-                    "[{secs}.{nanos:09}] {message}
-{detail}
-{backtrace}",
+                    "[{secs}.{nanos:09}] {message}\n{detail}\n{backtrace}",
                     secs = timestamp.as_secs(),
                     nanos = timestamp.subsec_nanos(),
-                    message = message,
-                    detail = detail,
-                    backtrace = backtrace
                 );
             } else {
                 log_path = PathBuf::from("mdhearts-panic.log");
@@ -124,7 +122,6 @@ fn install_panic_hook() {
         }));
     });
 }
-
 fn current_log_path() -> PathBuf {
     match std::env::current_exe() {
         Ok(mut exe) => {
@@ -146,7 +143,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             #[cfg(not(windows))]
             {
-                // Non-Windows: call stub run() to satisfy usage
                 platform::run()?;
             }
             Ok(())

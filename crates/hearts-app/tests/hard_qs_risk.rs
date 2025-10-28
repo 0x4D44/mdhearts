@@ -94,8 +94,12 @@ fn hard_qs_risk_penalizes_high_spade_capture() {
     let mut cont_ace = None;
     let mut cont_two = None;
     for (c, _b, cont, _t) in verbose {
-        if c == Card::new(Rank::Ace, Suit::Spades) { cont_ace = Some(cont); }
-        if c == Card::new(Rank::Two, Suit::Spades) { cont_two = Some(cont); }
+        if c == Card::new(Rank::Ace, Suit::Spades) {
+            cont_ace = Some(cont);
+        }
+        if c == Card::new(Rank::Two, Suit::Spades) {
+            cont_two = Some(cont);
+        }
     }
     let cont_ace = cont_ace.expect("Ace present");
     let cont_two = cont_two.expect("Two present");

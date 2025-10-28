@@ -1,5 +1,5 @@
-use hearts_app::controller::GameController;
 use hearts_app::bot::BotDifficulty;
+use hearts_app::controller::GameController;
 use hearts_core::model::player::PlayerPosition;
 
 #[test]
@@ -14,23 +14,34 @@ fn hard_probe_margin_does_not_change_explain() {
     let mut controller = GameController::new_with_seed(Some(seed), PlayerPosition::North);
     controller.set_bot_difficulty(BotDifficulty::FutureHard);
     if controller.in_passing_phase() {
-        if let Some(cards) = controller.simple_pass_for(seat) { let _ = controller.submit_pass(seat, cards); }
+        if let Some(cards) = controller.simple_pass_for(seat) {
+            let _ = controller.submit_pass(seat, cards);
+        }
         let _ = controller.submit_auto_passes_for_others(seat);
         let _ = controller.resolve_passes();
     }
     while !controller.in_passing_phase() && controller.expected_to_play() != seat {
-        if controller.autoplay_one(seat).is_none() { break; }
+        if controller.autoplay_one(seat).is_none() {
+            break;
+        }
     }
     let legal = controller.legal_moves(seat);
     let ctx = controller.bot_context(seat);
 
     // Explain without margin
-    unsafe { std::env::remove_var("MDH_HARD_PROBE_AB_MARGIN"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_PROBE_AB_MARGIN");
+    }
     let expl_base = hearts_app::bot::PlayPlannerHard::explain_candidates(&legal, &ctx);
     // Explain with margin
-    unsafe { std::env::set_var("MDH_HARD_PROBE_AB_MARGIN", "40"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_PROBE_AB_MARGIN", "40");
+    }
     let expl_ab = hearts_app::bot::PlayPlannerHard::explain_candidates(&legal, &ctx);
-    assert_eq!(expl_base, expl_ab, "probe margin must not affect explain output");
+    assert_eq!(
+        expl_base, expl_ab,
+        "probe margin must not affect explain output"
+    );
 
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");
@@ -39,4 +50,3 @@ fn hard_probe_margin_does_not_change_explain() {
         std::env::remove_var("MDH_HARD_PROBE_AB_MARGIN");
     }
 }
-

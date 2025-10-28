@@ -1,5 +1,5 @@
-use hearts_app::controller::GameController;
 use hearts_app::bot::BotDifficulty;
+use hearts_app::controller::GameController;
 use hearts_core::model::player::PlayerPosition;
 
 #[test]
@@ -27,7 +27,9 @@ fn hard_ab_skip_reduces_scans_without_changing_top() {
         let _ = controller.resolve_passes();
     }
     while !controller.in_passing_phase() && controller.expected_to_play() != seat {
-        if controller.autoplay_one(seat).is_none() { break; }
+        if controller.autoplay_one(seat).is_none() {
+            break;
+        }
     }
 
     // Get explain candidates (establishes top choice reference)
@@ -45,13 +47,19 @@ fn hard_ab_skip_reduces_scans_without_changing_top() {
     let picked_noab = hearts_app::bot::PlayPlannerHard::choose(&legal, &ctx).unwrap();
 
     // Enable AB margin and ensure scanned decreases but top remains same as no-AB
-    unsafe { std::env::set_var("MDH_HARD_AB_MARGIN", "200"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_AB_MARGIN", "200");
+    }
     let picked_ab = hearts_app::bot::PlayPlannerHard::choose(&legal, &ctx).unwrap();
-    let stats_after_choose_ab = hearts_app::bot::search::last_stats().expect("stats after choose-ab");
+    let stats_after_choose_ab =
+        hearts_app::bot::search::last_stats().expect("stats after choose-ab");
     // Refresh explain stats for comparison baseline
     let _ = hearts_app::bot::PlayPlannerHard::explain_candidates(&legal, &ctx);
     let stats_after_explain = hearts_app::bot::search::last_stats().expect("stats after explain");
-    assert_eq!(picked_ab, picked_noab, "AB skip should not change top versus no-AB when early-cutoff is off");
+    assert_eq!(
+        picked_ab, picked_noab,
+        "AB skip should not change top versus no-AB when early-cutoff is off"
+    );
     assert!(
         stats_after_choose_ab.scanned <= stats_after_explain.scanned,
         "choose(ab) scanned {} should be <= explain {}",

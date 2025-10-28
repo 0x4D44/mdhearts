@@ -5,7 +5,9 @@ fn find_midtrick_disagreement(seed: u64, seat: PlayerPosition, max_checks: usize
     let mut ctrl = GameController::new_with_seed(Some(seed), PlayerPosition::North);
     // Resolve passes if present
     if ctrl.in_passing_phase() {
-        if let Some(cards) = ctrl.simple_pass_for(seat) { let _ = ctrl.submit_pass(seat, cards); }
+        if let Some(cards) = ctrl.simple_pass_for(seat) {
+            let _ = ctrl.submit_pass(seat, cards);
+        }
         let _ = ctrl.submit_auto_passes_for_others(seat);
         let _ = ctrl.resolve_passes();
     }
@@ -13,10 +15,16 @@ fn find_midtrick_disagreement(seed: u64, seat: PlayerPosition, max_checks: usize
     while checks < max_checks {
         // Advance to our seat's turn
         while !ctrl.in_passing_phase() && ctrl.expected_to_play() != seat {
-            if ctrl.autoplay_one(seat).is_none() { break; }
+            if ctrl.autoplay_one(seat).is_none() {
+                break;
+            }
         }
-        if ctrl.in_passing_phase() { break; }
-        if ctrl.legal_moves(seat).is_empty() { break; }
+        if ctrl.in_passing_phase() {
+            break;
+        }
+        if ctrl.legal_moves(seat).is_empty() {
+            break;
+        }
 
         // Compare Normal vs Hard on the exact same snapshot by toggling difficulty
         ctrl.set_bot_difficulty(hearts_app::bot::BotDifficulty::NormalHeuristic);
@@ -27,10 +35,14 @@ fn find_midtrick_disagreement(seed: u64, seat: PlayerPosition, max_checks: usize
             n_expl.iter().max_by_key(|(_, s)| *s),
             h_expl.iter().max_by_key(|(_, s)| *s),
         ) {
-            if *n_top != *h_top { return true; }
+            if *n_top != *h_top {
+                return true;
+            }
         }
         // Move forward to the next decision point
-        if ctrl.autoplay_one(seat).is_none() { break; }
+        if ctrl.autoplay_one(seat).is_none() {
+            break;
+        }
         checks += 1;
     }
     false

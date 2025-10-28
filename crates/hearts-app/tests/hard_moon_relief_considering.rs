@@ -8,7 +8,11 @@ use hearts_core::model::round::{RoundPhase, RoundState};
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
 
-fn round_with_lead_and_qs(starting: PlayerPosition, leader_play: Card, hands_vec: [Vec<Card>; 4]) -> RoundState {
+fn round_with_lead_and_qs(
+    starting: PlayerPosition,
+    leader_play: Card,
+    hands_vec: [Vec<Card>; 4],
+) -> RoundState {
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     for (idx, cards) in hands_vec.into_iter().enumerate() {
         hands[idx] = Hand::with_cards(cards);
@@ -37,21 +41,47 @@ fn hard_moon_relief_applies_when_considering() {
 
     let starting = PlayerPosition::West;
     let our_seat = PlayerPosition::North;
-    let north = vec![Card::new(Rank::Ace, Suit::Spades), Card::new(Rank::Two, Suit::Clubs)];
-    let east = vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Three, Suit::Clubs)];
-    let south = vec![Card::new(Rank::Four, Suit::Spades), Card::new(Rank::Four, Suit::Clubs)];
-    let west = vec![Card::new(Rank::Two, Suit::Diamonds), Card::new(Rank::Three, Suit::Diamonds)];
-    let round = round_with_lead_and_qs(starting, Card::new(Rank::Seven, Suit::Spades), [north, east, south, west]);
+    let north = vec![
+        Card::new(Rank::Ace, Suit::Spades),
+        Card::new(Rank::Two, Suit::Clubs),
+    ];
+    let east = vec![
+        Card::new(Rank::Queen, Suit::Spades),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let south = vec![
+        Card::new(Rank::Four, Suit::Spades),
+        Card::new(Rank::Four, Suit::Clubs),
+    ];
+    let west = vec![
+        Card::new(Rank::Two, Suit::Diamonds),
+        Card::new(Rank::Three, Suit::Diamonds),
+    ];
+    let round = round_with_lead_and_qs(
+        starting,
+        Card::new(Rank::Seven, Suit::Spades),
+        [north, east, south, west],
+    );
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
     tracker.set_moon_state(our_seat, hearts_app::bot::MoonState::Considering);
     let scores = ScoreBoard::new();
-    let ctx = BotContext::new(our_seat, &round, &scores, PassingDirection::Hold, &tracker, BotDifficulty::FutureHard);
+    let ctx = BotContext::new(
+        our_seat,
+        &round,
+        &scores,
+        PassingDirection::Hold,
+        &tracker,
+        BotDifficulty::FutureHard,
+    );
     let legal = round
         .hand(our_seat)
         .iter()
         .copied()
-        .filter(|c| { let mut p = round.clone(); p.play_card(our_seat, *c).is_ok() })
+        .filter(|c| {
+            let mut p = round.clone();
+            p.play_card(our_seat, *c).is_ok()
+        })
         .collect::<Vec<_>>();
     assert!(legal.contains(&Card::new(Rank::Ace, Suit::Spades)));
 
@@ -61,7 +91,10 @@ fn hard_moon_relief_applies_when_considering() {
         .find(|(c, _b, _p, _t)| *c == Card::new(Rank::Ace, Suit::Spades))
         .expect("AS candidate present");
     let (_card, _base, parts, _total) = as_entry;
-    assert!(parts.moon_relief > 0, "expected positive moon_relief for Considering when winning penalties");
+    assert!(
+        parts.moon_relief > 0,
+        "expected positive moon_relief for Considering when winning penalties"
+    );
 
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");
@@ -70,4 +103,3 @@ fn hard_moon_relief_applies_when_considering() {
         std::env::remove_var("MDH_HARD_MOON_RELIEF_PERPEN");
     }
 }
-

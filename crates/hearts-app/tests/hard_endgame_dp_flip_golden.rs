@@ -11,10 +11,22 @@ use hearts_core::model::suit::Suit;
 fn build_endgame_flip(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     // ≤3 cards per hand; hearts broken. East leads. After A♣ wins, only hearts remain so we lead hearts next.
     // Configure other hands so North (leader) captures the heart trick with K♥.
-    let east = vec![Card::new(Rank::Ace, Suit::Clubs), Card::new(Rank::Two, Suit::Hearts)];
-    let north = vec![Card::new(Rank::King, Suit::Hearts), Card::new(Rank::Three, Suit::Clubs)];
-    let south = vec![Card::new(Rank::Five, Suit::Hearts), Card::new(Rank::Jack, Suit::Clubs)];
-    let west = vec![Card::new(Rank::Four, Suit::Hearts), Card::new(Rank::Queen, Suit::Clubs)];
+    let east = vec![
+        Card::new(Rank::Ace, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Hearts),
+    ];
+    let north = vec![
+        Card::new(Rank::King, Suit::Hearts),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let south = vec![
+        Card::new(Rank::Five, Suit::Hearts),
+        Card::new(Rank::Jack, Suit::Clubs),
+    ];
+    let west = vec![
+        Card::new(Rank::Four, Suit::Hearts),
+        Card::new(Rank::Queen, Suit::Clubs),
+    ];
 
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north);
@@ -28,7 +40,10 @@ fn build_endgame_flip(seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     let _ = prev.play(seat, Card::new(Rank::Nine, Suit::Diamonds));
     let _ = prev.play(seat.next(), Card::new(Rank::Ten, Suit::Diamonds));
     let _ = prev.play(seat.next().next(), Card::new(Rank::Jack, Suit::Diamonds));
-    let _ = prev.play(seat.next().next().next(), Card::new(Rank::Queen, Suit::Diamonds));
+    let _ = prev.play(
+        seat.next().next().next(),
+        Card::new(Rank::Queen, Suit::Diamonds),
+    );
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -99,7 +114,10 @@ fn hard_endgame_dp_strict_flip_golden() {
     }
     let without_dp = PlayPlannerHard::choose(&legal, &ctx).expect("choice without DP");
 
-    assert_ne!(with_dp, without_dp, "expected DP to flip under test weights");
+    assert_ne!(
+        with_dp, without_dp,
+        "expected DP to flip under test weights"
+    );
 
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");

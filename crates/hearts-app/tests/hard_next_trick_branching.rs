@@ -61,9 +61,15 @@ fn hard_next_trick_probe_second_opponent_branching_influences_choice() {
     let our_seat = PlayerPosition::South;
     let hands = [
         // North: void in diamonds; holds QS to dump on diamond lead next trick
-        vec![Card::new(Rank::Queen, Suit::Spades), Card::new(Rank::Seven, Suit::Clubs)],
+        vec![
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Seven, Suit::Clubs),
+        ],
         // East (leader target): has KD to win diamond lead, plus some clubs
-        vec![Card::new(Rank::King, Suit::Diamonds), Card::new(Rank::Six, Suit::Clubs)],
+        vec![
+            Card::new(Rank::King, Suit::Diamonds),
+            Card::new(Rank::Six, Suit::Clubs),
+        ],
         // South (our seat): AC to win now; TD (losing now); 3D to lead next; plus a small spade
         vec![
             Card::new(Rank::Ace, Suit::Clubs),
@@ -72,7 +78,10 @@ fn hard_next_trick_probe_second_opponent_branching_influences_choice() {
             Card::new(Rank::Two, Suit::Spades),
         ],
         // West: can follow clubs now and diamonds next with low cards
-        vec![Card::new(Rank::Five, Suit::Clubs), Card::new(Rank::Four, Suit::Diamonds)],
+        vec![
+            Card::new(Rank::Five, Suit::Clubs),
+            Card::new(Rank::Four, Suit::Diamonds),
+        ],
     ];
     let round = build_round(starting, hands, true);
     // To ensure AC wins current trick, make others able to follow clubs with lower than Ace.
@@ -116,9 +125,18 @@ fn hard_next_trick_probe_second_opponent_branching_influences_choice() {
     let (_ac_base, ac_cont, _ac_total) = ac.expect("AC present");
     let (_td_base, td_cont, _td_total) = td.expect("TD present");
     // Continuation for AC should be positive due to next-trick probe feeding QS to leader
-    assert!(ac_cont > 0, "AC continuation should be positive, got {}", ac_cont);
+    assert!(
+        ac_cont > 0,
+        "AC continuation should be positive, got {}",
+        ac_cont
+    );
     // TD should have zero or smaller continuation (no next-trick lead)
-    assert!(ac_cont >= td_cont, "AC cont {} should be >= TD cont {}", ac_cont, td_cont);
+    assert!(
+        ac_cont >= td_cont,
+        "AC cont {} should be >= TD cont {}",
+        ac_cont,
+        td_cont
+    );
     // Note: total may still be lower due to base heuristic penalizing current-trick capture.
     // We only assert the continuation signal is present and stronger for AC.
 }

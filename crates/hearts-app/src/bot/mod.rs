@@ -1,8 +1,10 @@
+mod adviser;
 mod pass;
 mod play;
 pub mod search;
 mod tracker;
 
+pub use adviser::play_bias;
 pub use pass::PassPlanner;
 pub use play::{PlayPlanner, debug_weights_string};
 pub use search::{PlayPlannerHard, debug_hard_weights_string};
@@ -65,6 +67,8 @@ pub struct ScoreSnapshot {
     pub max_score: u32,
     pub min_player: PlayerPosition,
     pub max_player: PlayerPosition,
+    pub leader_gap: u32,
+    pub leader_unique: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -171,6 +175,8 @@ pub(crate) fn snapshot_scores(scores: &ScoreBoard) -> ScoreSnapshot {
     let mut max_score = u32::MIN;
     let mut min_player = PlayerPosition::North;
     let mut max_player = PlayerPosition::North;
+    let mut second_highest = 0u32;
+    let mut leader_unique = true;
 
     for seat in PlayerPosition::LOOP.iter().copied() {
         let value = scores.score(seat);
@@ -179,8 +185,15 @@ pub(crate) fn snapshot_scores(scores: &ScoreBoard) -> ScoreSnapshot {
             min_player = seat;
         }
         if value > max_score {
+            second_highest = max_score;
             max_score = value;
             max_player = seat;
+            leader_unique = true;
+        } else if value == max_score {
+            leader_unique = false;
+            second_highest = max_score;
+        } else if value > second_highest {
+            second_highest = value;
         }
     }
 
@@ -189,6 +202,12 @@ pub(crate) fn snapshot_scores(scores: &ScoreBoard) -> ScoreSnapshot {
         max_score,
         min_player,
         max_player,
+        leader_gap: if leader_unique {
+            max_score.saturating_sub(second_highest)
+        } else {
+            0
+        },
+        leader_unique,
     }
 }
 

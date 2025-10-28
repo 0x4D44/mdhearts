@@ -1,0 +1,28 @@
+{
+  "hands": {
+    "E": [
+      "10S",
+      "QH",
+      "KH"
+    ],
+    "N": [
+      "10D",
+      "KD",
+      "AH"
+    ],
+    "S": [
+      "3D",
+      "7D",
+      "8D"
+    ],
+    "W": [
+      "JD",
+      "QD",
+      "AD"
+    ]
+  },
+  "hearts_broken": true,
+  "leader": "North",
+  "seat": "West",
+  "seed": 2263
+}

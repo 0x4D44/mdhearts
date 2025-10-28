@@ -8,9 +8,15 @@ use hearts_core::model::round::{RoundPhase, RoundState};
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
 
-fn build_midtrick_follow_suit(starting: PlayerPosition, plays: &[(PlayerPosition, Card)], hands: [Vec<Card>; 4]) -> RoundState {
+fn build_midtrick_follow_suit(
+    starting: PlayerPosition,
+    plays: &[(PlayerPosition, Card)],
+    hands: [Vec<Card>; 4],
+) -> RoundState {
     let mut hs = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
-    for (i, cards) in hands.into_iter().enumerate() { hs[i] = Hand::with_cards(cards); }
+    for (i, cards) in hands.into_iter().enumerate() {
+        hs[i] = Hand::with_cards(cards);
+    }
     // Seed a previous trick to avoid first-trick rules
     let mut prev = hearts_core::model::trick::Trick::new(starting);
     let mut seat = starting;
@@ -19,10 +25,23 @@ fn build_midtrick_follow_suit(starting: PlayerPosition, plays: &[(PlayerPosition
         Card::new(Rank::Three, Suit::Clubs),
         Card::new(Rank::Four, Suit::Clubs),
         Card::new(Rank::Five, Suit::Clubs),
-    ] { prev.play(seat, c).unwrap(); seat = seat.next(); }
+    ] {
+        prev.play(seat, c).unwrap();
+        seat = seat.next();
+    }
     let mut current = hearts_core::model::trick::Trick::new(starting);
-    for &(pos, card) in plays { current.play(pos, card).unwrap(); }
-    RoundState::from_hands_with_state(hs, starting, PassingDirection::Hold, RoundPhase::Playing, current, vec![prev], true)
+    for &(pos, card) in plays {
+        current.play(pos, card).unwrap();
+    }
+    RoundState::from_hands_with_state(
+        hs,
+        starting,
+        PassingDirection::Hold,
+        RoundPhase::Playing,
+        current,
+        vec![prev],
+        true,
+    )
 }
 
 fn scores_with_self(pos: PlayerPosition, val: u32) -> ScoreBoard {
@@ -49,17 +68,42 @@ fn hard_endgame_avoids_self_capture_when_near_100() {
     let north_hand = vec![Card::new(Rank::Two, Suit::Spades)];
     let east_hand = vec![Card::new(Rank::Four, Suit::Spades)];
     let west_hand = vec![Card::new(Rank::Five, Suit::Spades)];
-    let round = build_midtrick_follow_suit(starting, &plays, [north_hand, east_hand, south_hand.clone(), west_hand]);
+    let round = build_midtrick_follow_suit(
+        starting,
+        &plays,
+        [north_hand, east_hand, south_hand.clone(), west_hand],
+    );
     let our_seat = PlayerPosition::South;
     let scores = scores_with_self(our_seat, 92);
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
-    let ctx = BotContext::new(our_seat, &round, &scores, PassingDirection::Hold, &tracker, BotDifficulty::FutureHard);
+    let ctx = BotContext::new(
+        our_seat,
+        &round,
+        &scores,
+        PassingDirection::Hold,
+        &tracker,
+        BotDifficulty::FutureHard,
+    );
     let legal = {
-        round.hand(our_seat).iter().copied().filter(|c| { let mut p = round.clone(); p.play_card(our_seat, *c).is_ok() }).collect::<Vec<_>>()
+        round
+            .hand(our_seat)
+            .iter()
+            .copied()
+            .filter(|c| {
+                let mut p = round.clone();
+                p.play_card(our_seat, *c).is_ok()
+            })
+            .collect::<Vec<_>>()
     };
-    assert!(legal.contains(&Card::new(Rank::Eight, Suit::Hearts)) && legal.contains(&Card::new(Rank::Ten, Suit::Hearts)));
+    assert!(
+        legal.contains(&Card::new(Rank::Eight, Suit::Hearts))
+            && legal.contains(&Card::new(Rank::Ten, Suit::Hearts))
+    );
     let choice = PlayPlannerHard::choose(&legal, &ctx).unwrap();
-    assert_eq!(choice, Card::new(Rank::Eight, Suit::Hearts), "Hard should avoid capturing near 100");
+    assert_eq!(
+        choice,
+        Card::new(Rank::Eight, Suit::Hearts),
+        "Hard should avoid capturing near 100"
+    );
 }
-

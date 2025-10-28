@@ -11,23 +11,44 @@ use hearts_core::model::suit::Suit;
 fn build_small_endgame(_seat: PlayerPosition) -> (RoundState, ScoreBoard) {
     // <=3 cards per hand, hearts broken
     let leader = PlayerPosition::North;
-    let north_cards = vec![Card::new(Rank::Two, Suit::Clubs), Card::new(Rank::Three, Suit::Clubs)];
-    let east_cards = vec![Card::new(Rank::Two, Suit::Spades), Card::new(Rank::Three, Suit::Spades)];
-    let south_cards = vec![Card::new(Rank::Two, Suit::Hearts), Card::new(Rank::Three, Suit::Hearts)];
-    let west_cards = vec![Card::new(Rank::Two, Suit::Diamonds), Card::new(Rank::Three, Suit::Diamonds)];
+    let north_cards = vec![
+        Card::new(Rank::Two, Suit::Clubs),
+        Card::new(Rank::Three, Suit::Clubs),
+    ];
+    let east_cards = vec![
+        Card::new(Rank::Two, Suit::Spades),
+        Card::new(Rank::Three, Suit::Spades),
+    ];
+    let south_cards = vec![
+        Card::new(Rank::Two, Suit::Hearts),
+        Card::new(Rank::Three, Suit::Hearts),
+    ];
+    let west_cards = vec![
+        Card::new(Rank::Two, Suit::Diamonds),
+        Card::new(Rank::Three, Suit::Diamonds),
+    ];
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[PlayerPosition::North.index()] = Hand::with_cards(north_cards);
     hands[PlayerPosition::East.index()] = Hand::with_cards(east_cards);
     hands[PlayerPosition::South.index()] = Hand::with_cards(south_cards);
     hands[PlayerPosition::West.index()] = Hand::with_cards(west_cards);
     let mut current = hearts_core::model::trick::Trick::new(leader);
-    current.play(leader, Card::new(Rank::Four, Suit::Clubs)).unwrap();
+    current
+        .play(leader, Card::new(Rank::Four, Suit::Clubs))
+        .unwrap();
     // Seed previous trick to break hearts
     let mut prev = hearts_core::model::trick::Trick::new(leader);
-    prev.play(leader, Card::new(Rank::Five, Suit::Hearts)).unwrap();
-    prev.play(leader.next(), Card::new(Rank::Six, Suit::Hearts)).unwrap();
-    prev.play(leader.next().next(), Card::new(Rank::Seven, Suit::Hearts)).unwrap();
-    prev.play(leader.next().next().next(), Card::new(Rank::Eight, Suit::Hearts)).unwrap();
+    prev.play(leader, Card::new(Rank::Five, Suit::Hearts))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::Six, Suit::Hearts))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Seven, Suit::Hearts))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Eight, Suit::Hearts),
+    )
+    .unwrap();
     let round = RoundState::from_hands_with_state(
         hands,
         leader,
@@ -84,4 +105,3 @@ fn hard_endgame_dp_smoke() {
         std::env::remove_var("MDH_HARD_ENDGAME_MAX_CARDS");
     }
 }
-

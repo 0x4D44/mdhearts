@@ -13,7 +13,9 @@ fn autoplay_to_small_endgame(controller: &mut GameController, seat: PlayerPositi
     }
     let mut guard = 0u32;
     loop {
-        if guard > 500 { break; }
+        if guard > 500 {
+            break;
+        }
         guard += 1;
         let to_play = controller.expected_to_play();
         let round = controller.bot_context(seat).round;
@@ -24,9 +26,14 @@ fn autoplay_to_small_endgame(controller: &mut GameController, seat: PlayerPositi
             PlayerPosition::South,
             PlayerPosition::West,
         ] {
-            if round.hand(s).len() > 3 { ok_small = false; break; }
+            if round.hand(s).len() > 3 {
+                ok_small = false;
+                break;
+            }
         }
-        if ok_small && to_play == seat { break; }
+        if ok_small && to_play == seat {
+            break;
+        }
         let _ = controller.autoplay_one(to_play.next());
     }
 }
@@ -55,10 +62,14 @@ fn hard_endgame_dp_flip_from_seed_1983_west() {
         std::env::set_var("MDH_HARD_CTRL_HANDOFF_PEN", "150");
     }
     // Toggle DP OFF
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off = PlayPlannerHard::choose(&legal, &ctx);
     // Toggle DP ON
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on = PlayPlannerHard::choose(&legal, &ctx);
     // Require difference; if this proves flaky across toolchains, we will gate with small endgame-only boosts.
     assert_ne!(off, on, "expected DP to flip top choice for seed 1983 west");
@@ -95,10 +106,14 @@ fn hard_endgame_dp_flip_from_seed_2120_west() {
     assert!(!legal.is_empty());
     let ctx = controller.bot_context(seat);
     // Toggle DP OFF
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off = PlayPlannerHard::choose(&legal, &ctx);
     // Toggle DP ON
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on = PlayPlannerHard::choose(&legal, &ctx);
     assert_ne!(off, on, "expected DP to flip top choice for seed 2120 west");
     // Cleanup env
@@ -133,9 +148,13 @@ fn hard_endgame_dp_flip_from_seed_2269_east() {
     let legal = controller.legal_moves(seat);
     assert!(!legal.is_empty());
     let ctx = controller.bot_context(seat);
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off = PlayPlannerHard::choose(&legal, &ctx);
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on = PlayPlannerHard::choose(&legal, &ctx);
     assert_ne!(off, on, "expected DP to flip top choice for seed 2269 east");
     unsafe {
@@ -169,11 +188,18 @@ fn hard_endgame_dp_flip_from_seed_1052_south() {
     let legal = controller.legal_moves(seat);
     assert!(!legal.is_empty());
     let ctx = controller.bot_context(seat);
-    unsafe { std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE"); }
+    unsafe {
+        std::env::remove_var("MDH_HARD_ENDGAME_DP_ENABLE");
+    }
     let off = PlayPlannerHard::choose(&legal, &ctx);
-    unsafe { std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1"); }
+    unsafe {
+        std::env::set_var("MDH_HARD_ENDGAME_DP_ENABLE", "1");
+    }
     let on = PlayPlannerHard::choose(&legal, &ctx);
-    assert_ne!(off, on, "expected DP to flip top choice for seed 1052 south");
+    assert_ne!(
+        off, on,
+        "expected DP to flip top choice for seed 1052 south"
+    );
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");
         std::env::remove_var("MDH_HARD_TEST_STEPS");

@@ -1,0 +1,316 @@
+{
+  "version": 2,
+  "seed": 1373,
+  "seat": "North",
+  "round_number": 1,
+  "starting_player": "South",
+  "passing_direction": "Left",
+  "phase": "Playing",
+  "hearts_broken": true,
+  "leader": "North",
+  "hands": {
+    "E": [
+      "9D",
+      "JD",
+      "AD"
+    ],
+    "N": [
+      "KD",
+      "6S",
+      "AS"
+    ],
+    "S": [
+      "10C",
+      "JC",
+      "AC"
+    ],
+    "W": [
+      "QD",
+      "8H",
+      "KH"
+    ]
+  },
+  "current_trick": {
+    "leader": "North",
+    "plays": [],
+    "penalties": 0,
+    "is_complete": false
+  },
+  "completed_tricks": [
+    {
+      "leader": "South",
+      "plays": [
+        {
+          "seat": "South",
+          "card": "2C"
+        },
+        {
+          "seat": "West",
+          "card": "6C"
+        },
+        {
+          "seat": "North",
+          "card": "2D"
+        },
+        {
+          "seat": "East",
+          "card": "3C"
+        }
+      ],
+      "penalties": 0,
+      "is_complete": true
+    },
+    {
+      "leader": "West",
+      "plays": [
+        {
+          "seat": "West",
+          "card": "3D"
+        },
+        {
+          "seat": "North",
+          "card": "5D"
+        },
+        {
+          "seat": "East",
+          "card": "4D"
+        },
+        {
+          "seat": "South",
+          "card": "JH"
+        }
+      ],
+      "penalties": 1,
+      "is_complete": true
+    },
+    {
+      "leader": "North",
+      "plays": [
+        {
+          "seat": "North",
+          "card": "3H"
+        },
+        {
+          "seat": "East",
+          "card": "6H"
+        },
+        {
+          "seat": "South",
+          "card": "AH"
+        },
+        {
+          "seat": "West",
+          "card": "2H"
+        }
+      ],
+      "penalties": 4,
+      "is_complete": true
+    },
+    {
+      "leader": "South",
+      "plays": [
+        {
+          "seat": "South",
+          "card": "4C"
+        },
+        {
+          "seat": "West",
+          "card": "QC"
+        },
+        {
+          "seat": "North",
+          "card": "5H"
+        },
+        {
+          "seat": "East",
+          "card": "5C"
+        }
+      ],
+      "penalties": 1,
+      "is_complete": true
+    },
+    {
+      "leader": "West",
+      "plays": [
+        {
+          "seat": "West",
+          "card": "4H"
+        },
+        {
+          "seat": "North",
+          "card": "10H"
+        },
+        {
+          "seat": "East",
+          "card": "9H"
+        },
+        {
+          "seat": "South",
+          "card": "7C"
+        }
+      ],
+      "penalties": 3,
+      "is_complete": true
+    },
+    {
+      "leader": "North",
+      "plays": [
+        {
+          "seat": "North",
+          "card": "2S"
+        },
+        {
+          "seat": "East",
+          "card": "4S"
+        },
+        {
+          "seat": "South",
+          "card": "7S"
+        },
+        {
+          "seat": "West",
+          "card": "9S"
+        }
+      ],
+      "penalties": 0,
+      "is_complete": true
+    },
+    {
+      "leader": "West",
+      "plays": [
+        {
+          "seat": "West",
+          "card": "QS"
+        },
+        {
+          "seat": "North",
+          "card": "3S"
+        },
+        {
+          "seat": "East",
+          "card": "KS"
+        },
+        {
+          "seat": "South",
+          "card": "8S"
+        }
+      ],
+      "penalties": 13,
+      "is_complete": true
+    },
+    {
+      "leader": "East",
+      "plays": [
+        {
+          "seat": "East",
+          "card": "6D"
+        },
+        {
+          "seat": "South",
+          "card": "10S"
+        },
+        {
+          "seat": "West",
+          "card": "7D"
+        },
+        {
+          "seat": "North",
+          "card": "10D"
+        }
+      ],
+      "penalties": 0,
+      "is_complete": true
+    },
+    {
+      "leader": "North",
+      "plays": [
+        {
+          "seat": "North",
+          "card": "5S"
+        },
+        {
+          "seat": "East",
+          "card": "KC"
+        },
+        {
+          "seat": "South",
+          "card": "8C"
+        },
+        {
+          "seat": "West",
+          "card": "JS"
+        }
+      ],
+      "penalties": 0,
+      "is_complete": true
+    },
+    {
+      "leader": "West",
+      "plays": [
+        {
+          "seat": "West",
+          "card": "7H"
+        },
+        {
+          "seat": "North",
+          "card": "QH"
+        },
+        {
+          "seat": "East",
+          "card": "8D"
+        },
+        {
+          "seat": "South",
+          "card": "9C"
+        }
+      ],
+      "penalties": 2,
+      "is_complete": true
+    }
+  ],
+  "scores": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "penalties": [
+    6,
+    13,
+    4,
+    1
+  ],
+  "next_to_play": "North",
+  "moon_states": {
+    "E": "Inactive",
+    "N": "Inactive",
+    "S": "Inactive",
+    "W": "Inactive"
+  },
+  "voids": {
+    "E": [
+      false,
+      false,
+      true,
+      true
+    ],
+    "N": [
+      true,
+      false,
+      false,
+      false
+    ],
+    "S": [
+      false,
+      true,
+      true,
+      true
+    ],
+    "W": [
+      false,
+      false,
+      false,
+      false
+    ]
+  }
+}

@@ -36,15 +36,23 @@ fn build_round_not_first_trick(starting: PlayerPosition, hands_vec: [Vec<Card>; 
     )
 }
 
-fn empty_scores() -> ScoreBoard { ScoreBoard::new() }
+fn empty_scores() -> ScoreBoard {
+    ScoreBoard::new()
+}
 
 #[test]
 fn hard_ctrl_handoff_penalty_reduces_cont_when_leading_void_suit() {
     // West leads; has low clubs and low diamonds. East can win clubs; South can win diamonds.
     // Mark North void in clubs to trigger ctrl_handoff penalty when we lose a clubs lead.
     let starting = PlayerPosition::West;
-    let west = vec![Card::new(Rank::Two, Suit::Clubs), Card::new(Rank::Two, Suit::Diamonds)];
-    let north = vec![Card::new(Rank::Three, Suit::Diamonds), Card::new(Rank::Four, Suit::Diamonds)];
+    let west = vec![
+        Card::new(Rank::Two, Suit::Clubs),
+        Card::new(Rank::Two, Suit::Diamonds),
+    ];
+    let north = vec![
+        Card::new(Rank::Three, Suit::Diamonds),
+        Card::new(Rank::Four, Suit::Diamonds),
+    ];
     let east = vec![Card::new(Rank::Ace, Suit::Clubs)];
     let south = vec![Card::new(Rank::Ace, Suit::Diamonds)];
     let round = build_round_not_first_trick(starting, [north, east, south, west.clone()]);
@@ -77,8 +85,12 @@ fn hard_ctrl_handoff_penalty_reduces_cont_when_leading_void_suit() {
     let mut cont_clubs = None;
     let mut cont_diams = None;
     for (c, _b, cont, _t) in verbose {
-        if c == Card::new(Rank::Two, Suit::Clubs) { cont_clubs = Some(cont); }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { cont_diams = Some(cont); }
+        if c == Card::new(Rank::Two, Suit::Clubs) {
+            cont_clubs = Some(cont);
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            cont_diams = Some(cont);
+        }
     }
     let cont_clubs = cont_clubs.expect("2C present");
     let cont_diams = cont_diams.expect("2D present");

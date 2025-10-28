@@ -39,16 +39,29 @@ fn build_last_to_play_west() -> (RoundState, ScoreBoard) {
 
     // Current trick with small penalties (make hearts broken and include Q♠ earlier in round via prev trick)
     let mut current = hearts_core::model::trick::Trick::new(leader);
-    current.play(PlayerPosition::North, Card::new(Rank::Ten, Suit::Diamonds)).unwrap();
-    current.play(PlayerPosition::East, Card::new(Rank::King, Suit::Diamonds)).unwrap();
-    current.play(PlayerPosition::South, Card::new(Rank::Four, Suit::Diamonds)).unwrap();
+    current
+        .play(PlayerPosition::North, Card::new(Rank::Ten, Suit::Diamonds))
+        .unwrap();
+    current
+        .play(PlayerPosition::East, Card::new(Rank::King, Suit::Diamonds))
+        .unwrap();
+    current
+        .play(PlayerPosition::South, Card::new(Rank::Four, Suit::Diamonds))
+        .unwrap();
 
     // Seed prev trick to break hearts
     let mut prev = hearts_core::model::trick::Trick::new(leader);
-    prev.play(leader, Card::new(Rank::Two, Suit::Clubs)).unwrap();
-    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs)).unwrap();
-    prev.play(leader.next().next().next(), Card::new(Rank::Five, Suit::Clubs)).unwrap();
+    prev.play(leader, Card::new(Rank::Two, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::Three, Suit::Clubs))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Four, Suit::Clubs))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Five, Suit::Clubs),
+    )
+    .unwrap();
 
     let round = RoundState::from_hands_with_state(
         hands,
@@ -99,18 +112,53 @@ fn hard_widetier_flip_constructed() {
 
     // Verify base favors ducking (2♦) over capture (A♦)
     let base_only = hearts_app::bot::PlayPlanner::explain_candidates(&legal, &ctx);
-    let mut base_a = 0; let mut base_2 = 0;
-    for (c, b) in base_only.iter().copied() { if c == Card::new(Rank::Ace, Suit::Diamonds) { base_a = b; } if c == Card::new(Rank::Two, Suit::Diamonds) { base_2 = b; } }
-    assert!(base_2 >= base_a, "Expected base to prefer or tie 2♦ over A♦: base2={} baseA={}", base_2, base_a);
+    let mut base_a = 0;
+    let mut base_2 = 0;
+    for (c, b) in base_only.iter().copied() {
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            base_a = b;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            base_2 = b;
+        }
+    }
+    assert!(
+        base_2 >= base_a,
+        "Expected base to prefer or tie 2♦ over A♦: base2={} baseA={}",
+        base_2,
+        base_a
+    );
 
     // Hard continuation with Wide-like settings should favor A♦ via continuation contribution (even if not flipping total)
     let verbose = PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
-    let mut base_a = 0; let mut base_2_b = 0; let mut cont_a = 0; let mut cont_2 = 0; let mut total_a = 0; let mut total_2 = 0;
+    let mut base_a = 0;
+    let mut base_2_b = 0;
+    let mut cont_a = 0;
+    let mut cont_2 = 0;
+    let mut total_a = 0;
+    let mut total_2 = 0;
     for (c, b, cont, t) in verbose.iter().copied() {
-        if c == Card::new(Rank::Ace, Suit::Diamonds) { base_a = b; cont_a = cont; total_a = t; }
-        if c == Card::new(Rank::Two, Suit::Diamonds) { base_2_b = b; cont_2 = cont; total_2 = t; }
+        if c == Card::new(Rank::Ace, Suit::Diamonds) {
+            base_a = b;
+            cont_a = cont;
+            total_a = t;
+        }
+        if c == Card::new(Rank::Two, Suit::Diamonds) {
+            base_2_b = b;
+            cont_2 = cont;
+            total_2 = t;
+        }
     }
-    assert!(cont_a > cont_2, "Expected continuation to favor A♦: contA={} cont2={} (totals A={} 2={} baseA={} base2={})", cont_a, cont_2, total_a, total_2, base_a, base_2_b);
+    assert!(
+        cont_a > cont_2,
+        "Expected continuation to favor A♦: contA={} cont2={} (totals A={} 2={} baseA={} base2={})",
+        cont_a,
+        cont_2,
+        total_a,
+        total_2,
+        base_a,
+        base_2_b
+    );
 
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");
