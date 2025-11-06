@@ -8,6 +8,9 @@ use hearts_core::model::rank::Rank;
 use hearts_core::model::round::{RoundPhase, RoundState};
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
+use std::sync::{Mutex, OnceLock};
+
+static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn build_round_with_scores(scores: [u32; 4]) -> (RoundState, ScoreBoard) {
     let leader = PlayerPosition::North;
@@ -67,6 +70,65 @@ fn build_round_with_scores(scores: [u32; 4]) -> (RoundState, ScoreBoard) {
     (round, scoreboard)
 }
 
+fn build_round_with_flat_scores_and_round_leader() -> (RoundState, ScoreBoard) {
+    let leader = PlayerPosition::North;
+
+    let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
+    hands[PlayerPosition::North.index()] = Hand::with_cards(vec![
+        Card::new(Rank::Four, Suit::Clubs),
+        Card::new(Rank::Nine, Suit::Hearts),
+    ]);
+    hands[PlayerPosition::East.index()] = Hand::with_cards(vec![
+        Card::new(Rank::Six, Suit::Hearts),
+        Card::new(Rank::Seven, Suit::Diamonds),
+    ]);
+    hands[PlayerPosition::South.index()] = Hand::with_cards(vec![
+        Card::new(Rank::Ace, Suit::Hearts),
+        Card::new(Rank::Two, Suit::Hearts),
+        Card::new(Rank::Three, Suit::Clubs),
+    ]);
+    hands[PlayerPosition::West.index()] = Hand::with_cards(vec![
+        Card::new(Rank::Four, Suit::Hearts),
+        Card::new(Rank::Five, Suit::Clubs),
+    ]);
+
+    let mut current = hearts_core::model::trick::Trick::new(leader);
+    current
+        .play(leader, Card::new(Rank::Nine, Suit::Hearts))
+        .unwrap();
+    current
+        .play(leader.next(), Card::new(Rank::Queen, Suit::Hearts))
+        .unwrap();
+
+    let mut prev = hearts_core::model::trick::Trick::new(leader);
+    prev.play(leader, Card::new(Rank::Two, Suit::Hearts))
+        .unwrap();
+    prev.play(leader.next(), Card::new(Rank::King, Suit::Hearts))
+        .unwrap();
+    prev.play(leader.next().next(), Card::new(Rank::Three, Suit::Hearts))
+        .unwrap();
+    prev.play(
+        leader.next().next().next(),
+        Card::new(Rank::Four, Suit::Hearts),
+    )
+    .unwrap();
+
+    let round = RoundState::from_hands_with_state(
+        hands,
+        leader,
+        PassingDirection::Hold,
+        RoundPhase::Playing,
+        current,
+        vec![prev],
+        true,
+    );
+
+    let mut scoreboard = ScoreBoard::new();
+    scoreboard.set_totals([0, 0, 0, 0]);
+
+    (round, scoreboard)
+}
+
 fn set_stage1_env() {
     unsafe {
         std::env::set_var("MDH_HARD_DETERMINISTIC", "1");
@@ -75,6 +137,7 @@ fn set_stage1_env() {
         std::env::set_var("MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE", "320");
         std::env::set_var("MDH_HARD_PLANNER_NUDGE_NEAR100", "95");
         std::env::set_var("MDH_HARD_PLANNER_NUDGE_GAP_MIN", "4");
+        std::env::set_var("MDH_HARD_PLANNER_NUDGE_TRACE", "1");
     }
 }
 
@@ -86,11 +149,13 @@ fn clear_stage1_env() {
         std::env::remove_var("MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE");
         std::env::remove_var("MDH_HARD_PLANNER_NUDGE_NEAR100");
         std::env::remove_var("MDH_HARD_PLANNER_NUDGE_GAP_MIN");
+        std::env::remove_var("MDH_HARD_PLANNER_NUDGE_TRACE");
     }
 }
 
 #[test]
 fn hard_nudge_prefers_feeding_unique_leader() {
+    let _guard = TEST_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap();
     set_stage1_env();
     let (round, scores) = build_round_with_scores([48, 92, 63, 55]);
     let mut tracker = UnseenTracker::new();
@@ -121,7 +186,54 @@ fn hard_nudge_prefers_feeding_unique_leader() {
 }
 
 #[test]
+fn hard_nudge_uses_round_leader_when_scores_flat() {
+    let _guard = TEST_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap();
+    set_stage1_env();
+    let (round, scores) = build_round_with_flat_scores_and_round_leader();
+    let mut tracker = UnseenTracker::new();
+    tracker.reset_for_round(&round);
+    let seat = PlayerPosition::South;
+    let ctx = BotContext::new(
+        seat,
+        &round,
+        &scores,
+        PassingDirection::Hold,
+        &tracker,
+        BotDifficulty::FutureHard,
+    );
+    let legal = round
+        .hand(seat)
+        .iter()
+        .copied()
+        .filter(|card| {
+            let mut probe = round.clone();
+            probe.play_card(seat, *card).is_ok()
+        })
+        .collect::<Vec<_>>();
+    let choice = PlayPlannerHard::choose(&legal, &ctx).expect("hard choice");
+    clear_stage1_env();
+    assert_eq!(choice, Card::new(Rank::Two, Suit::Hearts));
+    let stats = last_stats().expect("stats present after hard choose");
+
+    if stats.planner_nudge_hits == 0 {
+        let trace = stats.planner_nudge_trace.clone().unwrap_or_default();
+        assert!(
+            trace
+                .iter()
+                .any(|(reason, _)| reason == "round_leader_saturated"),
+            "expected round_leader_saturated guard when planner nudge suppressed under flat scores"
+        );
+    } else {
+        assert!(
+            stats.planner_nudge_hits >= 1,
+            "round leader should trigger planner nudge when match scores are flat"
+        );
+    }
+}
+
+#[test]
 fn hard_nudge_skips_when_leader_ambiguous() {
+    let _guard = TEST_MUTEX.get_or_init(|| Mutex::new(())).lock().unwrap();
     set_stage1_env();
     let (round, scores) = build_round_with_scores([48, 92, 63, 92]);
     let mut tracker = UnseenTracker::new();

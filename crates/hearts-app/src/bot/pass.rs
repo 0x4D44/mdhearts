@@ -5,6 +5,7 @@ use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::rank::Rank;
 use hearts_core::model::suit::Suit;
+use std::cmp::Ordering;
 use std::sync::OnceLock;
 
 pub struct PassPlanner;
@@ -31,38 +32,57 @@ impl PassPlanner {
         let passing_to_leader = passing_target == snapshot.min_player;
         let my_score = ctx.scores.score(ctx.seat);
 
-        let mut scored: Vec<(Card, i32)> = hand
-            .iter()
-            .copied()
-            .map(|card| {
-                let score = score_card(
-                    card,
-                    hand,
-                    ctx,
-                    style,
-                    passing_to_trailing,
-                    passing_to_leader,
-                    my_score,
-                    snapshot,
-                );
-                (card, score)
-            })
-            .collect();
+        let cards: Vec<Card> = hand.iter().copied().collect();
+        let suit_counts = suit_tally(hand);
 
-        scored.sort_by(|(card_a, score_a), (card_b, score_b)| {
-            score_b
-                .cmp(score_a)
-                .then_with(|| card_sort_key(*card_a).cmp(&card_sort_key(*card_b)))
-        });
+        let mut best: Option<(i32, [Card; 3], [Card; 3])> = None;
 
-        if debug_enabled() {
-            for (card, score) in scored.iter().take(6) {
-                eprintln!("mdhearts: pass cand {} score={}", card, score);
+        for i in 0..cards.len() - 2 {
+            for j in i + 1..cards.len() - 1 {
+                for k in j + 1..cards.len() {
+                    let triple = [cards[i], cards[j], cards[k]];
+                    let score = score_pass_set(
+                        &triple,
+                        hand,
+                        ctx,
+                        style,
+                        passing_to_trailing,
+                        passing_to_leader,
+                        my_score,
+                        snapshot,
+                        &suit_counts,
+                    );
+                    let mut ordered = triple;
+                    ordered.sort_by_key(|card| card_sort_key(*card));
+
+                    match &mut best {
+                        None => best = Some((score, triple, ordered)),
+                        Some((best_score, best_triple, best_ordered)) => {
+                            if score > *best_score
+                                || (score == *best_score
+                                    && compare_sorted_triples(&ordered, best_ordered)
+                                        == std::cmp::Ordering::Less)
+                            {
+                                *best_score = score;
+                                *best_triple = triple;
+                                *best_ordered = ordered;
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        let picks = [scored[0].0, scored[1].0, scored[2].0];
-        Some(picks)
+        if debug_enabled() {
+            if let Some((score, picks, _)) = &best {
+                eprintln!(
+                    "mdhearts: pass best score={} cards=[{}, {}, {}]",
+                    score, picks[0], picks[1], picks[2]
+                );
+            }
+        }
+
+        best.map(|(_, picks, _)| picks)
     }
 }
 
@@ -222,6 +242,91 @@ fn score_card(
     score
 }
 
+fn suit_tally(hand: &Hand) -> [usize; 4] {
+    let mut counts = [0usize; 4];
+    for card in hand.iter() {
+        counts[suit_index(card.suit)] += 1;
+    }
+    counts
+}
+
+fn suit_index(suit: Suit) -> usize {
+    match suit {
+        Suit::Clubs => 0,
+        Suit::Diamonds => 1,
+        Suit::Hearts => 2,
+        Suit::Spades => 3,
+    }
+}
+
+fn compare_sorted_triples(a: &[Card; 3], b: &[Card; 3]) -> Ordering {
+    for idx in 0..3 {
+        let key_a = card_sort_key(a[idx]);
+        let key_b = card_sort_key(b[idx]);
+        match key_a.cmp(&key_b) {
+            Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+    Ordering::Equal
+}
+
+#[allow(clippy::too_many_arguments)]
+fn score_pass_set(
+    triple: &[Card; 3],
+    hand: &Hand,
+    ctx: &BotContext<'_>,
+    style: BotStyle,
+    passing_to_trailing: bool,
+    passing_to_leader: bool,
+    my_score: u32,
+    snapshot: super::ScoreSnapshot,
+    suit_counts: &[usize; 4],
+) -> i32 {
+    let mut total = 0;
+    for card in triple.iter().copied() {
+        total += score_card(
+            card,
+            hand,
+            ctx,
+            style,
+            passing_to_trailing,
+            passing_to_leader,
+            my_score,
+            snapshot,
+        );
+    }
+
+    let mut removed = [0usize; 4];
+    for card in triple.iter() {
+        removed[suit_index(card.suit)] += 1;
+    }
+
+    for (idx, removed_count) in removed.iter().enumerate() {
+        if *removed_count > 0 && suit_counts[idx] == *removed_count {
+            total += 1_800;
+        }
+    }
+
+    let high_club_count = triple
+        .iter()
+        .filter(|card| card.suit == Suit::Clubs && card.rank >= Rank::Queen)
+        .count();
+    if high_club_count >= 2 {
+        total += 6_000 + (high_club_count as i32 * 800);
+    }
+
+    if triple
+        .iter()
+        .any(|card| card.suit == Suit::Hearts && card.penalty_value() > 0)
+        && passing_to_trailing
+    {
+        total += 1_200;
+    }
+
+    total
+}
+
 struct PassWeights {
     to_leader_penalty: i32,
 }
@@ -354,6 +459,55 @@ mod tests {
                 "should retain spade control cards"
             );
         }
+    }
+
+    #[test]
+    fn pass_prefers_shedding_multiple_high_clubs() {
+        let seat = PlayerPosition::West;
+        let passing = PassingDirection::Left;
+        let hand = vec![
+            Card::new(Rank::Ace, Suit::Clubs),
+            Card::new(Rank::King, Suit::Clubs),
+            Card::new(Rank::Queen, Suit::Clubs),
+            Card::new(Rank::Jack, Suit::Clubs),
+            Card::new(Rank::Queen, Suit::Spades),
+            Card::new(Rank::Ten, Suit::Spades),
+            Card::new(Rank::Ace, Suit::Hearts),
+            Card::new(Rank::Five, Suit::Hearts),
+            Card::new(Rank::Three, Suit::Hearts),
+            Card::new(Rank::Nine, Suit::Diamonds),
+            Card::new(Rank::Eight, Suit::Diamonds),
+            Card::new(Rank::Six, Suit::Diamonds),
+            Card::new(Rank::Four, Suit::Diamonds),
+        ];
+        let round = build_round(seat, &hand, passing);
+        let scores = build_scores([18, 24, 19, 26]);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+        let ctx = BotContext::new(
+            seat,
+            &round,
+            &scores,
+            passing,
+            &tracker,
+            BotDifficulty::NormalHeuristic,
+        );
+
+        let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
+        let high_clubs = [
+            Card::new(Rank::Ace, Suit::Clubs),
+            Card::new(Rank::King, Suit::Clubs),
+            Card::new(Rank::Queen, Suit::Clubs),
+        ];
+        let shed_high_clubs = picks
+            .iter()
+            .filter(|card| high_clubs.contains(card))
+            .count();
+        assert!(
+            shed_high_clubs >= 2,
+            "expected at least two high clubs to be passed, got {:?}",
+            picks
+        );
     }
 
     #[test]

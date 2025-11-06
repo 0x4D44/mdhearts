@@ -29,6 +29,18 @@ pub struct HardTelemetryRecord {
     pub belief_cache_hits: usize,
     pub belief_cache_misses: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub difficulty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub think_limit_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
 }
 
@@ -89,7 +101,12 @@ impl TelemetrySink {
 }
 
 impl HardTelemetryRecord {
-    pub fn from_tracker(seat: PlayerPosition, tracker: &UnseenTracker) -> Self {
+    pub fn from_tracker(
+        seat: PlayerPosition,
+        tracker: &UnseenTracker,
+        difficulty: Option<crate::bot::BotDifficulty>,
+        phase: Option<&str>,
+    ) -> Self {
         let timestamp_ms = now_millis();
         let decision_index = DECISION_COUNTER.fetch_add(1, Ordering::Relaxed);
         let entropy = tracker.belief_entropy();
@@ -103,6 +120,12 @@ impl HardTelemetryRecord {
             belief_cache_capacity: metrics.capacity,
             belief_cache_hits: metrics.hits,
             belief_cache_misses: metrics.misses,
+            difficulty: difficulty.map(|d| format!("{:?}", d)),
+            phase: phase.map(|p| p.to_string()),
+            think_limit_ms: None,
+            elapsed_ms: None,
+            timed_out: None,
+            fallback: None,
             notes: None,
         }
     }
@@ -222,8 +245,32 @@ pub mod hard {
         DECISION_COUNTER.store(1, Ordering::Relaxed);
     }
 
-    pub fn record_pre_decision(seat: PlayerPosition, tracker: &UnseenTracker) {
-        let record = HardTelemetryRecord::from_tracker(seat, tracker);
+    pub fn record_pre_decision(
+        seat: PlayerPosition,
+        tracker: &UnseenTracker,
+        difficulty: crate::bot::BotDifficulty,
+    ) {
+        let record =
+            HardTelemetryRecord::from_tracker(seat, tracker, Some(difficulty), Some("pre"));
+        sink().push(record);
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn record_post_decision(
+        seat: PlayerPosition,
+        tracker: &UnseenTracker,
+        difficulty: crate::bot::BotDifficulty,
+        think_limit_ms: Option<u32>,
+        elapsed_ms: u32,
+        timed_out: bool,
+        fallback: Option<&str>,
+    ) {
+        let mut record =
+            HardTelemetryRecord::from_tracker(seat, tracker, Some(difficulty), Some("post"));
+        record.think_limit_ms = think_limit_ms;
+        record.elapsed_ms = Some(elapsed_ms);
+        record.timed_out = Some(timed_out);
+        record.fallback = fallback.map(|f| f.to_string());
         sink().push(record);
     }
 
@@ -261,6 +308,12 @@ mod tests {
                 belief_cache_capacity: 4,
                 belief_cache_hits: 2,
                 belief_cache_misses: 1,
+                difficulty: None,
+                phase: None,
+                think_limit_ms: None,
+                elapsed_ms: None,
+                timed_out: None,
+                fallback: None,
                 notes: None,
             },
             HardTelemetryRecord {
@@ -272,6 +325,12 @@ mod tests {
                 belief_cache_capacity: 4,
                 belief_cache_hits: 1,
                 belief_cache_misses: 0,
+                difficulty: None,
+                phase: None,
+                think_limit_ms: None,
+                elapsed_ms: None,
+                timed_out: None,
+                fallback: None,
                 notes: None,
             },
         ];

@@ -8,6 +8,7 @@ param(
   [int]$CountEast = 150,
   [int]$CountNorth = 200,
   [int]$HardSteps = 120,
+  [int]$ThinkLimitMs = 10000,
   [switch]$Verbose
 )
 
@@ -17,6 +18,12 @@ $ErrorActionPreference = 'Stop'
 $env:MDH_DEBUG_LOGS = '0'
 $env:MDH_HARD_DETERMINISTIC = '1'
 $env:MDH_HARD_TEST_STEPS = [string]$HardSteps
+
+$thinkArgs = if ($ThinkLimitMs -le 0) {
+  @('--think-limit-unlimited')
+} else {
+  @('--think-limit-ms', [string]$ThinkLimitMs)
+}
 
 function Write-Info($msg) { if ($Verbose) { Write-Host $msg } }
 
@@ -42,17 +49,17 @@ Ensure-Dir $matchWest; Ensure-Dir $matchSouth; Ensure-Dir $matchEast; Ensure-Dir
 
 # Compare batches (only disagreements)
 Write-Info "Running compare-batch (only-disagree)…"
-cargo run -q -p hearts-app -- --compare-batch west  $SeatStartWest  $CountWest  --only-disagree --out $cmpWest  | Out-Null
-cargo run -q -p hearts-app -- --compare-batch south $SeatStartSouth $CountSouth --only-disagree --out $cmpSouth | Out-Null
-cargo run -q -p hearts-app -- --compare-batch east  $SeatStartEast  $CountEast  --only-disagree --out $cmpEast  | Out-Null
-cargo run -q -p hearts-app -- --compare-batch north $SeatStartNorth $CountNorth --only-disagree --out $cmpNorth | Out-Null
+cargo run -q -p hearts-app -- --compare-batch west  $SeatStartWest  $CountWest  --only-disagree --out $cmpWest  @thinkArgs | Out-Null
+cargo run -q -p hearts-app -- --compare-batch south $SeatStartSouth $CountSouth --only-disagree --out $cmpSouth @thinkArgs | Out-Null
+cargo run -q -p hearts-app -- --compare-batch east  $SeatStartEast  $CountEast  --only-disagree --out $cmpEast  @thinkArgs | Out-Null
+cargo run -q -p hearts-app -- --compare-batch north $SeatStartNorth $CountNorth --only-disagree --out $cmpNorth @thinkArgs | Out-Null
 
 # Match batches (Normal vs Hard)
 Write-Info "Running match-batch (Normal vs Hard)…"
-cargo run -q -p hearts-app -- --match-batch west  $SeatStartWest  $CountWest  normal hard --out $matchWest  | Out-Null
-cargo run -q -p hearts-app -- --match-batch south $SeatStartSouth $CountSouth normal hard --out $matchSouth | Out-Null
-cargo run -q -p hearts-app -- --match-batch east  $SeatStartEast  $CountEast  normal hard --out $matchEast  | Out-Null
-cargo run -q -p hearts-app -- --match-batch north $SeatStartNorth $CountNorth normal hard --out $matchNorth | Out-Null
+cargo run -q -p hearts-app -- --match-batch west  $SeatStartWest  $CountWest  normal hard --out $matchWest  @thinkArgs | Out-Null
+cargo run -q -p hearts-app -- --match-batch south $SeatStartSouth $CountSouth normal hard --out $matchSouth @thinkArgs | Out-Null
+cargo run -q -p hearts-app -- --match-batch east  $SeatStartEast  $CountEast  normal hard --out $matchEast  @thinkArgs | Out-Null
+cargo run -q -p hearts-app -- --match-batch north $SeatStartNorth $CountNorth normal hard --out $matchNorth @thinkArgs | Out-Null
 
 # Summarize results
 function Get-Lines($path) { (Get-Content $path | Measure-Object -Line).Lines }
@@ -82,4 +89,3 @@ $outMd = "designs/tuning/eval_summary_$timestamp.md"
 Ensure-Dir $outMd
 Set-Content -Encoding UTF8 $outMd -Value ("# Eval Summary ($timestamp)`n`n" + ($summary -join "`n") + "`n")
 Write-Host "WROTE $outMd"
-

@@ -1,0 +1,54 @@
+name: Eval (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_start:
+        description: 'Seed start'
+        default: '200'
+        required: false
+      smoke_count:
+        description: 'SMOKE_COUNT'
+        default: '2'
+        required: false
+      small_count:
+        description: 'SMALL_COUNT'
+        default: '3'
+        required: false
+      med_count:
+        description: 'MED_COUNT'
+        default: '6'
+        required: false
+
+jobs:
+  eval:
+    name: Run eval scripts (Linux)
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+      MDH_DEBUG_LOGS: "0"
+      MDH_HARD_DETERMINISTIC: "1"
+      MDH_HARD_TEST_STEPS: "60"
+      MDH_FEATURE_HARD_STAGE12: "1"
+      SMOKE_COUNT: ${{ github.event.inputs.smoke_count || '2' }}
+      SMALL_COUNT: ${{ github.event.inputs.small_count || '3' }}
+      MED_COUNT: ${{ github.event.inputs.med_count || '6' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run eval wrapper
+        run: |
+          chmod +x tools/*.sh
+          ./tools/eval_all.sh ${{ github.event.inputs.seed_start || '200' }}
+          ./tools/index_compare.sh designs/tuning/stage1/compare_release
+      - name: Upload eval artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: |
+            designs/tuning/stage1/smoke_release/*.csv
+            designs/tuning/stage1/smoke_release/INDEX.md
+            designs/tuning/stage1/compare_release/*.csv
+            designs/tuning/stage1/compare_release/INDEX.md
+            designs/tuning/eval_summaries/*.md

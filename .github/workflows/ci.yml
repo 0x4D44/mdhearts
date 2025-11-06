@@ -43,6 +43,7 @@ jobs:
       MDH_DEBUG_LOGS: "0"
       MDH_HARD_DETERMINISTIC: "1"
       MDH_HARD_TEST_STEPS: "60"
+      MDH_FEATURE_HARD_STAGE12: "1"
       SEAT_START_WEST: "1000"
       SEAT_START_SOUTH: "1080"
       SEAT_START_EAST: "2000"
@@ -60,3 +61,31 @@ jobs:
           chmod +x tools/run_eval.sh
           ./tools/run_eval.sh
 
+  ultra-smoke:
+    name: Ultra-fast smoke (Linux, PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    env:
+      CARGO_TERM_COLOR: always
+      MDH_DEBUG_LOGS: "0"
+      MDH_HARD_DETERMINISTIC: "1"
+      MDH_HARD_TEST_STEPS: "60"
+      MDH_FEATURE_HARD_STAGE12: "1"
+      SMOKE_COUNT: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Ultra-fast smokes (1-seed per seat, NNHH+HHNN)
+        run: |
+          chmod +x tools/smoke_fast.sh
+          ./tools/smoke_fast.sh 100
+      - name: Validate smoke CSVs
+        run: |
+          chmod +x tools/check_smoke_artifacts.sh
+          ./tools/check_smoke_artifacts.sh designs/tuning/stage1/smoke_release
+      - name: Upload smoke CSVs
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage1-ultra-smoke-csv
+          path: designs/tuning/stage1/smoke_release/*.csv

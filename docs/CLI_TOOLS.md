@@ -26,10 +26,10 @@ Run `mdhearts.exe` (or `cargo run -p hearts-app --bin mdhearts --`) with the fol
 - `--explain-json <seed> <seat> <path> [difficulty]`
   - Writes a JSON dump containing candidates, difficulty, weights, and (for hard) verbose candidate breakdown and stats.
   - Use `--hard-verbose` with explain commands to include continuation part breakdown on console when `MDH_DEBUG_LOGS=1`.
-- `--match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]`
+- `--match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [--telemetry-out <path>] [Hard flags]`
   - Simulates one round per seed twice (A vs B difficulties) and emits CSV lines:
     `seed,seat,diffA,diffB,a_pen,b_pen,delta` where `delta=b_pen-a_pen`.
-  - Defaults: difficultyA=normal, difficultyB=hard. Append Hard flags to control Hard determinism/time caps.
+  - Defaults: difficultyA=normal, difficultyB=hard (you can also pass `search` / `lookahead`). Append Hard flags to control Hard determinism/time caps. `--telemetry-out <path>` writes the hard telemetry sink (NDJSON) after the batch completes.
   - Example: `--match-batch west 1000 50 normal hard --out designs/tuning/match_west_1000_50.csv`
  - `--match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]`
    - Runs mixed-seat evaluations using a seed file. `<mix>` is 4 characters (N,E,S,W) using `e|n|h`.

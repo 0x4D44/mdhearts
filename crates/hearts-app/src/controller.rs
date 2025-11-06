@@ -1,23 +1,183 @@
 #![cfg_attr(not(windows), allow(dead_code))]
 
 use crate::bot::MoonState;
-use crate::bot::{BotContext, BotDifficulty, PassPlanner, PlayPlanner, UnseenTracker};
+use crate::bot::{
+    BotContext, BotDifficulty, DecisionLimit, PassPlanner, PlayPlanner, UnseenTracker,
+};
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
+use hearts_core::model::passing::PassingDirection;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
-use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase};
+use hearts_core::model::round::{PlayError, PlayOutcome, RoundPhase, RoundState};
+use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 #[cfg(windows)]
 use windows::core::PCWSTR;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TimeoutFallback {
+    HeuristicBest,
+    FirstLegal,
+    SkipAndLog,
+}
+
+impl TimeoutFallback {
+    pub const fn label(self) -> &'static str {
+        match self {
+            TimeoutFallback::HeuristicBest => "heuristic_best",
+            TimeoutFallback::FirstLegal => "first_legal",
+            TimeoutFallback::SkipAndLog => "skip_and_log",
+        }
+    }
+
+    pub fn from_env_value(raw: &str) -> Option<Self> {
+        let trimmed = raw.trim();
+        if let Ok(code) = trimmed.parse::<u8>() {
+            return match code {
+                0 => Some(TimeoutFallback::HeuristicBest),
+                1 => Some(TimeoutFallback::FirstLegal),
+                2 => Some(TimeoutFallback::SkipAndLog),
+                _ => None,
+            };
+        }
+        match trimmed.to_ascii_lowercase().as_str() {
+            "heuristic" | "heuristic_best" | "heuristicbest" | "best" => {
+                Some(TimeoutFallback::HeuristicBest)
+            }
+            "first" | "first_legal" | "firstlegal" | "legal" => Some(TimeoutFallback::FirstLegal),
+            "skip" | "skip_and_log" | "skipandlog" | "skip-log" => {
+                Some(TimeoutFallback::SkipAndLog)
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Default for TimeoutFallback {
+    fn default() -> Self {
+        TimeoutFallback::HeuristicBest
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ThinkConfig {
+    pub max_duration: Duration,
+    pub fallback: TimeoutFallback,
+}
+
+impl Default for ThinkConfig {
+    fn default() -> Self {
+        Self {
+            max_duration: Duration::from_secs(10),
+            fallback: TimeoutFallback::default(),
+        }
+    }
+}
+
+impl ThinkConfig {
+    pub fn from_env() -> Self {
+        let mut cfg = Self::default();
+        if let Ok(raw_ms) = std::env::var("MDH_THINK_LIMIT_MS") {
+            if let Ok(ms) = raw_ms.trim().parse::<u32>() {
+                cfg.max_duration = if ms == 0 {
+                    Duration::ZERO
+                } else {
+                    Duration::from_millis(ms as u64)
+                };
+            }
+        }
+        if let Ok(raw_fallback) = std::env::var("MDH_THINK_FALLBACK") {
+            if let Some(fallback) = TimeoutFallback::from_env_value(&raw_fallback) {
+                cfg.fallback = fallback;
+            }
+        }
+        cfg
+    }
+
+    pub fn limit_millis(&self) -> Option<u32> {
+        if self.max_duration.is_zero() {
+            None
+        } else {
+            Some(self.max_duration.as_millis().min(u32::MAX as u128) as u32)
+        }
+    }
+}
+
+fn test_force_autoplay_timeout() -> bool {
+    std::env::var("MDH_TEST_FORCE_AUTOP_TIMEOUT")
+        .map(|v| {
+            let lower = v.trim().to_ascii_lowercase();
+            matches!(lower.as_str(), "1" | "true" | "on")
+        })
+        .unwrap_or(false)
+}
+
+#[derive(Clone)]
+pub struct BotSnapshot {
+    round: RoundState,
+    scores: ScoreBoard,
+    passing_direction: PassingDirection,
+    tracker: UnseenTracker,
+}
+
+impl BotSnapshot {
+    pub fn capture(match_state: &MatchState, tracker: &UnseenTracker) -> Self {
+        Self {
+            round: match_state.round().clone(),
+            scores: *match_state.scores(),
+            passing_direction: match_state.passing_direction(),
+            tracker: tracker.clone(),
+        }
+    }
+
+    pub fn make_thread_local(mut self) -> Self {
+        self.tracker = self.tracker.clone_with_fresh_cache();
+        self
+    }
+
+    pub fn bot_context(&self, seat: PlayerPosition, difficulty: BotDifficulty) -> BotContext<'_> {
+        BotContext::new(
+            seat,
+            &self.round,
+            &self.scores,
+            self.passing_direction,
+            &self.tracker,
+            difficulty,
+        )
+    }
+
+    pub fn tracker(&self) -> &UnseenTracker {
+        &self.tracker
+    }
+}
+
+pub struct BotThinkRequest {
+    pub seat: PlayerPosition,
+    pub legal: Vec<Card>,
+    pub enforce_two: bool,
+    pub difficulty: BotDifficulty,
+    pub snapshot: BotSnapshot,
+    pub config: ThinkConfig,
+}
+
+#[derive(Debug)]
+pub struct BotThinkResult {
+    pub seat: PlayerPosition,
+    pub chosen: Option<Card>,
+    pub elapsed: Duration,
+    pub timed_out: bool,
+}
 
 pub struct GameController {
     match_state: MatchState,
     last_trick: Option<TrickSummary>,
     bot_difficulty: BotDifficulty,
     unseen_tracker: UnseenTracker,
+    think_config: ThinkConfig,
 }
 
 impl GameController {
@@ -62,6 +222,7 @@ impl GameController {
             last_trick: None,
             bot_difficulty: BotDifficulty::from_env(),
             unseen_tracker,
+            think_config: ThinkConfig::from_env(),
         };
         Self::dbg(&format!(
             "mdhearts: AI weights {} | hard {} | moon {}",
@@ -81,6 +242,7 @@ impl GameController {
             last_trick: None,
             bot_difficulty: BotDifficulty::from_env(),
             unseen_tracker,
+            think_config: ThinkConfig::from_env(),
         };
         Self::dbg(&format!(
             "mdhearts: AI weights {} | hard {} | moon {}",
@@ -108,6 +270,109 @@ impl GameController {
 
     pub fn bot_difficulty(&self) -> BotDifficulty {
         self.bot_difficulty
+    }
+
+    pub fn think_config(&self) -> ThinkConfig {
+        self.think_config
+    }
+
+    pub fn set_think_config(&mut self, config: ThinkConfig) {
+        self.think_config = config;
+    }
+
+    pub fn prepare_bot_think(&self, seat: PlayerPosition) -> Option<BotThinkRequest> {
+        if self.in_passing_phase() {
+            return None;
+        }
+        if seat != self.expected_to_play() {
+            return None;
+        }
+        let legal = self.legal_moves(seat);
+        if legal.is_empty() {
+            return None;
+        }
+        let enforce_two = {
+            let round = self.match_state.round();
+            round.is_first_trick() && round.current_trick().leader() == seat
+        };
+        crate::telemetry::hard::record_pre_decision(
+            seat,
+            &self.unseen_tracker,
+            self.bot_difficulty,
+        );
+        let snapshot =
+            BotSnapshot::capture(&self.match_state, &self.unseen_tracker).make_thread_local();
+        Some(BotThinkRequest {
+            seat,
+            legal,
+            enforce_two,
+            difficulty: self.bot_difficulty,
+            snapshot,
+            config: self.think_config,
+        })
+    }
+
+    pub fn apply_bot_move(
+        &mut self,
+        seat: PlayerPosition,
+        card: Card,
+    ) -> Result<(PlayerPosition, Card), PlayError> {
+        let _ = self.play(seat, card)?;
+        Ok((seat, card))
+    }
+
+    pub fn timeout_fallback_card(&self, seat: PlayerPosition) -> Option<Card> {
+        if self.in_passing_phase() {
+            return None;
+        }
+        if seat != self.expected_to_play() {
+            return None;
+        }
+        let legal = self.legal_moves(seat);
+        if legal.is_empty() {
+            return None;
+        }
+        let enforce_two = {
+            let round = self.match_state.round();
+            round.is_first_trick() && round.current_trick().leader() == seat
+        };
+        if enforce_two {
+            let two = Card::new(Rank::Two, Suit::Clubs);
+            if let Some(card) = legal.iter().copied().find(|c| *c == two) {
+                return Some(card);
+            }
+        }
+        match self.think_config.fallback {
+            TimeoutFallback::SkipAndLog => None,
+            TimeoutFallback::FirstLegal => legal.first().copied(),
+            TimeoutFallback::HeuristicBest => {
+                let ctx = self.bot_context(seat);
+                match self.bot_difficulty {
+                    BotDifficulty::SearchLookahead => {
+                        crate::bot::PlayPlannerHard::choose(&legal, &ctx)
+                    }
+                    _ => PlayPlanner::choose(&legal, &ctx),
+                }
+                .or_else(|| legal.first().copied())
+            }
+        }
+    }
+
+    pub fn match_over(&self) -> bool {
+        self.match_state
+            .scores()
+            .standings()
+            .iter()
+            .copied()
+            .any(|score| score >= 100)
+    }
+
+    pub fn match_winner(&self) -> Option<PlayerPosition> {
+        if self.match_over() {
+            Some(self.match_state.scores().leading_player())
+        } else {
+            None
+        }
     }
 
     #[cfg(test)]
@@ -459,12 +724,33 @@ impl GameController {
         if seat == stop_seat {
             return None;
         }
+        let legal = self.legal_moves(seat);
+        if legal.is_empty() {
+            return None;
+        }
         let enforce_two = {
             let round = self.match_state.round();
             round.is_first_trick() && round.current_trick().leader() == seat
         };
-        let legal = self.legal_moves(seat);
-        let card_to_play = if enforce_two {
+
+        crate::telemetry::hard::record_pre_decision(
+            seat,
+            &self.unseen_tracker,
+            self.bot_difficulty,
+        );
+        let start = Instant::now();
+        let think_limit_ms = self.think_config.limit_millis();
+        let mut decision_limit = think_limit_ms.map(|ms| DecisionLimit {
+            deadline: Some(start + Duration::from_millis(ms as u64)),
+            cancel: None,
+        });
+        if test_force_autoplay_timeout() {
+            decision_limit = Some(DecisionLimit {
+                deadline: Some(Instant::now() - Duration::from_millis(1)),
+                cancel: None,
+            });
+        }
+        let mut card_to_play = if enforce_two {
             let two = Card::new(Rank::Two, Suit::Clubs);
             if legal.contains(&two) {
                 Some(two)
@@ -475,7 +761,6 @@ impl GameController {
             match self.bot_difficulty {
                 BotDifficulty::EasyLegacy => legal.first().copied(),
                 BotDifficulty::SearchLookahead => {
-                    // Compute style without holding an immutable borrow across mutation
                     let commit = {
                         let ctx_probe = self.bot_context(seat);
                         crate::bot::determine_style(&ctx_probe)
@@ -486,11 +771,13 @@ impl GameController {
                             .set_moon_state(seat, MoonState::Committed);
                     }
                     let ctx = self.bot_context(seat);
-                    crate::bot::PlayPlannerHard::choose(&legal, &ctx)
-                        .or_else(|| legal.first().copied())
+                    crate::bot::PlayPlannerHard::choose_with_limit(
+                        &legal,
+                        &ctx,
+                        decision_limit.as_ref(),
+                    )
                 }
                 _ => {
-                    // Compute style without holding an immutable borrow across mutation
                     let commit = {
                         let ctx_probe = self.bot_context(seat);
                         crate::bot::determine_style(&ctx_probe)
@@ -501,10 +788,47 @@ impl GameController {
                             .set_moon_state(seat, MoonState::Committed);
                     }
                     let ctx = self.bot_context(seat);
-                    PlayPlanner::choose(&legal, &ctx).or_else(|| legal.first().copied())
+                    PlayPlanner::choose_with_limit(&legal, &ctx, decision_limit.as_ref())
                 }
             }
         };
+
+        let elapsed = start.elapsed();
+        let timed_out = decision_limit
+            .as_ref()
+            .map(|limit| limit.expired())
+            .unwrap_or(false);
+        let mut fallback_label: Option<&'static str> = None;
+
+        if card_to_play.is_none() && timed_out {
+            fallback_label = Some(self.think_config.fallback.label());
+            card_to_play = self.timeout_fallback_card(seat);
+        }
+
+        if card_to_play.is_none() && (!timed_out || fallback_label.is_none()) {
+            if let Some(card) = legal.first().copied() {
+                if fallback_label.is_none() {
+                    fallback_label = Some("first_legal");
+                }
+                card_to_play = Some(card);
+            }
+        }
+
+        if timed_out && fallback_label.is_none() {
+            fallback_label = Some("planner_result");
+        }
+
+        let elapsed_ms = elapsed.as_millis().min(u32::MAX as u128) as u32;
+        crate::telemetry::hard::record_post_decision(
+            seat,
+            &self.unseen_tracker,
+            self.bot_difficulty,
+            think_limit_ms,
+            elapsed_ms,
+            timed_out,
+            fallback_label,
+        );
+
         if let Some(card) = card_to_play {
             Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
             let _ = self.play(seat, card);
@@ -583,23 +907,29 @@ impl GameController {
             .reset_for_round(self.match_state.round());
     }
 
-    pub fn finish_round_if_ready(&mut self) {
-        if self.match_state.is_round_ready_for_scoring() {
-            self.match_state.finish_round_and_start_next();
-            self.unseen_tracker
-                .reset_for_round(self.match_state.round());
+    pub fn finish_round_if_ready(&mut self) -> Option<PlayerPosition> {
+        if !self.match_state.is_round_ready_for_scoring() {
+            return None;
         }
+        if let Some(winner) = self.match_state.finish_round_and_start_next() {
+            return Some(winner);
+        }
+        self.unseen_tracker
+            .reset_for_round(self.match_state.round());
+        crate::telemetry::hard::reset();
+        None
     }
 }
 #[cfg(test)]
 mod tests {
-    use super::GameController;
+    use super::{GameController, TimeoutFallback};
     use crate::bot::BotDifficulty;
     use hearts_core::model::card::Card;
     use hearts_core::model::passing::PassingDirection;
     use hearts_core::model::player::PlayerPosition;
     use hearts_core::model::rank::Rank;
     use hearts_core::model::suit::Suit;
+    use std::time::Duration;
 
     #[test]
     fn easy_legacy_pass_returns_first_three() {
@@ -637,6 +967,90 @@ mod tests {
         let result = controller.autoplay_one(PlayerPosition::South).unwrap();
         assert_eq!(result.0, seat);
         assert_eq!(result.1, legal[0]);
+    }
+
+    #[test]
+    fn search_autoplay_records_think_limit() {
+        crate::telemetry::hard::reset();
+        let mut controller = GameController::new_with_seed(Some(321), PlayerPosition::North);
+        controller.set_bot_difficulty(BotDifficulty::SearchLookahead);
+        let mut config = controller.think_config();
+        config.max_duration = Duration::from_millis(5);
+        config.fallback = TimeoutFallback::FirstLegal;
+        controller.set_think_config(config);
+
+        if controller.in_passing_phase() {
+            let south_pass = controller.simple_pass_for(PlayerPosition::South).unwrap();
+            controller
+                .submit_pass(PlayerPosition::South, south_pass)
+                .unwrap();
+            controller
+                .submit_auto_passes_for_others(PlayerPosition::South)
+                .unwrap();
+            controller.resolve_passes().unwrap();
+        }
+
+        let _ = controller.autoplay_one(PlayerPosition::South);
+        let records = crate::telemetry::hard::sink().snapshot();
+        assert!(!records.is_empty(), "expected telemetry record");
+        let last = records.last().unwrap();
+        assert_eq!(last.think_limit_ms, Some(5));
+        crate::telemetry::hard::reset();
+    }
+
+    #[test]
+    fn autoplay_timeout_records_fallback() {
+        crate::telemetry::hard::reset();
+        let prev = std::env::var("MDH_TEST_FORCE_AUTOP_TIMEOUT").ok();
+
+        let mut controller = GameController::new_with_seed(Some(98765), PlayerPosition::North);
+        controller.set_bot_difficulty(BotDifficulty::SearchLookahead);
+        let mut cfg = controller.think_config();
+        cfg.max_duration = Duration::from_millis(5);
+        cfg.fallback = TimeoutFallback::FirstLegal;
+        controller.set_think_config(cfg);
+
+        if controller.in_passing_phase() {
+            let south_pass = controller.simple_pass_for(PlayerPosition::South).unwrap();
+            controller
+                .submit_pass(PlayerPosition::South, south_pass)
+                .unwrap();
+            controller
+                .submit_auto_passes_for_others(PlayerPosition::South)
+                .unwrap();
+            controller.resolve_passes().unwrap();
+        }
+
+        let prep_stop = controller.expected_to_play().next();
+        let prep_play = controller.autoplay_one(prep_stop);
+        assert!(prep_play.is_some(), "setup autoplay should succeed");
+        crate::telemetry::hard::reset();
+
+        unsafe { std::env::set_var("MDH_TEST_FORCE_AUTOP_TIMEOUT", "1") };
+        assert!(
+            super::test_force_autoplay_timeout(),
+            "force timeout flag should be active"
+        );
+
+        let seat_to_play = controller.expected_to_play();
+        let stop_seat = seat_to_play.next();
+        let result = controller.autoplay_one(stop_seat);
+        assert!(result.is_some(), "expected autoplay move");
+
+        let records = crate::telemetry::hard::sink().snapshot();
+        assert_eq!(records.len(), 2, "expected pre and post records");
+        assert!(!records.is_empty(), "expected telemetry records");
+        let last = records.last().unwrap();
+        assert_eq!(last.timed_out, Some(true));
+        assert_eq!(last.fallback.as_deref(), Some("first_legal"));
+        assert_eq!(last.timed_out, Some(true));
+
+        crate::telemetry::hard::reset();
+        if let Some(val) = prev {
+            unsafe { std::env::set_var("MDH_TEST_FORCE_AUTOP_TIMEOUT", val) };
+        } else {
+            unsafe { std::env::remove_var("MDH_TEST_FORCE_AUTOP_TIMEOUT") };
+        }
     }
 
     #[test]

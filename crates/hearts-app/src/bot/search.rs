@@ -1,4 +1,4 @@
-use super::{BotContext, PlayPlanner, snapshot_scores};
+use super::{BotContext, DecisionLimit, PlayPlanner, snapshot_scores};
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::{PlayOutcome, RoundState};
@@ -6,6 +6,7 @@ use hearts_core::model::suit::Suit;
 use once_cell::sync::Lazy;
 use std::cell::Cell;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 // Stage 3 scaffold: Hard planner with configurable branch limit and (future) depth/time caps.
@@ -83,10 +84,21 @@ impl PlayPlannerHard {
     }
 
     pub fn choose(legal: &[Card], ctx: &BotContext<'_>) -> Option<Card> {
+        Self::choose_with_limit(legal, ctx, None)
+    }
+
+    pub fn choose_with_limit(
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        limit: Option<&DecisionLimit<'_>>,
+    ) -> Option<Card> {
         if legal.is_empty() {
             return None;
         }
-        crate::telemetry::hard::record_pre_decision(ctx.seat, ctx.tracker);
+        if limit.map_or(false, |limit| limit.expired()) {
+            return None;
+        }
+        crate::telemetry::hard::record_pre_decision(ctx.seat, ctx.tracker, ctx.difficulty);
         let cfg = Self::config();
         let deterministic = std::env::var("MDH_HARD_DETERMINISTIC")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
@@ -105,7 +117,13 @@ impl PlayPlannerHard {
         let snapshot = snapshot_scores(ctx.scores);
         let mut best: Option<(Card, i32)> = None;
         let start = Instant::now();
-        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap);
+        let mut budget = Budget::new(
+            cfg.time_cap_ms,
+            deterministic,
+            step_cap,
+            limit.and_then(|limit| limit.deadline),
+            limit.and_then(|limit| limit.cancel),
+        );
         let mut scanned = 0usize;
         let (tier, leverage_score, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
@@ -215,6 +233,7 @@ impl PlayPlannerHard {
         let utilization = budget.utilization_percent(start);
         let n3_after = NEXT3_TINY_COUNT.with(|c| c.get());
         let dp_after = ENDGAME_DP_COUNT.with(|c| c.get());
+        let planner_nudge_trace = super::play::take_hard_nudge_trace_summary();
         set_last_stats(Stats {
             scanned,
             elapsed_ms: start.elapsed().as_millis() as u32,
@@ -232,6 +251,7 @@ impl PlayPlannerHard {
             next3_tiny_hits: n3_after.saturating_sub(n3_before),
             endgame_dp_hits: dp_after.saturating_sub(dp_before),
             planner_nudge_hits,
+            planner_nudge_trace,
         });
         best.map(|(c, _)| c)
     }
@@ -253,7 +273,7 @@ impl PlayPlannerHard {
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
         let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
-        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap);
+        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
         let (tier, leverage_score, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
@@ -306,6 +326,7 @@ impl PlayPlannerHard {
             }
         }
         let utilization = budget.utilization_percent(start);
+        let planner_nudge_trace = super::play::take_hard_nudge_trace_summary();
         set_last_stats(Stats {
             scanned,
             elapsed_ms: start.elapsed().as_millis() as u32,
@@ -323,6 +344,7 @@ impl PlayPlannerHard {
             next3_tiny_hits: 0,
             endgame_dp_hits: 0,
             planner_nudge_hits,
+            planner_nudge_trace,
         });
         out
     }
@@ -349,7 +371,7 @@ impl PlayPlannerHard {
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
         let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
-        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap);
+        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
         let (tier, leverage_score, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
@@ -383,6 +405,7 @@ impl PlayPlannerHard {
                 break;
             }
         }
+        let planner_nudge_trace = super::play::take_hard_nudge_trace_summary();
         set_last_stats(Stats {
             scanned,
             elapsed_ms: start.elapsed().as_millis() as u32,
@@ -400,6 +423,7 @@ impl PlayPlannerHard {
             next3_tiny_hits: 0,
             endgame_dp_hits: 0,
             planner_nudge_hits,
+            planner_nudge_trace,
         });
         out
     }
@@ -420,7 +444,7 @@ impl PlayPlannerHard {
         v.sort_by(|a, b| b.1.cmp(&a.1));
         let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
-        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap);
+        let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
         let (_, _, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
@@ -1176,6 +1200,7 @@ pub struct Stats {
     pub next3_tiny_hits: usize,
     pub endgame_dp_hits: usize,
     pub planner_nudge_hits: usize,
+    pub planner_nudge_trace: Option<Vec<(String, usize)>>,
 }
 
 static LAST_STATS: Lazy<Mutex<Option<Stats>>> = Lazy::new(|| Mutex::new(None));
@@ -1648,23 +1673,33 @@ pub fn debug_hard_weights_string() -> String {
 }
 
 // Deterministic/time-capped budget for Hard planner (env-gated)
-struct Budget {
+struct Budget<'a> {
     time_cap_ms: u32,
     deterministic: bool,
     step_cap: Option<usize>,
     steps: usize,
     // telemetry counters
     probe_calls: usize,
+    limit_deadline: Option<Instant>,
+    limit_cancel: Option<&'a AtomicBool>,
 }
 
-impl Budget {
-    fn new(time_cap_ms: u32, deterministic: bool, step_cap: Option<usize>) -> Self {
+impl<'a> Budget<'a> {
+    fn new(
+        time_cap_ms: u32,
+        deterministic: bool,
+        step_cap: Option<usize>,
+        limit_deadline: Option<Instant>,
+        limit_cancel: Option<&'a AtomicBool>,
+    ) -> Self {
         Self {
             time_cap_ms,
             deterministic,
             step_cap,
             steps: 0,
             probe_calls: 0,
+            limit_deadline,
+            limit_cancel,
         }
     }
     fn tick(&mut self) {
@@ -1673,14 +1708,23 @@ impl Budget {
         }
     }
     fn should_stop(&self) -> bool {
+        if self.limit_expired() {
+            return true;
+        }
         if let (true, Some(cap)) = (self.deterministic, self.step_cap) {
             return self.steps >= cap;
         }
         false
     }
     fn timed_out(&self, start: Instant) -> bool {
+        if self.limit_expired() {
+            return true;
+        }
         if self.deterministic {
             return self.should_stop();
+        }
+        if self.time_cap_ms == 0 {
+            return false;
         }
         start.elapsed().as_millis() as u32 >= self.time_cap_ms
     }
@@ -1694,12 +1738,45 @@ impl Budget {
             return 0;
         }
         let used = start.elapsed().as_millis() as u32;
-        if self.time_cap_ms == 0 {
+        let Some(cap) = self.effective_cap_ms(start) else {
             return 0;
+        };
+        if cap == 0 {
+            return 100;
         }
-        (((used as f32) / (self.time_cap_ms as f32)) * 100.0)
+        (((used as f32) / (cap as f32)) * 100.0)
             .round()
             .clamp(0.0, 100.0) as u8
+    }
+    fn limit_expired(&self) -> bool {
+        if let Some(cancel) = self.limit_cancel {
+            if cancel.load(Ordering::Relaxed) {
+                return true;
+            }
+        }
+        if let Some(deadline) = self.limit_deadline {
+            if Instant::now() >= deadline {
+                return true;
+            }
+        }
+        false
+    }
+    fn effective_cap_ms(&self, start: Instant) -> Option<u32> {
+        let time_cap = (self.time_cap_ms > 0).then_some(self.time_cap_ms);
+        let limit_cap = self.limit_deadline.map(|deadline| {
+            let dur = deadline.saturating_duration_since(start);
+            if dur.is_zero() {
+                0
+            } else {
+                dur.as_millis().min(u32::MAX as u128) as u32
+            }
+        });
+        match (time_cap, limit_cap) {
+            (Some(t), Some(l)) => Some(t.min(l)),
+            (Some(t), None) => Some(t),
+            (None, Some(l)) => Some(l),
+            (None, None) => None,
+        }
     }
 }
 

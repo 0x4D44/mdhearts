@@ -104,9 +104,13 @@ impl MatchState {
         self.current_round.penalty_totals()
     }
 
-    pub fn finish_round_and_start_next(&mut self) {
+    pub fn finish_round_and_start_next(&mut self) -> Option<PlayerPosition> {
         let penalties = self.current_round.penalty_totals();
         self.scores.apply_hand(penalties);
+
+        if self.scores.standings().iter().any(|&score| score >= 100) {
+            return Some(self.scores.leading_player());
+        }
 
         self.round_number += 1;
         self.passing_index = (self.passing_index + 1) % Self::passing_sequence().len();
@@ -116,6 +120,7 @@ impl MatchState {
 
         let deck = Deck::shuffled(&mut self.rng);
         self.current_round = RoundState::deal(&deck, next_starting_player, next_passing);
+        None
     }
 
     pub fn is_round_ready_for_scoring(&self) -> bool {
@@ -148,11 +153,11 @@ mod tests {
     fn finish_round_rotates_passing_direction() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 0);
 
-        match_state.finish_round_and_start_next();
+        assert!(match_state.finish_round_and_start_next().is_none());
         assert_eq!(match_state.round_number(), 2);
         assert_eq!(match_state.passing_direction(), PassingDirection::Right);
 
-        match_state.finish_round_and_start_next();
+        assert!(match_state.finish_round_and_start_next().is_none());
         assert_eq!(match_state.round_number(), 3);
         assert_eq!(match_state.passing_direction(), PassingDirection::Across);
     }
@@ -162,7 +167,7 @@ mod tests {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 0);
         let before = *match_state.scores().standings();
 
-        match_state.finish_round_and_start_next();
+        assert!(match_state.finish_round_and_start_next().is_none());
 
         assert_eq!(before, *match_state.scores().standings());
     }
@@ -177,7 +182,7 @@ mod tests {
     fn next_round_leader_follows_two_of_clubs() {
         let mut match_state = MatchState::with_seed(PlayerPosition::North, 42);
 
-        match_state.finish_round_and_start_next();
+        assert!(match_state.finish_round_and_start_next().is_none());
 
         let round = match_state.round();
         let two_of_clubs = Card::new(Rank::Two, Suit::Clubs);
@@ -189,5 +194,15 @@ mod tests {
 
         assert_eq!(round.starting_player(), expected);
         assert_eq!(round.current_trick().leader(), expected);
+    }
+
+    #[test]
+    fn finish_round_detects_match_over() {
+        let mut match_state = MatchState::with_seed(PlayerPosition::North, 0);
+        match_state.scores_mut().set_totals([75, 82, 100, 60]);
+        let outcome = match_state.finish_round_and_start_next();
+        assert_eq!(outcome, Some(PlayerPosition::West));
+        // When a match ends we keep the existing round state so players can review it.
+        assert_eq!(match_state.round_number(), 1);
     }
 }

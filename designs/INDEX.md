@@ -11,11 +11,19 @@ Progress & Summaries
 - 2025.10.22 - Stage 6 progress summary.md
 - 2025.10.22 - PR Summary (AI work).md
 - 2025.10.22 - AI Handoff Guide.md
+- 2025.10.30 - Stage1+2 PR Summary.md
+- 2025.10.30 - Stage1+2 PR Description.md
+- 2025.10.31 - Continue-On-Main via Feature Flags.md
+- 2025.11.01 - Plan - Feature-flag follow-through.md
+- 2025.11.01 - Commit Plan (Continue-On-Main).md
 
 Tuning & Artifacts
 - 2025.10.22 - Tuning Artifacts Index.md
 - 2025.10.22 - Candidate Goldens (near-tie).md
 - tuning/ (compare_*.csv, match_*.csv, explain_*.*)
+- tuning/stage1/smoke_release (CI smokes)
+- tuning/stage1/compare_release (disagreements only)
+- tuning/eval_summaries (dated eval summaries)
 
 Journal
 - journal/2025-10-22 - AI bot journal.md
@@ -24,4 +32,3 @@ Journal
 
 Releases
 - releases/2025-10-22 - AI Improvements.md
-

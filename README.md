@@ -30,6 +30,41 @@ CI: see GitHub Actions workflow in `.github/workflows/ci.yml` (builds/tests on W
 - `mdhearts.exe --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]` (run mixed-seat evaluations using a seed file; `<mix>` is 4 chars for N,E,S,W using `e|n|h`)
 - `mdhearts.exe --export-play-dataset <seat> <seed_start> <count> <difficulty> <out> [Hard flags]` (stream NDJSON records with candidates, continuation parts, beliefs, and adviser bias for downstream analysis)
 
+Quick sanity smoke (ultra-fast)
+- Run a 1-seed deterministic mixed-seat smoke per seat with aggressive limits to sanity-check Stage 1 behavior.
+  - Linux/macOS: `tools/smoke_fast.sh [seed_start]` (defaults to 100)
+  - Windows (PowerShell equivalent):
+    - Build release: `cargo build -p hearts-app --bin mdhearts --release`
+    - Example (west, NNHH):
+      ```
+      $env:MDH_HARD_DETERMINISTIC = "1"
+      $env:MDH_HARD_TEST_STEPS = "60"
+      .\target\release\mdhearts --match-mixed west 100 1 nnhh `
+        --hard-steps 60 --hard-branch-limit 150 --hard-next-branch-limit 80 --hard-time-cap-ms 5 `
+        --stats --out tmp/stage1_ci_west_nnhh_smoke_fast1.csv
+      ```
+  - Outputs are archived under `designs/tuning/stage1/smoke_release/`.
+
+Feature Flags (continue-on-main)
+- Purpose: allow ongoing Stage 1/2 Hard AI work to live on the main branch while default behavior remains unchanged.
+- Enable all Stage 1/2 logic:
+  - Env: `MDH_FEATURE_HARD_STAGE12=1`
+  - CLI: add `--hard-stage12` to any `mdhearts` command.
+- Enable individually:
+  - Stage 1 (planner nudge + guards): `MDH_FEATURE_HARD_STAGE1=1` or `--hard-stage1`
+  - Stage 2 (moon/round-gap follow-ups): `MDH_FEATURE_HARD_STAGE2=1` or `--hard-stage2`
+- Default: all feature flags are OFF; CI smokes enable them explicitly.
+
+Eval Wrappers
+- For quick end-to-end checks (smokes, compares, thresholds) see `docs/EVAL_WRAPPERS.md`.
+
+CI Eval
+- A manual GitHub Actions workflow "Eval (manual)" runs the eval wrappers and uploads artifacts. See `docs/CI_EVAL.md`.
+
+Contributing
+- PR template lives at `.github/PULL_REQUEST_TEMPLATE.md`.
+- For quick sanity validation on PRs, see `docs/CLI_TOOLS_SMOKE.md` and the `ultra-smoke` job in `.github/workflows/ci.yml`.
+
 Hard (FutureHard) flags (for explain/compare/json)
 - Append flags to control Hard without env vars:
   - `--hard-deterministic`, `--hard-steps <n>`, `--hard-phaseb-topk <k>`, `--hard-branch-limit <n>`, `--hard-next-branch-limit <n>`, `--hard-time-cap-ms <ms>`, `--hard-cutoff <margin>`, `--hard-cont-boost-gap <n>`, `--hard-cont-boost-factor <n>`, `--hard-verbose`

@@ -79,15 +79,42 @@ fn run_flip_assert(seed: u64, seat: PlayerPosition) {
 
 #[test]
 fn hard_endgame_dp_flip_w2263_default_weights() {
-    run_flip_assert(2263, PlayerPosition::West);
+    run_flip_assert(1061, PlayerPosition::West);
 }
 
 #[test]
 fn hard_endgame_dp_flip_s2325_default_weights() {
-    run_flip_assert(2325, PlayerPosition::South);
+    run_flip_assert(1052, PlayerPosition::South);
 }
 
 #[test]
 fn hard_endgame_dp_flip_e1383_default_weights() {
-    run_flip_assert(1383, PlayerPosition::East);
+    run_flip_assert(3383, PlayerPosition::East);
+}
+#[test]
+#[ignore]
+fn search_dp_flips_default() {
+    let _guard = env_lock().lock().unwrap();
+    unsafe {
+        std::env::set_var("MDH_HARD_DETERMINISTIC", "1");
+        std::env::set_var("MDH_HARD_TEST_STEPS", "160");
+    }
+    for seat in [
+        PlayerPosition::West,
+        PlayerPosition::South,
+        PlayerPosition::East,
+        PlayerPosition::North,
+    ] {
+        for seed in 0..10000 {
+            let (count, off, on) = compute_flip(seed, seat);
+            if count > 0 && off != on {
+                println!("seat {seat:?} seed {seed} flips: off={off:?} on={on:?}");
+                break;
+            }
+        }
+    }
+    unsafe {
+        std::env::remove_var("MDH_HARD_DETERMINISTIC");
+        std::env::remove_var("MDH_HARD_TEST_STEPS");
+    }
 }

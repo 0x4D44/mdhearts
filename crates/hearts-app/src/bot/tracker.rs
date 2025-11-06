@@ -372,6 +372,16 @@ impl UnseenTracker {
         tracker
     }
 
+    #[allow(dead_code)]
+    pub fn clone_with_fresh_cache(&self) -> Self {
+        let mut cloned = self.clone();
+        let capacity = belief_cache_capacity_from_env();
+        cloned.belief_cache = Arc::new(RwLock::new(BeliefCache::new(capacity)));
+        cloned.belief_cache_hits.store(0, Ordering::Relaxed);
+        cloned.belief_cache_misses.store(0, Ordering::Relaxed);
+        cloned
+    }
+
     fn rebuild_beliefs_uniform(&mut self) {
         let cards: Vec<Card> = self.unseen.iter().copied().collect();
         for (idx, belief) in self.beliefs.iter_mut().enumerate() {

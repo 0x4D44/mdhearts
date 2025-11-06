@@ -1,6 +1,6 @@
 mod adviser;
 mod pass;
-mod play;
+pub(crate) mod play;
 pub mod search;
 mod tracker;
 
@@ -19,6 +19,8 @@ use hearts_core::model::round::RoundState;
 use hearts_core::model::score::ScoreBoard;
 use hearts_core::model::suit::Suit;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BotDifficulty {
@@ -68,7 +70,6 @@ pub struct ScoreSnapshot {
     pub min_player: PlayerPosition,
     pub max_player: PlayerPosition,
     pub leader_gap: u32,
-    pub leader_unique: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -79,6 +80,40 @@ pub struct BotContext<'a> {
     pub passing_direction: PassingDirection,
     pub tracker: &'a UnseenTracker,
     pub difficulty: BotDifficulty,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DecisionLimit<'a> {
+    pub deadline: Option<Instant>,
+    pub cancel: Option<&'a AtomicBool>,
+}
+
+impl<'a> DecisionLimit<'a> {
+    pub fn expired(&self) -> bool {
+        if let Some(cancel) = self.cancel {
+            if cancel.load(Ordering::Relaxed) {
+                return true;
+            }
+        }
+        if let Some(deadline) = self.deadline {
+            if Instant::now() >= deadline {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[allow(dead_code)]
+    pub fn remaining_millis(&self) -> Option<u32> {
+        self.deadline.map(|deadline| {
+            let now = Instant::now();
+            if deadline <= now {
+                0
+            } else {
+                (deadline - now).as_millis().min(u32::MAX as u128) as u32
+            }
+        })
+    }
 }
 
 impl<'a> BotContext<'a> {
@@ -207,7 +242,6 @@ pub(crate) fn snapshot_scores(scores: &ScoreBoard) -> ScoreSnapshot {
         } else {
             0
         },
-        leader_unique,
     }
 }
 

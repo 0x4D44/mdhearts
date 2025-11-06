@@ -30,17 +30,24 @@ match_north="designs/tuning/match_north_${SEAT_START_NORTH}_${COUNT_NORTH}_det_$
 
 mkdir -p designs/tuning
 
-echo "Running compare-batch (only-disagree)…"
-cargo run -q -p hearts-app -- --compare-batch west  "$SEAT_START_WEST"  "$COUNT_WEST"  --only-disagree --out "$cmp_west"
-cargo run -q -p hearts-app -- --compare-batch south "$SEAT_START_SOUTH" "$COUNT_SOUTH" --only-disagree --out "$cmp_south"
-cargo run -q -p hearts-app -- --compare-batch east  "$SEAT_START_EAST"  "$COUNT_EAST"  --only-disagree --out "$cmp_east"
-cargo run -q -p hearts-app -- --compare-batch north "$SEAT_START_NORTH" "$COUNT_NORTH" --only-disagree --out "$cmp_north"
+HARD_FEATURE_FLAG=${MDH_FEATURE_HARD_STAGE12:-""}
+HARD_FLAG_ARGS=()
+case "${HARD_FEATURE_FLAG,,}" in
+  1|on|true|yes) HARD_FLAG_ARGS+=("--hard-stage12");;
+  *) ;;
+esac
 
-echo "Running match-batch (Normal vs Hard)…"
-cargo run -q -p hearts-app -- --match-batch west  "$SEAT_START_WEST"  "$COUNT_WEST"  normal hard --out "$match_west"
-cargo run -q -p hearts-app -- --match-batch south "$SEAT_START_SOUTH" "$COUNT_SOUTH" normal hard --out "$match_south"
-cargo run -q -p hearts-app -- --match-batch east  "$SEAT_START_EAST"  "$COUNT_EAST"  normal hard --out "$match_east"
-cargo run -q -p hearts-app -- --match-batch north "$SEAT_START_NORTH" "$COUNT_NORTH" normal hard --out "$match_north"
+echo "Running compare-batch (only-disagree)… ${HARD_FLAG_ARGS[*]:-}"
+cargo run -q -p hearts-app -- --compare-batch west  "$SEAT_START_WEST"  "$COUNT_WEST"  --only-disagree --out "$cmp_west"  ${HARD_FLAG_ARGS[@]:-}
+cargo run -q -p hearts-app -- --compare-batch south "$SEAT_START_SOUTH" "$COUNT_SOUTH" --only-disagree --out "$cmp_south" ${HARD_FLAG_ARGS[@]:-}
+cargo run -q -p hearts-app -- --compare-batch east  "$SEAT_START_EAST"  "$COUNT_EAST"  --only-disagree --out "$cmp_east"  ${HARD_FLAG_ARGS[@]:-}
+cargo run -q -p hearts-app -- --compare-batch north "$SEAT_START_NORTH" "$COUNT_NORTH" --only-disagree --out "$cmp_north" ${HARD_FLAG_ARGS[@]:-}
+
+echo "Running match-batch (Normal vs Hard)… ${HARD_FLAG_ARGS[*]:-}"
+cargo run -q -p hearts-app -- --match-batch west  "$SEAT_START_WEST"  "$COUNT_WEST"  normal hard --out "$match_west"  ${HARD_FLAG_ARGS[@]:-}
+cargo run -q -p hearts-app -- --match-batch south "$SEAT_START_SOUTH" "$COUNT_SOUTH" normal hard --out "$match_south" ${HARD_FLAG_ARGS[@]:-}
+cargo run -q -p hearts-app -- --match-batch east  "$SEAT_START_EAST"  "$COUNT_EAST"  normal hard --out "$match_east"  ${HARD_FLAG_ARGS[@]:-}
+cargo run -q -p hearts-app -- --match-batch north "$SEAT_START_NORTH" "$COUNT_NORTH" normal hard --out "$match_north" ${HARD_FLAG_ARGS[@]:-}
 
 lines() { wc -l < "$1" | tr -d '[:space:]'; }
 summarize_match() {
@@ -65,4 +72,3 @@ out_md="designs/tuning/eval_summary_${timestamp}.md"
 } > "$out_md"
 
 echo "WROTE $out_md"
-
