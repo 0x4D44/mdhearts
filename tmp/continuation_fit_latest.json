@@ -1,0 +1,374 @@
+{
+  "shsh": {
+    "east": {
+      "mix": "shsh",
+      "seat": "east",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        15000,
+        20000,
+        20000
+      ],
+      "penalties": [
+        6.925,
+        6.925,
+        6.925,
+        9.8,
+        6.925,
+        9.8
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1000.0,
+        1125.0,
+        1200.0,
+        1188.0
+      ],
+      "continuation_scale": [
+        1000,
+        1125,
+        1188,
+        1313,
+        1450,
+        1450
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.31,
+        1.27,
+        0.5,
+        1.77
+      ],
+      "penalty_delta": 2.875,
+      "penalty_slope_per_10s": 1.9167,
+      "continuation_delta": 188.0,
+      "avg_depth2": 0.642,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 127
+    },
+    "north": {
+      "mix": "shsh",
+      "seat": "north",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        15000,
+        20000,
+        20000
+      ],
+      "penalties": [
+        5.8,
+        5.8,
+        5.8,
+        6.0,
+        5.8,
+        6.0
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1125.0,
+        1000.0,
+        1388.0,
+        1125.0
+      ],
+      "continuation_scale": [
+        1000,
+        1000,
+        1125,
+        1000,
+        1388,
+        1125
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.19,
+        0.54,
+        0.46,
+        0.62
+      ],
+      "penalty_delta": 0.2,
+      "penalty_slope_per_10s": 0.1333,
+      "continuation_delta": 125.0,
+      "avg_depth2": 0.302,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "south": {
+      "mix": "shsh",
+      "seat": "south",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        15000,
+        20000,
+        20000
+      ],
+      "penalties": [
+        7.4,
+        7.4,
+        7.4,
+        5.7,
+        7.4,
+        5.7
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1125.0,
+        1000.0,
+        1388.0,
+        1125.0
+      ],
+      "continuation_scale": [
+        1000,
+        1000,
+        1125,
+        1000,
+        1388,
+        1125
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.46,
+        0.58,
+        1.17,
+        0.81
+      ],
+      "penalty_delta": -1.7,
+      "penalty_slope_per_10s": -1.1333,
+      "continuation_delta": 125.0,
+      "avg_depth2": 0.503,
+      "needs_more_width": false,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 150
+    },
+    "west": {
+      "mix": "shsh",
+      "seat": "west",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        15000,
+        20000,
+        20000
+      ],
+      "penalties": [
+        7.0,
+        7.0,
+        7.0,
+        8.9,
+        7.0,
+        8.9
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1000.0,
+        1000.0,
+        1200.0,
+        1000.0
+      ],
+      "continuation_scale": [
+        1000,
+        1125,
+        1188,
+        1188,
+        1450,
+        1450
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.12,
+        0.7,
+        0.27,
+        1.6
+      ],
+      "penalty_delta": 1.9,
+      "penalty_slope_per_10s": 1.2667,
+      "continuation_delta": 0.0,
+      "avg_depth2": 0.448,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 6,
+      "suggested_ab_margin": 127
+    }
+  },
+  "snnh": {
+    "east": {
+      "mix": "snnh",
+      "seat": "east",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        6.925,
+        6.925,
+        6.925,
+        6.925
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1125.0,
+        1388.0
+      ],
+      "continuation_scale": [
+        1000,
+        1125,
+        1313,
+        1638
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        1.31,
+        1.54
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 388.0,
+      "avg_depth2": 0.713,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 127
+    },
+    "north": {
+      "mix": "snnh",
+      "seat": "north",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        5.8,
+        5.8,
+        5.8,
+        5.8
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1125.0,
+        1388.0
+      ],
+      "continuation_scale": [
+        1000,
+        1125,
+        1313,
+        1638
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        1.08,
+        1.15
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 388.0,
+      "avg_depth2": 0.557,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 127
+    },
+    "south": {
+      "mix": "snnh",
+      "seat": "south",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.4,
+        7.4,
+        7.4,
+        7.4
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1000.0,
+        1200.0
+      ],
+      "continuation_scale": [
+        1000,
+        1125,
+        1188,
+        1450
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        1.17,
+        1.33
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.625,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 127
+    },
+    "west": {
+      "mix": "snnh",
+      "seat": "west",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.0,
+        7.0,
+        7.0,
+        7.0
+      ],
+      "observed_continuation_scale": [
+        1000.0,
+        1000.0,
+        1000.0,
+        1200.0
+      ],
+      "continuation_scale": [
+        1000,
+        1125,
+        1188,
+        1450
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        1.08,
+        1.15
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.557,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 127
+    }
+  }
+}

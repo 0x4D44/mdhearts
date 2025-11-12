@@ -1,6 +1,6 @@
 use super::{
     BotContext, BotStyle, DecisionLimit, MoonState, card_sort_key, count_cards_in_suit,
-    determine_style, snapshot_scores,
+    detect_moon_pressure, determine_style, snapshot_scores,
 };
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -46,6 +46,62 @@ thread_local! {
     static HARD_NUDGE_HITS: Cell<usize> = Cell::new(0);
     static HARD_NUDGE_TRACE: RefCell<BTreeMap<&'static str, usize>> =
         RefCell::new(BTreeMap::new());
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MixTag {
+    Snnh,
+    Shsh,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MixSeatHint {
+    mix: MixTag,
+    seat: Option<PlayerPosition>,
+}
+
+impl MixSeatHint {
+    fn matches(&self, seat: PlayerPosition) -> bool {
+        self.seat.map_or(true, |s| s == seat)
+    }
+}
+
+fn mix_hint_for_play() -> Option<MixSeatHint> {
+    fn parse_seat(label: &str) -> Option<PlayerPosition> {
+        match label {
+            "north" | "n" => Some(PlayerPosition::North),
+            "east" | "e" => Some(PlayerPosition::East),
+            "south" | "s" => Some(PlayerPosition::South),
+            "west" | "w" => Some(PlayerPosition::West),
+            _ => None,
+        }
+    }
+    fn parse_mix(label: &str) -> Option<MixTag> {
+        match label {
+            "snnh" => Some(MixTag::Snnh),
+            "shsh" => Some(MixTag::Shsh),
+            _ => None,
+        }
+    }
+    static HINT: OnceLock<Option<MixSeatHint>> = OnceLock::new();
+    *HINT.get_or_init(|| {
+        let raw = std::env::var("MDH_SEARCH_MIX_HINT").ok()?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let mut parts = trimmed.splitn(2, ':');
+        let mix_part = parts.next()?.trim().to_ascii_lowercase();
+        let seat_part = parts
+            .next()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty());
+        let mix = parse_mix(&mix_part)?;
+        let seat = seat_part
+            .as_deref()
+            .and_then(|label| parse_seat(label.trim()));
+        Some(MixSeatHint { mix, seat })
+    })
 }
 
 pub(crate) fn reset_hard_nudge_hits() {
@@ -131,6 +187,7 @@ impl PlayPlanner {
         reset_hard_nudge_trace();
 
         let style = determine_style(ctx);
+        let limit_ms = limit.and_then(|lim| lim.remaining_millis());
         let snapshot = snapshot_scores(ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
         let mut best: Option<(Card, i32)> = None;
@@ -152,6 +209,7 @@ impl PlayPlanner {
                 lead_suit,
                 style,
                 &snapshot,
+                limit_ms,
             );
             let mut dbg = DebugParts::maybe_new(card, style, lead_suit, score);
 
@@ -293,6 +351,7 @@ impl PlayPlanner {
                 lead_suit,
                 style,
                 &snapshot,
+                None,
             );
             let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
             if suit_remaining <= 1 {
@@ -389,6 +448,7 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
         lead_suit,
         style,
         &snapshot,
+        None,
     );
 
     let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
@@ -506,6 +566,7 @@ fn base_score(
     lead_suit: Option<Suit>,
     style: BotStyle,
     snapshot: &super::ScoreSnapshot,
+    limit_ms: Option<u32>,
 ) -> i32 {
     let penalties_i32 = penalties as i32;
     let mut score: i32 = 0;
@@ -517,6 +578,8 @@ fn base_score(
         .iter()
         .map(|p| p.card.penalty_value() as i32)
         .sum();
+    let limit_ms = limit_ms.unwrap_or(0);
+    let mix_hint = mix_hint_for_play().filter(|hint| hint.matches(ctx.seat));
 
     if will_capture {
         score -= 4_800;
@@ -560,6 +623,8 @@ fn base_score(
     let leader_gap = snapshot
         .max_score
         .saturating_sub(ctx.scores.score(ctx.seat));
+    let moon_state = ctx.tracker.moon_state(ctx.seat);
+    let under_moon_pressure = matches!(moon_state, MoonState::Considering | MoonState::Committed);
     let gap_units = (leader_gap.min(30) / 10) as i32; // 0..=3
     let leader_feed_per = weights().leader_feed_base + gap_units * weights().leader_feed_gap_per10;
     // Planner-level leader targeting: small positive even before near-100 scenarios.
@@ -570,6 +635,40 @@ fn base_score(
         && snapshot.leader_gap > 0
     {
         score += penalties_i32 * leader_feed_per;
+    }
+
+    if under_moon_pressure && will_capture && penalties > 0 {
+        score -= penalties_i32 * 90;
+    }
+
+    if let Some(hint) = mix_hint {
+        if limit_ms >= 15_000 {
+            match hint.mix {
+                MixTag::Snnh => {
+                    if matches!(ctx.seat, PlayerPosition::North | PlayerPosition::East) {
+                        if !will_capture && penalties > 0 && winner == snapshot.max_player {
+                            score += penalties_i32 * 350;
+                        }
+                        if will_capture && penalties > 0 {
+                            score -= penalties_i32 * 250;
+                        }
+                    }
+                }
+                MixTag::Shsh => {
+                    if matches!(ctx.seat, PlayerPosition::East | PlayerPosition::South) {
+                        if !will_capture && penalties > 0 {
+                            score += penalties_i32 * 300;
+                            if winner == snapshot.max_player {
+                                score += 150;
+                            }
+                        }
+                        if will_capture && penalties > 0 {
+                            score -= penalties_i32 * 200;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Hard-specific leader-feed nudge (wide-tier-inspired) with strict guards.
@@ -816,6 +915,22 @@ fn base_score(
             score -= weights().near100_self_capture_base + penalties_i32 * 900;
         } else {
             score += penalties_i32 * weights().near100_shed_perpen;
+        }
+    }
+    let moon_pressure = detect_moon_pressure(ctx, &snapshot);
+    if moon_pressure {
+        let trick_pen = ctx.round.current_trick().penalty_total() as i32;
+        let leader_pressure = (snapshot.max_score as i32).saturating_sub(70).max(0);
+        let moon_base = 1500 + leader_pressure * 20 + trick_pen * 15;
+        if will_capture {
+            // Strongly discourage taking penalty tricks while others threaten to shoot.
+            score -= moon_base + penalties_i32 * 700;
+        } else if penalties > 0 && winner == snapshot.max_player {
+            // Feeding the leader is preferred to avoid holding penalties.
+            score += moon_base / 2 + penalties_i32 * 600;
+        } else if penalties > 0 {
+            // Still reward shedding to non-leaders during moon threats.
+            score += penalties_i32 * 250;
         }
     }
     // Phase B (Hard-only default): tiny extra penalty when near 100 and we would capture points now.

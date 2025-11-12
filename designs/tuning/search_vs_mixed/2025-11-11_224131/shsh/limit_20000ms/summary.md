@@ -1,0 +1,7 @@
+﻿# Mix: shsh / Think limit: limit_20000ms
+
+Seat penalties:
+- designs\tuning\search_vs_mixed\2025-11-11_224131\shsh\limit_20000ms/match_shsh_west_1000_10.csv: n=10 avg_pen=8.9
+- designs\tuning\search_vs_mixed\2025-11-11_224131\shsh\limit_20000ms/match_shsh_south_1080_10.csv: n=10 avg_pen=5.7
+- designs\tuning\search_vs_mixed\2025-11-11_224131\shsh\limit_20000ms/match_shsh_east_2000_10.csv: n=10 avg_pen=9.8
+- designs\tuning\search_vs_mixed\2025-11-11_224131\shsh\limit_20000ms/match_shsh_north_1100_10.csv: n=10 avg_pen=6

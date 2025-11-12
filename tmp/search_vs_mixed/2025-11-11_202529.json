@@ -1,0 +1,307 @@
+{
+  "snnh": {
+    "limit_15000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 10,
+          "avg_pen": 9.8,
+          "std_pen": 6.29
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.69,
+            "scanned_phase_a": 0.08,
+            "scanned_phase_b": 2.62,
+            "scanned_phase_c": 1.69,
+            "utilization": 9.62,
+            "continuation_scale_permil": 1200.0,
+            "samples": 13,
+            "depth2_samples": 1.85
+          },
+          "depth2_samples": 24
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 10,
+          "avg_pen": 6.0,
+          "std_pen": 6.542
+        },
+        "telemetry": {
+          "records": 116,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.46,
+            "scanned_phase_a": 0.46,
+            "scanned_phase_b": 2.0,
+            "scanned_phase_c": 0.15,
+            "utilization": 2.85,
+            "continuation_scale_permil": 1000.0,
+            "samples": 13,
+            "depth2_samples": 0.08
+          },
+          "depth2_samples": 1
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 10,
+          "avg_pen": 5.7,
+          "std_pen": 8.545
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.38,
+            "scanned_phase_a": 0.08,
+            "scanned_phase_b": 2.31,
+            "scanned_phase_c": 0.15,
+            "utilization": 4.77,
+            "continuation_scale_permil": 1200.0,
+            "samples": 13,
+            "depth2_samples": 0.31
+          },
+          "depth2_samples": 4
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 10,
+          "avg_pen": 8.9,
+          "std_pen": 7.19
+        },
+        "telemetry": {
+          "records": 90,
+          "post_records": 40,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 5.5,
+            "scanned_phase_a": 1.5,
+            "scanned_phase_b": 4.0,
+            "scanned_phase_c": 0.4,
+            "utilization": 8.5,
+            "continuation_scale_permil": 1200.0,
+            "samples": 10,
+            "depth2_samples": 0.4
+          },
+          "depth2_samples": 4
+        }
+      }
+    },
+    "limit_20000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 10,
+          "avg_pen": 9.8,
+          "std_pen": 6.29
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 3.23,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 3.23,
+            "scanned_phase_c": 2.08,
+            "utilization": 14.38,
+            "continuation_scale_permil": 1200.0,
+            "samples": 13,
+            "depth2_samples": 3.62
+          },
+          "depth2_samples": 47
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 10,
+          "avg_pen": 6.0,
+          "std_pen": 6.542
+        },
+        "telemetry": {
+          "records": 116,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.92,
+            "scanned_phase_a": 0.92,
+            "scanned_phase_b": 2.0,
+            "scanned_phase_c": 0.15,
+            "utilization": 3.15,
+            "continuation_scale_permil": 1200.0,
+            "samples": 13,
+            "depth2_samples": 0.08
+          },
+          "depth2_samples": 1
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 10,
+          "avg_pen": 5.7,
+          "std_pen": 8.545
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.54,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.54,
+            "scanned_phase_c": 0.15,
+            "utilization": 5.38,
+            "continuation_scale_permil": 1200.0,
+            "samples": 13,
+            "depth2_samples": 0.46
+          },
+          "depth2_samples": 6
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 10,
+          "avg_pen": 8.9,
+          "std_pen": 7.19
+        },
+        "telemetry": {
+          "records": 90,
+          "post_records": 40,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 6.3,
+            "scanned_phase_a": 0.9,
+            "scanned_phase_b": 5.4,
+            "scanned_phase_c": 0.7,
+            "utilization": 11.7,
+            "continuation_scale_permil": 1200.0,
+            "samples": 10,
+            "depth2_samples": 0.9
+          },
+          "depth2_samples": 9
+        }
+      }
+    },
+    "smoke_limit_15000ms": {},
+    "seat_trends": {
+      "east": {
+        "limits_ms": [
+          15000,
+          20000
+        ],
+        "avg_penalties": [
+          9.8,
+          9.8
+        ],
+        "penalty_delta": 0.0,
+        "penalty_slope_per_10s": 0.0,
+        "continuation_scale_delta": 0.0,
+        "penalty_per_cont_delta": null,
+        "per_limit_deltas": {
+          "15000->20000": 0.0
+        },
+        "avg_depth2_samples": 2.735,
+        "fails_goals": true,
+        "goal_checks": {
+          "depth2_triggered": true,
+          "depth2_threshold": 0.4,
+          "slope_threshold": -0.15,
+          "observed_depth2_avg": 2.735,
+          "observed_slope": 0.0
+        }
+      },
+      "north": {
+        "limits_ms": [
+          15000,
+          20000
+        ],
+        "avg_penalties": [
+          6.0,
+          6.0
+        ],
+        "penalty_delta": 0.0,
+        "penalty_slope_per_10s": 0.0,
+        "continuation_scale_delta": 200.0,
+        "penalty_per_cont_delta": 0.0,
+        "per_limit_deltas": {
+          "15000->20000": 0.0
+        },
+        "avg_depth2_samples": 0.08,
+        "fails_goals": false,
+        "goal_checks": {
+          "depth2_triggered": false,
+          "depth2_threshold": 0.4,
+          "slope_threshold": -0.15,
+          "observed_depth2_avg": 0.08,
+          "observed_slope": 0.0
+        }
+      },
+      "south": {
+        "limits_ms": [
+          15000,
+          20000
+        ],
+        "avg_penalties": [
+          5.7,
+          5.7
+        ],
+        "penalty_delta": 0.0,
+        "penalty_slope_per_10s": 0.0,
+        "continuation_scale_delta": 0.0,
+        "penalty_per_cont_delta": null,
+        "per_limit_deltas": {
+          "15000->20000": 0.0
+        },
+        "avg_depth2_samples": 0.385,
+        "fails_goals": false,
+        "goal_checks": {
+          "depth2_triggered": false,
+          "depth2_threshold": 0.4,
+          "slope_threshold": -0.15,
+          "observed_depth2_avg": 0.385,
+          "observed_slope": 0.0
+        }
+      },
+      "west": {
+        "limits_ms": [
+          15000,
+          20000
+        ],
+        "avg_penalties": [
+          8.9,
+          8.9
+        ],
+        "penalty_delta": 0.0,
+        "penalty_slope_per_10s": 0.0,
+        "continuation_scale_delta": 0.0,
+        "penalty_per_cont_delta": null,
+        "per_limit_deltas": {
+          "15000->20000": 0.0
+        },
+        "avg_depth2_samples": 0.65,
+        "fails_goals": true,
+        "goal_checks": {
+          "depth2_triggered": true,
+          "depth2_threshold": 0.4,
+          "slope_threshold": -0.15,
+          "observed_depth2_avg": 0.65,
+          "observed_slope": 0.0
+        }
+      }
+    }
+  }
+}

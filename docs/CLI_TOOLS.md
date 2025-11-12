@@ -29,10 +29,13 @@ Run `mdhearts.exe` (or `cargo run -p hearts-app --bin mdhearts --`) with the fol
 - `--match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [--telemetry-out <path>] [Hard flags]`
   - Simulates one round per seed twice (A vs B difficulties) and emits CSV lines:
     `seed,seat,diffA,diffB,a_pen,b_pen,delta` where `delta=b_pen-a_pen`.
-  - Defaults: difficultyA=normal, difficultyB=hard (you can also pass `search` / `lookahead`). Append Hard flags to control Hard determinism/time caps. `--telemetry-out <path>` writes the hard telemetry sink (NDJSON) after the batch completes.
-  - Example: `--match-batch west 1000 50 normal hard --out designs/tuning/match_west_1000_50.csv`
- - `--match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [Hard flags]`
-   - Runs mixed-seat evaluations using a seed file. `<mix>` is 4 characters (N,E,S,W) using `e|n|h`.
+  - Defaults: difficultyA=normal, difficultyB=hard (accepts `search`/`lookahead`). Append Hard flags to control Hard determinism/time caps.
+  - `--telemetry-out <path>` writes the Hard telemetry sink (NDJSON).
+  - Example: `--match-batch west 1000 50 search hard --out designs/tuning/match_west_1000_50.csv`
+ - `--match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [--telemetry-out <path>] [--stats] [Hard flags]`
+   - Mixed-seat evaluation with inline seed ranges. `<mix>` is 4 characters (N,E,S,W) using `e|n|h|s` (Easy/Normal/Hard/Search).
+ - `--match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [--telemetry-out <path>] [Hard flags]`
+   - Runs mixed-seat evaluations using a seed file (same `e|n|h|s` syntax).
    - Example: `--match-mixed-file west nnhh --seeds-file designs/tuning/seeds_example.txt --out designs/tuning/mixed_seeds_west.csv`
 
 Helper scripts (deterministic evaluation)
@@ -40,6 +43,8 @@ Helper scripts (deterministic evaluation)
 - Bash/*nix: `bash tools/run_eval.sh`
   - Both write timestamped CSVs under `designs/tuning/` and a summary Markdown `eval_summary_<timestamp>.md`.
   - Parameters/ranges can be adjusted (PowerShell via parameters; Bash via env vars like `SEAT_START_WEST`, `COUNT_WEST`, etc.).
+- Search vs Hard sweeps: `powershell -ExecutionPolicy Bypass -File tools/run_search_vs_hard.ps1 -VerifyTimeoutTelemetry`
+- Mixed-seat sweeps: `powershell -ExecutionPolicy Bypass -File tools/run_search_vs_mixed.ps1 -Mixes shsh -ThinkLimitsMs @(5000,0)`
 
 ## Hard (FutureHard) flags (optional)
 

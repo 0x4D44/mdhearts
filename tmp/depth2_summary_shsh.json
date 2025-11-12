@@ -1,0 +1,94 @@
+{
+  "east": {
+    "limits_ms": [
+      5000,
+      10000,
+      15000,
+      20000
+    ],
+    "avg_penalties": [
+      6.925,
+      6.925,
+      6.925,
+      6.925
+    ],
+    "penalty_delta": 0.0,
+    "penalty_slope_per_10s": 0.0,
+    "continuation_scale_delta": 200.0,
+    "penalty_per_cont_delta": 0.0,
+    "per_limit_deltas": {
+      "5000->10000": 0.0,
+      "10000->15000": 0.0,
+      "15000->20000": 0.0
+    }
+  },
+  "north": {
+    "limits_ms": [
+      5000,
+      10000,
+      15000,
+      20000
+    ],
+    "avg_penalties": [
+      5.8,
+      5.8,
+      5.8,
+      5.8
+    ],
+    "penalty_delta": 0.0,
+    "penalty_slope_per_10s": 0.0,
+    "continuation_scale_delta": 200.0,
+    "penalty_per_cont_delta": 0.0,
+    "per_limit_deltas": {
+      "5000->10000": 0.0,
+      "10000->15000": 0.0,
+      "15000->20000": 0.0
+    }
+  },
+  "south": {
+    "limits_ms": [
+      5000,
+      10000,
+      15000,
+      20000
+    ],
+    "avg_penalties": [
+      7.4,
+      7.4,
+      7.4,
+      7.4
+    ],
+    "penalty_delta": 0.0,
+    "penalty_slope_per_10s": 0.0,
+    "continuation_scale_delta": 200.0,
+    "penalty_per_cont_delta": 0.0,
+    "per_limit_deltas": {
+      "5000->10000": 0.0,
+      "10000->15000": 0.0,
+      "15000->20000": 0.0
+    }
+  },
+  "west": {
+    "limits_ms": [
+      5000,
+      10000,
+      15000,
+      20000
+    ],
+    "avg_penalties": [
+      6.85,
+      6.85,
+      6.675,
+      6.675
+    ],
+    "penalty_delta": -0.175,
+    "penalty_slope_per_10s": -0.1167,
+    "continuation_scale_delta": 200.0,
+    "penalty_per_cont_delta": -0.0009,
+    "per_limit_deltas": {
+      "5000->10000": 0.0,
+      "10000->15000": -0.175,
+      "15000->20000": 0.0
+    }
+  }
+}

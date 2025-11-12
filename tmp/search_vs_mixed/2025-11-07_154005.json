@@ -1,0 +1,58 @@
+{
+  "hssh": {
+    "limit_5000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 50,
+          "avg_pen": 6.52,
+          "std_pen": 6.604
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 50,
+          "avg_pen": 6.94,
+          "std_pen": 6.895
+        },
+        "telemetry": {
+          "records": 100,
+          "post_records": 40,
+          "timed_out": 0
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 50,
+          "avg_pen": 7.58,
+          "std_pen": 7.023
+        },
+        "telemetry": {
+          "records": 120,
+          "post_records": 48,
+          "timed_out": 0
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 50,
+          "avg_pen": 6.1,
+          "std_pen": 6.451
+        },
+        "telemetry": {
+          "records": 129,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      }
+    }
+  }
+}

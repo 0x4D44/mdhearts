@@ -412,8 +412,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             stats.limits_in_effect.ab_margin,
                         );
                         println!(
-                            "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={} endgame_dp_hits={} planner_nudge_hits={}",
+                            "    cont_cap={} cont_scale_permil={} wide_boost_feed_permil={} wide_boost_self_permil={} next3_tiny_hits={} endgame_dp_hits={} planner_nudge_hits={}",
                             stats.cont_cap,
+                            stats.continuation_scale_permil,
                             stats.wide_boost_feed_permil,
                             stats.wide_boost_self_permil,
                             stats.next3_tiny_hits,
@@ -551,8 +552,9 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                                 stats.limits_in_effect.ab_margin,
                             );
                             println!(
-                                "    cont_cap={} wide_boost_feed_permil={} wide_boost_self_permil={} endgame_dp_hits={} planner_nudge_hits={}",
+                                "    cont_cap={} cont_scale_permil={} wide_boost_feed_permil={} wide_boost_self_permil={} endgame_dp_hits={} planner_nudge_hits={}",
                                 stats.cont_cap,
+                                stats.continuation_scale_permil,
                                 stats.wide_boost_feed_permil,
                                 stats.wide_boost_self_permil,
                                 stats.endgame_dp_hits,
@@ -1088,6 +1090,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     );
                     stats_map.insert("cont_cap".into(), stats.cont_cap.into());
                     stats_map.insert(
+                        "continuation_scale_permil".into(),
+                        stats.continuation_scale_permil.into(),
+                    );
+                    stats_map.insert(
                         "wide_boost_feed_permil".into(),
                         stats.wide_boost_feed_permil.into(),
                     );
@@ -1368,7 +1374,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
         }
         "--match-mixed" => {
             // Usage: --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [Hard flags]
-            // <mix> is a 4-char string in order N,E,S,W using: e|n|h (easy|normal|hard)
+            // <mix> is a 4-char string in order N,E,S,W using: e|n|h|s (easy|normal|hard|search)
             let seat = args.next().map(|s| parse_seat(&s)).transpose()?.ok_or(
                 CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"),
             )?;
@@ -1379,7 +1385,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 CliError::MissingArgument("--match-mixed <seat> <seed_start> <count> <mix>"),
             )?;
             let mix = args.next().ok_or(CliError::MissingArgument(
-                "--match-mixed requires <mix> (e|n|h for N,E,S,W)",
+                "--match-mixed requires <mix> (e|n|h|s for N,E,S,W)",
             ))?;
             if mix.len() != 4 {
                 return Err(CliError::UnknownCommand(
@@ -1392,19 +1398,21 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     'e' | 'E' => Some(crate::bot::BotDifficulty::EasyLegacy),
                     'n' | 'N' => Some(crate::bot::BotDifficulty::NormalHeuristic),
                     'h' | 'H' => Some(crate::bot::BotDifficulty::FutureHard),
+                    's' | 'S' => Some(crate::bot::BotDifficulty::SearchLookahead),
                     _ => None,
                 }
             };
             let mut diffs = [crate::bot::BotDifficulty::NormalHeuristic; 4];
             for (i, c) in chars.into_iter().enumerate() {
                 let d = map_char(c).ok_or(CliError::UnknownCommand(
-                    "--match-mixed invalid mix char (use e|n|h)".to_string(),
+                    "--match-mixed invalid mix char (use e|n|h|s)".to_string(),
                 ))?;
                 diffs[i] = d;
             }
 
-            // Optional flags: --out <path>, --stats, plus Hard flags
+            // Optional flags: --out <path>, --telemetry-out <path>, --stats, plus Hard flags
             let mut out_path: Option<std::path::PathBuf> = None;
+            let mut telemetry_out: Option<std::path::PathBuf> = None;
             let mut include_stats: bool = false;
             let mut tail_tokens: Vec<String> = Vec::new();
             while let Some(flag) = args.next() {
@@ -1414,6 +1422,12 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             .next()
                             .ok_or(CliError::MissingArgument("--out <path>"))?;
                         out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    "--telemetry-out" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--telemetry-out <path>"))?;
+                        telemetry_out = Some(std::path::PathBuf::from(p));
                     }
                     "--stats" => {
                         include_stats = true;
@@ -1431,6 +1445,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 }
             }
             parse_hard_cli_flags(&mut tail_tokens.into_iter())?;
+
+            if telemetry_out.is_some() {
+                crate::telemetry::hard::reset();
+            }
 
             let mut rows = Vec::new();
             if include_stats {
@@ -1469,6 +1487,18 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     println!("{}", line);
                 }
             }
+            if let Some(path) = telemetry_out {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(CliError::Io)?;
+                }
+                let (path, summary) =
+                    crate::telemetry::hard::export(Some(path)).map_err(CliError::Io)?;
+                println!(
+                    "Telemetry written to {} (records: {})",
+                    path.display(),
+                    summary.record_count
+                );
+            }
             Ok(CliOutcome::Handled)
         }
         "--match-mixed-file" => {
@@ -1477,7 +1507,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 CliError::MissingArgument("--match-mixed-file <seat> <mix> --seeds-file <path>"),
             )?;
             let mix = args.next().ok_or(CliError::MissingArgument(
-                "--match-mixed-file requires <mix> (e|n|h for N,E,S,W)",
+                "--match-mixed-file requires <mix> (e|n|h|s for N,E,S,W)",
             ))?;
             if mix.len() != 4 {
                 return Err(CliError::UnknownCommand(
@@ -1485,9 +1515,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 ));
             }
 
-            // Optional flags: --seeds-file <path>, --out <path>, --stats, then Hard flags
+            // Optional flags: --seeds-file <path>, --out <path>, --telemetry-out <path>, --stats, then Hard flags
             let mut seeds_path: Option<std::path::PathBuf> = None;
             let mut out_path: Option<std::path::PathBuf> = None;
+            let mut telemetry_out: Option<std::path::PathBuf> = None;
             let mut include_stats: bool = false;
             let mut tail_tokens: Vec<String> = Vec::new();
             while let Some(flag) = args.next() {
@@ -1503,6 +1534,12 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             .next()
                             .ok_or(CliError::MissingArgument("--out <path>"))?;
                         out_path = Some(std::path::PathBuf::from(p));
+                    }
+                    "--telemetry-out" => {
+                        let p = args
+                            .next()
+                            .ok_or(CliError::MissingArgument("--telemetry-out <path>"))?;
+                        telemetry_out = Some(std::path::PathBuf::from(p));
                     }
                     "--stats" => {
                         include_stats = true;
@@ -1522,6 +1559,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             let seeds_path = seeds_path.ok_or(CliError::MissingArgument("--seeds-file <path>"))?;
             parse_hard_cli_flags(&mut tail_tokens.into_iter())?;
 
+            if telemetry_out.is_some() {
+                crate::telemetry::hard::reset();
+            }
+
             // Map mix characters to difficulties
             let chars: Vec<char> = mix.chars().collect();
             let map_char = |c: char| -> Option<crate::bot::BotDifficulty> {
@@ -1529,13 +1570,14 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     'e' | 'E' => Some(crate::bot::BotDifficulty::EasyLegacy),
                     'n' | 'N' => Some(crate::bot::BotDifficulty::NormalHeuristic),
                     'h' | 'H' => Some(crate::bot::BotDifficulty::FutureHard),
+                    's' | 'S' => Some(crate::bot::BotDifficulty::SearchLookahead),
                     _ => None,
                 }
             };
             let mut diffs = [crate::bot::BotDifficulty::NormalHeuristic; 4];
             for (i, c) in chars.into_iter().enumerate() {
                 let d = map_char(c).ok_or(CliError::UnknownCommand(
-                    "--match-mixed-file invalid mix char (use e|n|h)".to_string(),
+                    "--match-mixed-file invalid mix char (use e|n|h|s)".to_string(),
                 ))?;
                 diffs[i] = d;
             }
@@ -1582,6 +1624,18 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 for line in rows {
                     println!("{}", line);
                 }
+            }
+            if let Some(path) = telemetry_out {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(CliError::Io)?;
+                }
+                let (path, summary) =
+                    crate::telemetry::hard::export(Some(path)).map_err(CliError::Io)?;
+                println!(
+                    "Telemetry written to {} (records: {})",
+                    path.display(),
+                    summary.record_count
+                );
             }
             Ok(CliOutcome::Handled)
         }

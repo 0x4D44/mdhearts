@@ -1,0 +1,90 @@
+{
+  "snnh": {
+    "limit_5000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 50,
+          "avg_pen": 6.58,
+          "std_pen": 6.667
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.62,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.62,
+            "scanned_phase_c": 0.08,
+            "utilization": 5.23,
+            "samples": 13
+          }
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 50,
+          "avg_pen": 6.64,
+          "std_pen": 6.776
+        },
+        "telemetry": {
+          "records": 90,
+          "post_records": 40,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 1.5,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 1.5,
+            "scanned_phase_c": 0.7,
+            "utilization": 3.5,
+            "samples": 10
+          }
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 50,
+          "avg_pen": 7.58,
+          "std_pen": 7.023
+        },
+        "telemetry": {
+          "records": 108,
+          "post_records": 48,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.58,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.58,
+            "scanned_phase_c": 0.42,
+            "utilization": 5.58,
+            "samples": 12
+          }
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 50,
+          "avg_pen": 6.06,
+          "std_pen": 6.457
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 1.92,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 1.92,
+            "scanned_phase_c": 0.23,
+            "utilization": 3.46,
+            "samples": 13
+          }
+        }
+      }
+    }
+  }
+}

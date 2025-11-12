@@ -1,0 +1,286 @@
+{
+  "shsh": {
+    "east": {
+      "mix": "shsh",
+      "seat": "east",
+      "limits_ms": [
+        5000,
+        5000,
+        15000,
+        15000
+      ],
+      "penalties": [
+        13.75,
+        13.75,
+        13.75,
+        13.75
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.6,
+        0.6
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.3,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "north": {
+      "mix": "shsh",
+      "seat": "north",
+      "limits_ms": [
+        5000,
+        5000,
+        15000,
+        15000
+      ],
+      "penalties": [
+        8.25,
+        8.25,
+        8.25,
+        8.25
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.77,
+        0.77
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.385,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "south": {
+      "mix": "shsh",
+      "seat": "south",
+      "limits_ms": [
+        5000,
+        5000,
+        15000,
+        15000
+      ],
+      "penalties": [
+        6.5,
+        6.5,
+        6.5,
+        6.5
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.4,
+        0.4
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.2,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "west": {
+      "mix": "shsh",
+      "seat": "west",
+      "limits_ms": [
+        5000,
+        5000,
+        15000,
+        15000
+      ],
+      "penalties": [
+        6.25,
+        6.25,
+        6.25,
+        6.25
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.7,
+        0.7
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.35,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    }
+  },
+  "snnh": {
+    "east": {
+      "mix": "snnh",
+      "seat": "east",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        6.925,
+        6.925,
+        6.925,
+        6.925
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.0,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "north": {
+      "mix": "snnh",
+      "seat": "north",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        5.8,
+        5.8,
+        5.8,
+        5.8
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.0,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "south": {
+      "mix": "snnh",
+      "seat": "south",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.4,
+        7.4,
+        7.4,
+        7.4
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.0,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "west": {
+      "mix": "snnh",
+      "seat": "west",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.175,
+        7.175,
+        7.0,
+        7.0
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "penalty_delta": -0.175,
+      "penalty_slope_per_10s": -0.1167,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.0,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 150
+    }
+  }
+}

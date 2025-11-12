@@ -1,0 +1,10 @@
+{
+  "bundle_stage3": {
+    "seat_trends": {}
+  },
+  "snnh,shsh": {
+    "limit_5000ms": {},
+    "smoke_limit_5000ms": {},
+    "seat_trends": {}
+  }
+}

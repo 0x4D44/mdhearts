@@ -1,0 +1,176 @@
+{
+  "snnh": {
+    "limit_15000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 20,
+          "avg_pen": 6.85,
+          "std_pen": 6.544
+        },
+        "telemetry": {
+          "records": 108,
+          "post_records": 48,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 1.83,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 1.83,
+            "scanned_phase_c": 0.33,
+            "utilization": 3.67,
+            "samples": 12
+          }
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 20,
+          "avg_pen": 6.8,
+          "std_pen": 6.728
+        },
+        "telemetry": {
+          "records": 108,
+          "post_records": 48,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.42,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.42,
+            "scanned_phase_c": 0.25,
+            "utilization": 5.25,
+            "samples": 12
+          }
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 20,
+          "avg_pen": 6.4,
+          "std_pen": 7.546
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.31,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.31,
+            "scanned_phase_c": 0.31,
+            "utilization": 6.08,
+            "samples": 13
+          }
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 20,
+          "avg_pen": 6.15,
+          "std_pen": 6.467
+        },
+        "telemetry": {
+          "records": 116,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.38,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.38,
+            "scanned_phase_c": 0.08,
+            "utilization": 3.77,
+            "samples": 13
+          }
+        }
+      }
+    },
+    "limit_5000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 20,
+          "avg_pen": 6.85,
+          "std_pen": 6.544
+        },
+        "telemetry": {
+          "records": 108,
+          "post_records": 48,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 1.83,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 1.83,
+            "scanned_phase_c": 0.33,
+            "utilization": 3.67,
+            "samples": 12
+          }
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 20,
+          "avg_pen": 6.8,
+          "std_pen": 6.728
+        },
+        "telemetry": {
+          "records": 108,
+          "post_records": 48,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.42,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.42,
+            "scanned_phase_c": 0.25,
+            "utilization": 5.25,
+            "samples": 12
+          }
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 20,
+          "avg_pen": 6.4,
+          "std_pen": 7.546
+        },
+        "telemetry": {
+          "records": 117,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.31,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.31,
+            "scanned_phase_c": 0.31,
+            "utilization": 6.08,
+            "samples": 13
+          }
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 20,
+          "avg_pen": 6.15,
+          "std_pen": 6.467
+        },
+        "telemetry": {
+          "records": 116,
+          "post_records": 52,
+          "timed_out": 0,
+          "search_stats": {
+            "scanned": 2.38,
+            "scanned_phase_a": 0.0,
+            "scanned_phase_b": 2.38,
+            "scanned_phase_c": 0.08,
+            "utilization": 3.77,
+            "samples": 13
+          }
+        }
+      }
+    }
+  }
+}

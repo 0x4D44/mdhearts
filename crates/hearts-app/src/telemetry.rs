@@ -1,4 +1,5 @@
 use crate::bot::UnseenTracker;
+use crate::bot::search::Stats as SearchStats;
 use hearts_core::model::player::PlayerPosition;
 use parking_lot::RwLock;
 use serde::Serialize;
@@ -41,7 +42,26 @@ pub struct HardTelemetryRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_stats: Option<SearchTelemetrySnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchTelemetrySnapshot {
+    pub scanned: usize,
+    pub scanned_phase_a: usize,
+    pub scanned_phase_b: usize,
+    pub scanned_phase_c: usize,
+    pub tier: Option<String>,
+    pub utilization: Option<u8>,
+    pub phaseb_topk: Option<u32>,
+    pub next_probe_m: Option<u32>,
+    pub ab_margin: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation_scale_permil: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth2_samples: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -125,8 +145,29 @@ impl HardTelemetryRecord {
             think_limit_ms: None,
             elapsed_ms: None,
             timed_out: None,
+            search_stats: None,
             fallback: None,
             notes: None,
+        }
+    }
+}
+
+impl SearchTelemetrySnapshot {
+    pub fn from_stats(stats: &SearchStats) -> Self {
+        let tier = Some(format!("{:?}", stats.tier));
+        let limits = stats.limits_in_effect;
+        SearchTelemetrySnapshot {
+            scanned: stats.scanned,
+            scanned_phase_a: stats.scanned_phase_a,
+            scanned_phase_b: stats.scanned_phase_b,
+            scanned_phase_c: stats.scanned_phase_c,
+            tier,
+            utilization: Some(stats.utilization),
+            phaseb_topk: Some(limits.phaseb_topk as u32),
+            next_probe_m: Some(limits.next_probe_m as u32),
+            ab_margin: Some(limits.ab_margin),
+            continuation_scale_permil: Some(stats.continuation_scale_permil),
+            depth2_samples: Some(stats.depth2_samples),
         }
     }
 }
@@ -228,6 +269,7 @@ fn enforce_retention(dir: &Path, retention: usize) -> io::Result<()> {
 }
 
 pub mod hard {
+    pub use super::SearchTelemetrySnapshot;
     use super::*;
 
     pub fn sink() -> &'static TelemetrySink {
@@ -264,6 +306,7 @@ pub mod hard {
         elapsed_ms: u32,
         timed_out: bool,
         fallback: Option<&str>,
+        search_stats: Option<SearchTelemetrySnapshot>,
     ) {
         let mut record =
             HardTelemetryRecord::from_tracker(seat, tracker, Some(difficulty), Some("post"));
@@ -271,6 +314,7 @@ pub mod hard {
         record.elapsed_ms = Some(elapsed_ms);
         record.timed_out = Some(timed_out);
         record.fallback = fallback.map(|f| f.to_string());
+        record.search_stats = search_stats;
         sink().push(record);
     }
 
@@ -313,6 +357,7 @@ mod tests {
                 think_limit_ms: None,
                 elapsed_ms: None,
                 timed_out: None,
+                search_stats: None,
                 fallback: None,
                 notes: None,
             },
@@ -330,6 +375,7 @@ mod tests {
                 think_limit_ms: None,
                 elapsed_ms: None,
                 timed_out: None,
+                search_stats: None,
                 fallback: None,
                 notes: None,
             },

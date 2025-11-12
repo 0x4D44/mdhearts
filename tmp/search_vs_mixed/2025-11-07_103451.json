@@ -1,0 +1,220 @@
+{
+  "shsh": {
+    "limit_10000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 200,
+          "avg_pen": 7.085,
+          "std_pen": 6.753
+        },
+        "telemetry": {
+          "records": 119,
+          "post_records": 48,
+          "timed_out": 0
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 200,
+          "avg_pen": 6.535,
+          "std_pen": 6.499
+        },
+        "telemetry": {
+          "records": 129,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 200,
+          "avg_pen": 6.515,
+          "std_pen": 6.319
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 200,
+          "avg_pen": 6.615,
+          "std_pen": 6.48
+        },
+        "telemetry": {
+          "records": 109,
+          "post_records": 44,
+          "timed_out": 0
+        }
+      }
+    },
+    "limit_15000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 200,
+          "avg_pen": 7.085,
+          "std_pen": 6.753
+        },
+        "telemetry": {
+          "records": 119,
+          "post_records": 48,
+          "timed_out": 0
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 200,
+          "avg_pen": 6.535,
+          "std_pen": 6.499
+        },
+        "telemetry": {
+          "records": 129,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 200,
+          "avg_pen": 6.515,
+          "std_pen": 6.319
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 200,
+          "avg_pen": 6.615,
+          "std_pen": 6.48
+        },
+        "telemetry": {
+          "records": 109,
+          "post_records": 44,
+          "timed_out": 0
+        }
+      }
+    },
+    "limit_5000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 200,
+          "avg_pen": 7.085,
+          "std_pen": 6.753
+        },
+        "telemetry": {
+          "records": 119,
+          "post_records": 48,
+          "timed_out": 0
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 200,
+          "avg_pen": 6.535,
+          "std_pen": 6.499
+        },
+        "telemetry": {
+          "records": 129,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 200,
+          "avg_pen": 6.515,
+          "std_pen": 6.319
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 200,
+          "avg_pen": 6.615,
+          "std_pen": 6.48
+        },
+        "telemetry": {
+          "records": 109,
+          "post_records": 44,
+          "timed_out": 0
+        }
+      }
+    },
+    "limit_unlimited": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 200,
+          "avg_pen": 7.085,
+          "std_pen": 6.753
+        },
+        "telemetry": {
+          "records": 119,
+          "post_records": 48,
+          "timed_out": 0
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 200,
+          "avg_pen": 6.535,
+          "std_pen": 6.499
+        },
+        "telemetry": {
+          "records": 129,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 200,
+          "avg_pen": 6.515,
+          "std_pen": 6.319
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 200,
+          "avg_pen": 6.615,
+          "std_pen": 6.48
+        },
+        "telemetry": {
+          "records": 109,
+          "post_records": 44,
+          "timed_out": 0
+        }
+      }
+    }
+  }
+}

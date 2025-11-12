@@ -1,0 +1,278 @@
+{
+  "shsh": {
+    "east": {
+      "mix": "shsh",
+      "seat": "east",
+      "limits_ms": [
+        5000,
+        10000,
+        15000
+      ],
+      "penalties": [
+        6.925,
+        6.925,
+        6.925
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.38
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.127,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "north": {
+      "mix": "shsh",
+      "seat": "north",
+      "limits_ms": [
+        5000,
+        10000,
+        15000
+      ],
+      "penalties": [
+        5.8,
+        5.8,
+        5.7
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.42
+      ],
+      "penalty_delta": -0.1,
+      "penalty_slope_per_10s": -0.1,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.14,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 150
+    },
+    "south": {
+      "mix": "shsh",
+      "seat": "south",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.4,
+        7.4,
+        7.475,
+        7.475
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        0.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.54,
+        0.0
+      ],
+      "penalty_delta": 0.075,
+      "penalty_slope_per_10s": 0.05,
+      "continuation_delta": -1000.0,
+      "avg_depth2": 0.135,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 6,
+      "suggested_ab_margin": 127
+    },
+    "west": {
+      "mix": "shsh",
+      "seat": "west",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        6.7,
+        6.7,
+        7.125,
+        7.45
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.15,
+        0.54
+      ],
+      "penalty_delta": 0.75,
+      "penalty_slope_per_10s": 0.5,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.173,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    }
+  },
+  "snnh": {
+    "east": {
+      "mix": "snnh",
+      "seat": "east",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        6.925,
+        6.925,
+        6.925,
+        6.925
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.62,
+        1.38
+      ],
+      "penalty_delta": 0.0,
+      "penalty_slope_per_10s": 0.0,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.5,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 127
+    },
+    "north": {
+      "mix": "snnh",
+      "seat": "north",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        5.8,
+        5.8,
+        5.7,
+        5.7
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.69,
+        2.08
+      ],
+      "penalty_delta": -0.1,
+      "penalty_slope_per_10s": -0.0667,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.693,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 8,
+      "suggested_ab_margin": 150
+    },
+    "south": {
+      "mix": "snnh",
+      "seat": "south",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.4,
+        7.4,
+        7.475,
+        7.475
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.5,
+        0.75
+      ],
+      "penalty_delta": 0.075,
+      "penalty_slope_per_10s": 0.05,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.312,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    },
+    "west": {
+      "mix": "snnh",
+      "seat": "west",
+      "limits_ms": [
+        5000,
+        10000,
+        15000,
+        20000
+      ],
+      "penalties": [
+        7.025,
+        7.025,
+        7.45,
+        7.45
+      ],
+      "continuation_scale": [
+        1000.0,
+        1000.0,
+        1200.0,
+        1200.0
+      ],
+      "depth2_samples": [
+        0.0,
+        0.0,
+        0.23,
+        0.46
+      ],
+      "penalty_delta": 0.425,
+      "penalty_slope_per_10s": 0.2833,
+      "continuation_delta": 200.0,
+      "avg_depth2": 0.173,
+      "needs_more_width": true,
+      "suggested_phaseb_topk": 7,
+      "suggested_ab_margin": 127
+    }
+  }
+}

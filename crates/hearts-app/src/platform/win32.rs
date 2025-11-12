@@ -662,6 +662,13 @@ fn spawn_bot_worker(
         } else {
             Some(config.max_duration.as_millis().min(u32::MAX as u128) as u32)
         };
+        let search_stats = if matches!(difficulty, crate::bot::BotDifficulty::SearchLookahead) {
+            crate::bot::search::last_stats()
+                .map(|stats| crate::telemetry::hard::SearchTelemetrySnapshot::from_stats(&stats))
+        } else {
+            None
+        };
+
         crate::telemetry::hard::record_post_decision(
             seat,
             snapshot.tracker(),
@@ -670,6 +677,7 @@ fn spawn_bot_worker(
             elapsed_ms,
             timed_out,
             fallback_label,
+            search_stats,
         );
         let result = BotThinkResult {
             seat,

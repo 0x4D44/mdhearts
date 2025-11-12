@@ -1,0 +1,58 @@
+{
+  "sshh": {
+    "limit_5000ms": {
+      "east": {
+        "penalties": {
+          "seat": "east",
+          "count": 50,
+          "avg_pen": 6.54,
+          "std_pen": 6.585
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      },
+      "north": {
+        "penalties": {
+          "seat": "north",
+          "count": 50,
+          "avg_pen": 6.9,
+          "std_pen": 6.842
+        },
+        "telemetry": {
+          "records": 100,
+          "post_records": 40,
+          "timed_out": 0
+        }
+      },
+      "south": {
+        "penalties": {
+          "seat": "south",
+          "count": 50,
+          "avg_pen": 7.58,
+          "std_pen": 7.023
+        },
+        "telemetry": {
+          "records": 120,
+          "post_records": 48,
+          "timed_out": 0
+        }
+      },
+      "west": {
+        "penalties": {
+          "seat": "west",
+          "count": 50,
+          "avg_pen": 6.06,
+          "std_pen": 6.457
+        },
+        "telemetry": {
+          "records": 130,
+          "post_records": 52,
+          "timed_out": 0
+        }
+      }
+    }
+  }
+}

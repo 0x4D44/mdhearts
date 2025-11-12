@@ -819,6 +819,13 @@ impl GameController {
         }
 
         let elapsed_ms = elapsed.as_millis().min(u32::MAX as u128) as u32;
+        let search_stats = if matches!(self.bot_difficulty, BotDifficulty::SearchLookahead) {
+            crate::bot::search::last_stats()
+                .map(|stats| crate::telemetry::hard::SearchTelemetrySnapshot::from_stats(&stats))
+        } else {
+            None
+        };
+
         crate::telemetry::hard::record_post_decision(
             seat,
             &self.unseen_tracker,
@@ -827,6 +834,7 @@ impl GameController {
             elapsed_ms,
             timed_out,
             fallback_label,
+            search_stats,
         );
 
         if let Some(card) = card_to_play {

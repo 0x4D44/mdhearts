@@ -245,6 +245,19 @@ pub(crate) fn snapshot_scores(scores: &ScoreBoard) -> ScoreSnapshot {
     }
 }
 
+pub(crate) fn detect_moon_pressure(ctx: &BotContext<'_>, snapshot: &ScoreSnapshot) -> bool {
+    let leader_near_moon = snapshot.max_score >= 80;
+    let trick_penalty = ctx.round.current_trick().penalty_total() >= 13;
+    let others_committed = PlayerPosition::LOOP.iter().copied().any(|seat| {
+        seat != ctx.seat
+            && matches!(
+                ctx.tracker.moon_state(seat),
+                MoonState::Considering | MoonState::Committed
+            )
+    });
+    leader_near_moon || trick_penalty || others_committed
+}
+
 pub(crate) fn count_cards_in_suit(hand: &Hand, suit: Suit) -> usize {
     hand.iter().filter(|card| card.suit == suit).count()
 }
