@@ -26,6 +26,14 @@ impl ScoreBoard {
         self.totals[seat.index()]
     }
 
+    pub fn with_bias(&self, seat: PlayerPosition, delta: i32) -> Self {
+        let mut totals = self.totals;
+        let idx = seat.index();
+        let base = totals[idx] as i32;
+        totals[idx] = base.saturating_add(delta).max(0) as u32;
+        Self { totals }
+    }
+
     pub fn standings(&self) -> &[u32; 4] {
         &self.totals
     }
@@ -63,6 +71,12 @@ impl ScoreBoard {
 impl Default for ScoreBoard {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl From<&ScoreBoard> for ScoreBoard {
+    fn from(value: &ScoreBoard) -> Self {
+        *value
     }
 }
 
@@ -112,5 +126,25 @@ mod tests {
         board.set_totals([10, 20, 30, 40]);
         assert_eq!(board.score(PlayerPosition::North), 10);
         assert_eq!(board.score(PlayerPosition::West), 40);
+    }
+
+    #[test]
+    fn with_bias_offsets_scores_without_mutating_source() {
+        let mut board = ScoreBoard::new();
+        board.set_totals([10, 20, 30, 40]);
+        let biased = board.with_bias(PlayerPosition::East, 5);
+
+        assert_eq!(board.score(PlayerPosition::East), 20);
+        assert_eq!(biased.score(PlayerPosition::East), 25);
+        assert_eq!(biased.score(PlayerPosition::South), 30);
+    }
+
+    #[test]
+    fn with_bias_clamps_negative_results_to_zero() {
+        let mut board = ScoreBoard::new();
+        board.set_totals([3, 0, 0, 0]);
+
+        let biased = board.with_bias(PlayerPosition::North, -10);
+        assert_eq!(biased.score(PlayerPosition::North), 0);
     }
 }

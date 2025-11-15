@@ -200,23 +200,20 @@ fn parse_seat_hint(label: &str) -> Option<PlayerPosition> {
 }
 
 fn search_mix_hint() -> Option<MixSeatHint> {
-    static HINT: OnceLock<Option<MixSeatHint>> = OnceLock::new();
-    *HINT.get_or_init(|| {
-        let raw = std::env::var("MDH_SEARCH_MIX_HINT").ok()?;
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let mut parts = trimmed.splitn(2, ':');
-        let mix_part = parts.next()?.trim().to_ascii_lowercase();
-        let seat_part = parts
-            .next()
-            .map(|s| s.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty());
-        let mix = MixTag::from_str(&mix_part)?;
-        let seat = seat_part.as_deref().and_then(parse_seat_hint);
-        Some(MixSeatHint { mix, seat })
-    })
+    let raw = std::env::var("MDH_SEARCH_MIX_HINT").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = trimmed.splitn(2, ':');
+    let mix_part = parts.next()?.trim().to_ascii_lowercase();
+    let seat_part = parts
+        .next()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
+    let mix = MixTag::from_str(&mix_part)?;
+    let seat = seat_part.as_deref().and_then(parse_seat_hint);
+    Some(MixSeatHint { mix, seat })
 }
 
 fn continuation_schedule_data() -> &'static Option<ContinuationSchedule> {
@@ -382,7 +379,7 @@ impl PlayPlannerHard {
                 cutoff_scale *= margin_scale;
             }
         }
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
         let my_score = ctx.scores.score(ctx.seat);
         let leader_gap = snapshot.max_score.saturating_sub(my_score);
@@ -520,6 +517,44 @@ impl PlayPlannerHard {
                 phaseb_topk = phaseb_topk.saturating_add(1);
             }
         }
+        if let Some(limit) = limit_ms {
+            if let Some(hint) = search_mix_hint() {
+                let target = hint.seat.unwrap_or(seat);
+                match hint.mix {
+                    MixTag::Snnh => {
+                        if matches!(target, PlayerPosition::North | PlayerPosition::East) {
+                            if limit >= 15_000 && ab_margin > 0 {
+                                ab_margin = ((ab_margin as f32) * 0.65).round() as i32;
+                                ab_margin = ab_margin.max(35);
+                            }
+                            if limit >= 18_000 && ab_margin > 0 {
+                                ab_margin = ab_margin.min(30);
+                            }
+                            if depth2_enabled {
+                                phaseb_topk = phaseb_topk.max(4);
+                            }
+                        }
+                    }
+                    MixTag::Shsh => {
+                        if matches!(
+                            target,
+                            PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
+                        ) {
+                            if limit >= 15_000 && ab_margin > 0 {
+                                ab_margin = ((ab_margin as f32) * 0.6).round() as i32;
+                                ab_margin = ab_margin.min(90).max(25);
+                            }
+                            if limit >= 18_000 && ab_margin > 0 {
+                                ab_margin = ab_margin.min(70);
+                            }
+                            if limit >= 14_000 {
+                                phaseb_topk = phaseb_topk.saturating_add(2);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if depth2_enabled {
             phaseb_topk = phaseb_topk.saturating_add(1);
             if ab_margin > 0 {
@@ -653,14 +688,15 @@ impl PlayPlannerHard {
             .ok()
             .and_then(|s| s.parse::<usize>().ok());
         // Rank by heuristic (fast), keep top-N, then apply a tiny continuation bonus via a 1-ply trick rollout.
-        let mut explained = PlayPlanner::explain_candidates(legal, ctx);
+        let mut explained =
+            PlayPlanner::explain_candidates_with_limit(legal, ctx, limit_ms_remaining);
         Self::apply_play_adviser_bias(&mut explained, ctx);
         let planner_nudge_hits = super::play::take_hard_nudge_hits();
         explained.sort_by(|a, b| b.1.cmp(&a.1));
         let best_base = explained.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
         let mut best: Option<(Card, i32)> = None;
         let start = Instant::now();
@@ -984,6 +1020,8 @@ impl PlayPlannerHard {
             endgame_dp_hits: dp_after.saturating_sub(dp_before),
             planner_nudge_hits,
             planner_nudge_trace,
+            mix_hint_bias: super::play::take_mix_hint_bias_stats(),
+            controller_bias_delta: ctx.controller_bias_delta,
         });
         best.map(|(c, _)| c)
     }
@@ -1003,7 +1041,7 @@ impl PlayPlannerHard {
         let best_base = v.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let start = Instant::now();
         let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
@@ -1083,6 +1121,8 @@ impl PlayPlannerHard {
             endgame_dp_hits: 0,
             planner_nudge_hits,
             planner_nudge_trace,
+            mix_hint_bias: super::play::take_mix_hint_bias_stats(),
+            controller_bias_delta: ctx.controller_bias_delta,
         });
         out
     }
@@ -1187,7 +1227,7 @@ impl PlayPlannerHard {
         let best_base = v.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let start = Instant::now();
         let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
@@ -1248,6 +1288,8 @@ impl PlayPlannerHard {
             endgame_dp_hits: 0,
             planner_nudge_hits,
             planner_nudge_trace,
+            mix_hint_bias: super::play::take_mix_hint_bias_stats(),
+            controller_bias_delta: ctx.controller_bias_delta,
         });
         out
     }
@@ -1266,7 +1308,7 @@ impl PlayPlannerHard {
         let mut v = PlayPlanner::explain_candidates(legal, ctx);
         Self::apply_play_adviser_bias(&mut v, ctx);
         v.sort_by(|a, b| b.1.cmp(&a.1));
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let start = Instant::now();
         let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
@@ -1463,7 +1505,7 @@ impl PlayPlannerHard {
         // Simulate only the remainder of the current trick with a simple, void-aware policy.
         let mut sim = ctx.round.clone();
         let seat = ctx.seat;
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let my_score = ctx.scores.score(ctx.seat) as i32;
         let leader_gap = snapshot.max_score as i32 - my_score;
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
@@ -1977,6 +2019,8 @@ pub struct Stats {
     pub endgame_dp_hits: usize,
     pub planner_nudge_hits: usize,
     pub planner_nudge_trace: Option<Vec<(String, usize)>>,
+    pub mix_hint_bias: Option<super::play::MixHintBiasStats>,
+    pub controller_bias_delta: Option<i32>,
 }
 
 static LAST_STATS: Lazy<Mutex<Option<Stats>>> = Lazy::new(|| Mutex::new(None));
@@ -2720,7 +2764,7 @@ fn rollout_current_trick_with_resolution(
     depth2_enabled: bool,
 ) -> Option<(i32, TrickResolution)> {
     let seat = ctx.seat;
-    let snapshot = snapshot_scores(ctx.scores);
+    let snapshot = snapshot_scores(&ctx.scores);
     let my_score = ctx.scores.score(ctx.seat) as i32;
     let leader_gap = snapshot.max_score as i32 - my_score;
     let moon_pressure = detect_moon_pressure(ctx, &snapshot);
@@ -2785,7 +2829,7 @@ fn evaluate_depth2_bonus(
     let best_base = ordered.first().map(|x| x.1).unwrap_or(0);
     let mut best_total = best_base;
     let mut considered = 0usize;
-    let snapshot = snapshot_scores(depth_ctx.scores);
+    let snapshot = snapshot_scores(&depth_ctx.scores);
     let my_score = depth_ctx.scores.score(depth_ctx.seat) as i32;
     let leader_gap = snapshot.max_score as i32 - my_score;
     let moon_pressure = detect_moon_pressure(&depth_ctx, &snapshot);
@@ -2933,7 +2977,7 @@ fn effective_limits(ctx: &BotContext<'_>) -> (Tier, u8, Limits) {
 
 fn compute_leverage(ctx: &BotContext<'_>) -> (Tier, u8) {
     // Simple first pass per HLD: scoreboard pressure, near-100 risk, and penalties on table.
-    let snap = super::snapshot_scores(ctx.scores);
+    let snap = super::snapshot_scores(&ctx.scores);
     let my = ctx.scores.score(ctx.seat) as i32;
     let lead_score = snap.max_score as i32;
     let mut s: i32 = 0;

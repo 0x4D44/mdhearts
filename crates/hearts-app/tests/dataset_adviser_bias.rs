@@ -43,6 +43,7 @@ fn dataset_records_adviser_bias_toggle() {
     unsafe {
         std::env::remove_var("MDH_HARD_ADVISER_PLAY");
         std::env::remove_var("MDH_ADVISER_PLAY_PATH");
+        std::env::remove_var("MDH_SEARCH_MIX_HINT");
     }
 
     let seed = 1234;
@@ -77,7 +78,7 @@ fn dataset_records_adviser_bias_toggle() {
     let controller = prepare_for_play(build_controller(seed), seat);
     let biased = collect_play_sample(&controller, seat, seed).expect("biased sample");
     let four_clubs = Card::new(Rank::Four, Suit::Clubs).to_string();
-    let queen_clubs = Card::new(Rank::Queen, Suit::Clubs).to_string();
+    let five_clubs = Card::new(Rank::Five, Suit::Clubs).to_string();
     assert!(
         biased
             .candidates
@@ -89,12 +90,13 @@ fn dataset_records_adviser_bias_toggle() {
         biased
             .candidates
             .iter()
-            .any(|candidate| candidate.card == queen_clubs && candidate.adviser_bias == 2500),
-        "expected QC candidate to reflect configured adviser bias"
+            .any(|candidate| candidate.card == five_clubs && candidate.adviser_bias == 2500),
+        "expected 5C candidate to reflect configured adviser bias"
     );
 
     unsafe {
         std::env::remove_var("MDH_HARD_ADVISER_PLAY");
         std::env::remove_var("MDH_ADVISER_PLAY_PATH");
+        std::env::remove_var("MDH_SEARCH_MIX_HINT");
     }
 }

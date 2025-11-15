@@ -134,3 +134,8 @@ Planner-level nudges (env; optional; defaults off)
 - `MDH_HARD_PLANNER_LEADER_FEED_NUDGE` — per-penalty bonus when feeding the score leader on a penalty trick under a small-base guard.
 - `MDH_HARD_PLANNER_SELF_CAPTURE_NUDGE` — per-penalty extra penalty when we’d capture penalties and our score = 85.
 - `MDH_HARD_PLANNER_MAX_BASE_FOR_NUDGE` — guard threshold for existing per-penalty leader-feed base; nudge applies only if below this.
+## Mix hints & continuation schedules
+
+- `MDH_SEARCH_MIX_HINT=<mix>[:<seat>][:<delta>]` enables mix-aware overrides (example: `snnh:east`, `shsh::+12`). Leave `<seat>` empty to target every seat, and append an optional signed `<delta>` to override the controller bias (default is +8 for ShSh when omitted). `tools/run_search_vs_mixed.ps1` sets and restores this env per seat; add `-MixHintTrace -Verbose` to log the active hint before each cargo run.
+- `MDH_CONT_SCHEDULE_PATH=<path>` points the runtime at a fitted continuation schedule file (defaults to `tmp/continuation_fit_latest.json`). With a schedule in place, the sweep script automatically raises deterministic `--hard-steps` for the seats that require forced depth2.
+- Always clear or restore `MDH_SEARCH_MIX_HINT` after running sweeps so mix-specific heuristics do not leak into other workflows.

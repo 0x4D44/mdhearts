@@ -631,13 +631,22 @@ fn spawn_bot_worker(
                 choice = Some(two);
             }
         }
+        let mut controller_bias_delta: Option<i32> = None;
         if choice.is_none() {
             let ctx = snapshot.bot_context(seat, difficulty);
             choice = match difficulty {
                 crate::bot::BotDifficulty::SearchLookahead => {
-                    PlayPlannerHard::choose_with_limit(&legal, &ctx, decision_limit.as_ref())
+                    let picked =
+                        PlayPlannerHard::choose_with_limit(&legal, &ctx, decision_limit.as_ref());
+                    controller_bias_delta = ctx.controller_bias_delta;
+                    picked
                 }
-                _ => PlayPlanner::choose_with_limit(&legal, &ctx, decision_limit.as_ref()),
+                _ => {
+                    let picked =
+                        PlayPlanner::choose_with_limit(&legal, &ctx, decision_limit.as_ref());
+                    controller_bias_delta = ctx.controller_bias_delta;
+                    picked
+                }
             };
         }
         if choice.is_none() {
@@ -678,6 +687,7 @@ fn spawn_bot_worker(
             timed_out,
             fallback_label,
             search_stats,
+            controller_bias_delta,
         );
         let result = BotThinkResult {
             seat,

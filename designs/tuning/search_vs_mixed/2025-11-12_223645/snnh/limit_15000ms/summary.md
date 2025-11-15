@@ -1,0 +1,7 @@
+﻿# Mix: snnh / Think limit: limit_15000ms
+
+Seat penalties:
+- designs\tuning\search_vs_mixed\2025-11-12_223645\snnh\limit_15000ms/match_snnh_west_1000_4.csv: n=4 avg_pen=9.5
+- designs\tuning\search_vs_mixed\2025-11-12_223645\snnh\limit_15000ms/match_snnh_south_1080_4.csv: n=4 avg_pen=6.5
+- designs\tuning\search_vs_mixed\2025-11-12_223645\snnh\limit_15000ms/match_snnh_east_2000_4.csv: n=4 avg_pen=14
+- designs\tuning\search_vs_mixed\2025-11-12_223645\snnh\limit_15000ms/match_snnh_north_1100_4.csv: n=4 avg_pen=8.25

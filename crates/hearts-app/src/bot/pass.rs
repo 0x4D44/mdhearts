@@ -26,7 +26,7 @@ impl PassPlanner {
         }
 
         let style = determine_style(ctx);
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let passing_target = ctx.passing_direction.target(ctx.seat);
         let passing_to_trailing = passing_target == snapshot.max_player;
         let passing_to_leader = passing_target == snapshot.min_player;
@@ -579,7 +579,7 @@ mod tests {
             BotDifficulty::NormalHeuristic,
         );
         let style = determine_style(&ctx_unseen);
-        let snapshot = snapshot_scores(ctx_unseen.scores);
+        let snapshot = snapshot_scores(&ctx_unseen.scores);
         let passing_target = ctx_unseen.passing_direction.target(ctx_unseen.seat);
         let passing_to_trailing = passing_target == snapshot.max_player;
         let passing_to_leader = passing_target == snapshot.min_player;
@@ -608,7 +608,7 @@ mod tests {
             &tracker_seen,
             BotDifficulty::NormalHeuristic,
         );
-        let snapshot_seen = snapshot_scores(ctx_seen.scores);
+        let snapshot_seen = snapshot_scores(&ctx_seen.scores);
         let score_seen = super::score_card(
             queen,
             hand_ref,

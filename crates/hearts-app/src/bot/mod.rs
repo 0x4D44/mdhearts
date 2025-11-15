@@ -76,10 +76,11 @@ pub struct ScoreSnapshot {
 pub struct BotContext<'a> {
     pub seat: PlayerPosition,
     pub round: &'a RoundState,
-    pub scores: &'a ScoreBoard,
+    pub scores: ScoreBoard,
     pub passing_direction: PassingDirection,
     pub tracker: &'a UnseenTracker,
     pub difficulty: BotDifficulty,
+    pub controller_bias_delta: Option<i32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -120,11 +121,12 @@ impl<'a> BotContext<'a> {
     pub fn new(
         seat: PlayerPosition,
         round: &'a RoundState,
-        scores: &'a ScoreBoard,
+        scores: impl Into<ScoreBoard>,
         passing_direction: PassingDirection,
         tracker: &'a UnseenTracker,
         difficulty: BotDifficulty,
     ) -> Self {
+        let scores = scores.into();
         Self {
             seat,
             round,
@@ -132,7 +134,13 @@ impl<'a> BotContext<'a> {
             passing_direction,
             tracker,
             difficulty,
+            controller_bias_delta: None,
         }
+    }
+
+    pub fn with_controller_bias_delta(mut self, delta: Option<i32>) -> Self {
+        self.controller_bias_delta = delta;
+        self
     }
 
     pub fn hand(&self) -> &'a Hand {
@@ -145,7 +153,7 @@ impl<'a> BotContext<'a> {
 }
 
 pub(crate) fn determine_style(ctx: &BotContext<'_>) -> BotStyle {
-    let snapshot = snapshot_scores(ctx.scores);
+    let snapshot = snapshot_scores(&ctx.scores);
     let my_score = ctx.scores.score(ctx.seat);
     let hand = ctx.hand();
 

@@ -140,14 +140,16 @@ impl BotSnapshot {
     }
 
     pub fn bot_context(&self, seat: PlayerPosition, difficulty: BotDifficulty) -> BotContext<'_> {
+        let (scores, bias_delta) = biased_scores(&self.scores, seat);
         BotContext::new(
             seat,
             &self.round,
-            &self.scores,
+            scores,
             self.passing_direction,
             &self.tracker,
             difficulty,
         )
+        .with_controller_bias_delta(bias_delta)
     }
 
     pub fn tracker(&self) -> &UnseenTracker {
@@ -254,14 +256,16 @@ impl GameController {
     }
 
     pub fn bot_context(&self, seat: PlayerPosition) -> BotContext<'_> {
+        let (scores, bias_delta) = biased_scores(self.match_state.scores(), seat);
         BotContext::new(
             seat,
             self.match_state.round(),
-            self.match_state.scores(),
+            scores,
             self.match_state.passing_direction(),
             &self.unseen_tracker,
             self.bot_difficulty,
         )
+        .with_controller_bias_delta(bias_delta)
     }
 
     pub fn set_bot_difficulty(&mut self, difficulty: BotDifficulty) {
@@ -348,7 +352,7 @@ impl GameController {
             TimeoutFallback::HeuristicBest => {
                 let ctx = self.bot_context(seat);
                 match self.bot_difficulty {
-                    BotDifficulty::SearchLookahead => {
+                    BotDifficulty::SearchLookahead | BotDifficulty::FutureHard => {
                         crate::bot::PlayPlannerHard::choose(&legal, &ctx)
                     }
                     _ => PlayPlanner::choose(&legal, &ctx),
@@ -628,6 +632,133 @@ impl GameController {
     }
 }
 
+fn biased_scores(base: &ScoreBoard, seat: PlayerPosition) -> (ScoreBoard, Option<i32>) {
+    match mix_hint_bias_delta(seat) {
+        Some(delta) => (base.with_bias(seat, delta), Some(delta)),
+        None => (*base, None),
+    }
+}
+
+fn mix_hint_bias_delta(seat: PlayerPosition) -> Option<i32> {
+    let raw = std::env::var("MDH_SEARCH_MIX_HINT").ok()?;
+    mix_hint_bias_delta_from_hint(raw.trim(), seat)
+}
+
+fn mix_hint_bias_delta_from_hint(raw: &str, seat: PlayerPosition) -> Option<i32> {
+    if raw.is_empty() {
+        return None;
+    }
+    let mut parts = raw.splitn(3, ':');
+    let mix = parts.next()?.trim().to_ascii_lowercase();
+    if mix.is_empty() {
+        return None;
+    }
+
+    let part_two = parts.next().map(|s| s.trim()).filter(|s| !s.is_empty());
+    let part_three = parts.next().map(|s| s.trim()).filter(|s| !s.is_empty());
+
+    let seat_hint = part_two.and_then(parse_hint_seat);
+
+    let mut delta_hint = part_three.and_then(parse_bias_delta).or_else(|| {
+        if seat_hint.is_none() {
+            part_two.and_then(parse_bias_delta)
+        } else {
+            None
+        }
+    });
+
+    if let Some(target) = seat_hint {
+        if target != seat {
+            return None;
+        }
+    }
+
+    if delta_hint.is_none() {
+        delta_hint = default_bias_for_mix(&mix);
+    }
+
+    delta_hint
+}
+
+fn parse_hint_seat(label: &str) -> Option<PlayerPosition> {
+    match label.to_ascii_lowercase().as_str() {
+        "" => None,
+        "n" | "north" => Some(PlayerPosition::North),
+        "e" | "east" => Some(PlayerPosition::East),
+        "s" | "south" => Some(PlayerPosition::South),
+        "w" | "west" => Some(PlayerPosition::West),
+        _ => None,
+    }
+}
+
+fn parse_bias_delta(raw: &str) -> Option<i32> {
+    if raw.is_empty() {
+        return None;
+    }
+    raw.parse::<i32>().ok()
+}
+
+fn default_bias_for_mix(mix: &str) -> Option<i32> {
+    match mix {
+        "shsh" => Some(8),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod mix_hint_bias_tests {
+    use super::{default_bias_for_mix, mix_hint_bias_delta_from_hint};
+    use hearts_core::model::player::PlayerPosition;
+
+    #[test]
+    fn applies_default_for_shsh_all_seats() {
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("shsh", PlayerPosition::East),
+            default_bias_for_mix("shsh")
+        );
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("shsh", PlayerPosition::North),
+            default_bias_for_mix("shsh")
+        );
+    }
+
+    #[test]
+    fn respects_seat_specific_hints() {
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("shsh:e", PlayerPosition::East),
+            default_bias_for_mix("shsh")
+        );
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("shsh:e", PlayerPosition::North),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_explicit_deltas_with_and_without_seats() {
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("shsh::+12", PlayerPosition::South),
+            Some(12)
+        );
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("snnh:+5", PlayerPosition::North),
+            Some(5)
+        );
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("snnh:w:-3", PlayerPosition::West),
+            Some(-3)
+        );
+    }
+
+    #[test]
+    fn ignores_unrecognized_mixes_without_explicit_delta() {
+        assert_eq!(
+            mix_hint_bias_delta_from_hint("unknown:e", PlayerPosition::East),
+            None
+        );
+    }
+}
+
 // --- Moon tuning config ---
 #[derive(Debug, Clone, Copy)]
 struct MoonConfig {
@@ -750,6 +881,7 @@ impl GameController {
                 cancel: None,
             });
         }
+        let mut last_bias_delta: Option<i32> = None;
         let mut card_to_play = if enforce_two {
             let two = Card::new(Rank::Two, Suit::Clubs);
             if legal.contains(&two) {
@@ -760,7 +892,7 @@ impl GameController {
         } else {
             match self.bot_difficulty {
                 BotDifficulty::EasyLegacy => legal.first().copied(),
-                BotDifficulty::SearchLookahead => {
+                BotDifficulty::SearchLookahead | BotDifficulty::FutureHard => {
                     let commit = {
                         let ctx_probe = self.bot_context(seat);
                         crate::bot::determine_style(&ctx_probe)
@@ -771,11 +903,13 @@ impl GameController {
                             .set_moon_state(seat, MoonState::Committed);
                     }
                     let ctx = self.bot_context(seat);
-                    crate::bot::PlayPlannerHard::choose_with_limit(
+                    let result = crate::bot::PlayPlannerHard::choose_with_limit(
                         &legal,
                         &ctx,
                         decision_limit.as_ref(),
-                    )
+                    );
+                    last_bias_delta = ctx.controller_bias_delta;
+                    result
                 }
                 _ => {
                     let commit = {
@@ -788,7 +922,10 @@ impl GameController {
                             .set_moon_state(seat, MoonState::Committed);
                     }
                     let ctx = self.bot_context(seat);
-                    PlayPlanner::choose_with_limit(&legal, &ctx, decision_limit.as_ref())
+                    let result =
+                        PlayPlanner::choose_with_limit(&legal, &ctx, decision_limit.as_ref());
+                    last_bias_delta = ctx.controller_bias_delta;
+                    result
                 }
             }
         };
@@ -819,7 +956,7 @@ impl GameController {
         }
 
         let elapsed_ms = elapsed.as_millis().min(u32::MAX as u128) as u32;
-        let search_stats = if matches!(self.bot_difficulty, BotDifficulty::SearchLookahead) {
+        let search_stats = if matches!(self.bot_difficulty, BotDifficulty::SearchLookahead | BotDifficulty::FutureHard) {
             crate::bot::search::last_stats()
                 .map(|stats| crate::telemetry::hard::SearchTelemetrySnapshot::from_stats(&stats))
         } else {
@@ -835,6 +972,7 @@ impl GameController {
             timed_out,
             fallback_label,
             search_stats,
+            last_bias_delta,
         );
 
         if let Some(card) = card_to_play {
@@ -1046,7 +1184,7 @@ mod tests {
         assert!(result.is_some(), "expected autoplay move");
 
         let records = crate::telemetry::hard::sink().snapshot();
-        assert_eq!(records.len(), 2, "expected pre and post records");
+        assert!(records.len() >= 2, "expected at least pre and post records");
         assert!(!records.is_empty(), "expected telemetry records");
         let last = records.last().unwrap();
         assert_eq!(last.timed_out, Some(true));

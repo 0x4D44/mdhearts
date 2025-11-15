@@ -45,6 +45,8 @@ pub struct HardTelemetryRecord {
     pub search_stats: Option<SearchTelemetrySnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controller_bias_delta: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +64,18 @@ pub struct SearchTelemetrySnapshot {
     pub continuation_scale_permil: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth2_samples: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mix_hint_bias: Option<MixHintBiasSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controller_bias_delta: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MixHintBiasSnapshot {
+    pub snnh_feed_bonus_hits: u32,
+    pub snnh_capture_guard_hits: u32,
+    pub shsh_feed_bonus_hits: u32,
+    pub shsh_capture_guard_hits: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -148,6 +162,7 @@ impl HardTelemetryRecord {
             search_stats: None,
             fallback: None,
             notes: None,
+             controller_bias_delta: None,
         }
     }
 }
@@ -168,6 +183,19 @@ impl SearchTelemetrySnapshot {
             ab_margin: Some(limits.ab_margin),
             continuation_scale_permil: Some(stats.continuation_scale_permil),
             depth2_samples: Some(stats.depth2_samples),
+            mix_hint_bias: stats.mix_hint_bias.map(MixHintBiasSnapshot::from),
+            controller_bias_delta: stats.controller_bias_delta,
+        }
+    }
+}
+
+impl From<crate::bot::play::MixHintBiasStats> for MixHintBiasSnapshot {
+    fn from(stats: crate::bot::play::MixHintBiasStats) -> Self {
+        Self {
+            snnh_feed_bonus_hits: stats.snnh_feed_bonus_hits,
+            snnh_capture_guard_hits: stats.snnh_capture_guard_hits,
+            shsh_feed_bonus_hits: stats.shsh_feed_bonus_hits,
+            shsh_capture_guard_hits: stats.shsh_capture_guard_hits,
         }
     }
 }
@@ -307,6 +335,7 @@ pub mod hard {
         timed_out: bool,
         fallback: Option<&str>,
         search_stats: Option<SearchTelemetrySnapshot>,
+        controller_bias_delta: Option<i32>,
     ) {
         let mut record =
             HardTelemetryRecord::from_tracker(seat, tracker, Some(difficulty), Some("post"));
@@ -315,6 +344,7 @@ pub mod hard {
         record.timed_out = Some(timed_out);
         record.fallback = fallback.map(|f| f.to_string());
         record.search_stats = search_stats;
+        record.controller_bias_delta = controller_bias_delta;
         sink().push(record);
     }
 
@@ -360,6 +390,7 @@ mod tests {
                 search_stats: None,
                 fallback: None,
                 notes: None,
+                controller_bias_delta: None,
             },
             HardTelemetryRecord {
                 timestamp_ms: 2,
@@ -378,6 +409,7 @@ mod tests {
                 search_stats: None,
                 fallback: None,
                 notes: None,
+                controller_bias_delta: None,
             },
         ];
         let summary = HardTelemetrySummary::from_records(&records);

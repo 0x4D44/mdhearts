@@ -1118,6 +1118,29 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             stats_map.insert("planner_nudge_guard".into(), arr.into());
                         }
                     }
+                    if let Some(bias) = stats.mix_hint_bias {
+                        let mut bias_map = serde_json::Map::new();
+                        bias_map.insert(
+                            "snnh_feed_bonus_hits".into(),
+                            bias.snnh_feed_bonus_hits.into(),
+                        );
+                        bias_map.insert(
+                            "snnh_capture_guard_hits".into(),
+                            bias.snnh_capture_guard_hits.into(),
+                        );
+                        bias_map.insert(
+                            "shsh_feed_bonus_hits".into(),
+                            bias.shsh_feed_bonus_hits.into(),
+                        );
+                        bias_map.insert(
+                            "shsh_capture_guard_hits".into(),
+                            bias.shsh_capture_guard_hits.into(),
+                        );
+                        stats_map.insert("mix_hint_bias".into(), bias_map.into());
+                    }
+                    if let Some(delta) = stats.controller_bias_delta {
+                        stats_map.insert("controller_bias_delta".into(), delta.into());
+                    }
                     stats_obj = serde_json::Value::Object(stats_map);
                 }
             }

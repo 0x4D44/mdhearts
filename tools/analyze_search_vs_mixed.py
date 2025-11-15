@@ -32,6 +32,8 @@ class TelemetrySummary:
     timed_out: int
     search_stats: Dict[str, float]
     depth2_samples: int
+    mix_hint_bias: Dict[str, float]
+    controller_bias_avg: float
 
 
 def parse_match_csv(path: Path) -> SeatSummary:
@@ -55,7 +57,13 @@ def parse_match_csv(path: Path) -> SeatSummary:
 def parse_telemetry(path: Path) -> TelemetrySummary:
     if not path.exists():
         return TelemetrySummary(
-            records=0, post_records=0, timed_out=0, search_stats={}, depth2_samples=0
+            records=0,
+            post_records=0,
+            timed_out=0,
+            search_stats={},
+            depth2_samples=0,
+            mix_hint_bias={},
+            controller_bias_avg=0.0,
         )
     records = 0
     post_records = 0
@@ -68,8 +76,12 @@ def parse_telemetry(path: Path) -> TelemetrySummary:
         "scanned_phase_c": 0,
         "utilization": 0,
         "continuation_scale_permil": 0,
+        "controller_bias_delta": 0,
     }
     depth2_total = 0
+    bias_totals: Dict[str, int] = {}
+    controller_bias_total = 0
+    controller_bias_count = 0
     with path.open() as handle:
         for line in handle:
             line = line.strip()
@@ -82,6 +94,9 @@ def parse_telemetry(path: Path) -> TelemetrySummary:
             post_records += 1
             if payload.get("timed_out"):
                 timed_out += 1
+            if "controller_bias_delta" in payload and payload["controller_bias_delta"] is not None:
+                controller_bias_total += int(payload["controller_bias_delta"])
+                controller_bias_count += 1
             stats = payload.get("search_stats")
             if stats:
                 search_count += 1
@@ -95,6 +110,11 @@ def parse_telemetry(path: Path) -> TelemetrySummary:
                     search_totals[key] += int(stats.get(key, 0))
                 search_totals["utilization"] += int(stats.get("utilization", 0))
                 depth2_total += int(stats.get("depth2_samples", 0))
+                bias = stats.get("mix_hint_bias")
+                if isinstance(bias, dict):
+                    for key, value in bias.items():
+                        bias_totals[key] = bias_totals.get(key, 0) + int(value)
+                search_totals["controller_bias_delta"] += int(stats.get("controller_bias_delta", 0))
     averages = {}
     if search_count:
         averages = {
@@ -106,12 +126,24 @@ def parse_telemetry(path: Path) -> TelemetrySummary:
     if search_count:
         avg_depth2 = round(depth2_total / search_count, 2)
         averages["depth2_samples"] = avg_depth2
+    bias_averages: Dict[str, float] = {}
+    if search_count:
+        bias_averages = {
+            key: round(value / search_count, 3) for key, value in bias_totals.items()
+        }
+    controller_bias_avg = (
+        round(controller_bias_total / controller_bias_count, 2)
+        if controller_bias_count
+        else 0.0
+    )
     return TelemetrySummary(
         records=records,
         post_records=post_records,
         timed_out=timed_out,
         search_stats=averages,
         depth2_samples=depth2_total,
+        mix_hint_bias=bias_averages,
+        controller_bias_avg=controller_bias_avg,
     )
 
 
@@ -136,6 +168,8 @@ def analyze_limit(limit_dir: Path) -> Dict[str, Dict[str, object]]:
                 timed_out=0,
                 search_stats={},
                 depth2_samples=0,
+                mix_hint_bias={},
+                controller_bias_avg=0.0,
             ),
         )
         output[seat] = {

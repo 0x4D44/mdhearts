@@ -15,7 +15,8 @@ param(
   [switch]$IncludeStats,
   [switch]$TelemetrySmoke,
   [switch]$TelemetryOut,
-  [switch]$Verbose
+  [switch]$Verbose,
+  [switch]$MixHintTrace
 )
 
 . "$PSScriptRoot/eval_shared.ps1"
@@ -34,7 +35,8 @@ function Invoke-MixedMatch {
     [string]$SeedsFile,
     [string]$TelemetryPath,
     [switch]$IncludeStats,
-    [switch]$Verbose
+    [switch]$Verbose,
+    [switch]$MixHintTrace
   )
 
   Ensure-EvalParentDir $OutPath
@@ -72,6 +74,16 @@ function Invoke-MixedMatch {
       } else {
         "${mixLabel}:${seatLabel}"
       }
+    }
+    if ($MixHintTrace -and $Verbose) {
+      $hintValue = if ([string]::IsNullOrWhiteSpace($env:MDH_SEARCH_MIX_HINT)) {
+        '<unset>'
+      } else {
+        $env:MDH_SEARCH_MIX_HINT
+      }
+      Write-EvalInfo -Verbose:$Verbose -Message (
+        "MixHintTrace mix={0} seat={1} hint={2}" -f $Mix, $Seat, $hintValue
+      )
     }
     & cargo @args | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -213,7 +225,7 @@ foreach ($mix in $Mixes) {
       $smokeOut = "$smokeDir/smoke_${mix}_$($seatCfg.Name).csv"
       $smokeCount = [math]::Min($SmokeCount, [int]$seatCfg.Count)
       $hardArgs = Get-HardArgsForSeat $mix $seatCfg.Name $HardSteps
-      Invoke-MixedMatch $seatCfg.Seat $seatCfg.Start $smokeCount $mix $smokeOut $smokeArgs $hardArgs $null $null -IncludeStats:$IncludeStats -Verbose:$Verbose
+      Invoke-MixedMatch $seatCfg.Seat $seatCfg.Start $smokeCount $mix $smokeOut $smokeArgs $hardArgs $null $null -IncludeStats:$IncludeStats -Verbose:$Verbose -MixHintTrace:$MixHintTrace
     }
   }
 
@@ -231,7 +243,7 @@ foreach ($mix in $Mixes) {
         $telemetryPath = "$limitDir/telemetry_${mix}_$($seatCfg.Name).jsonl"
       }
       $hardArgs = Get-HardArgsForSeat $mix $seatCfg.Name $HardSteps
-      Invoke-MixedMatch $seatCfg.Seat $seatCfg.Start $seatCfg.Count $mix $matchOut $thinkArgs $hardArgs $SeedsFile $telemetryPath -IncludeStats:$IncludeStats -Verbose:$Verbose
+      Invoke-MixedMatch $seatCfg.Seat $seatCfg.Start $seatCfg.Count $mix $matchOut $thinkArgs $hardArgs $SeedsFile $telemetryPath -IncludeStats:$IncludeStats -Verbose:$Verbose -MixHintTrace:$MixHintTrace
       $stats = Get-MixedPenaltySummary $matchOut
       if ($null -ne $stats) {
         $limitSummary += "- $($stats.Path): n=$($stats.Count) avg_pen=$($stats.AvgPen)"

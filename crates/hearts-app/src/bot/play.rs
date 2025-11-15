@@ -48,6 +48,35 @@ thread_local! {
         RefCell::new(BTreeMap::new());
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MixHintBiasStats {
+    pub snnh_feed_bonus_hits: u32,
+    pub snnh_capture_guard_hits: u32,
+    pub shsh_feed_bonus_hits: u32,
+    pub shsh_capture_guard_hits: u32,
+}
+
+impl MixHintBiasStats {
+    fn is_empty(&self) -> bool {
+        self.snnh_feed_bonus_hits == 0
+            && self.snnh_capture_guard_hits == 0
+            && self.shsh_feed_bonus_hits == 0
+            && self.shsh_capture_guard_hits == 0
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MixHintBiasCounter {
+    SnnhFeed,
+    SnnhCapture,
+    ShshFeed,
+    ShshCapture,
+}
+
+thread_local! {
+    static MIX_HINT_BIAS: RefCell<MixHintBiasStats> = RefCell::new(MixHintBiasStats::default());
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MixTag {
     Snnh,
@@ -58,12 +87,6 @@ enum MixTag {
 struct MixSeatHint {
     mix: MixTag,
     seat: Option<PlayerPosition>,
-}
-
-impl MixSeatHint {
-    fn matches(&self, seat: PlayerPosition) -> bool {
-        self.seat.map_or(true, |s| s == seat)
-    }
 }
 
 fn mix_hint_for_play() -> Option<MixSeatHint> {
@@ -83,25 +106,22 @@ fn mix_hint_for_play() -> Option<MixSeatHint> {
             _ => None,
         }
     }
-    static HINT: OnceLock<Option<MixSeatHint>> = OnceLock::new();
-    *HINT.get_or_init(|| {
-        let raw = std::env::var("MDH_SEARCH_MIX_HINT").ok()?;
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let mut parts = trimmed.splitn(2, ':');
-        let mix_part = parts.next()?.trim().to_ascii_lowercase();
-        let seat_part = parts
-            .next()
-            .map(|s| s.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty());
-        let mix = parse_mix(&mix_part)?;
-        let seat = seat_part
-            .as_deref()
-            .and_then(|label| parse_seat(label.trim()));
-        Some(MixSeatHint { mix, seat })
-    })
+    let raw = std::env::var("MDH_SEARCH_MIX_HINT").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = trimmed.splitn(2, ':');
+    let mix_part = parts.next()?.trim().to_ascii_lowercase();
+    let seat_part = parts
+        .next()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty());
+    let mix = parse_mix(&mix_part)?;
+    let seat = seat_part
+        .as_deref()
+        .and_then(|label| parse_seat(label.trim()));
+    Some(MixSeatHint { mix, seat })
 }
 
 pub(crate) fn reset_hard_nudge_hits() {
@@ -124,6 +144,42 @@ fn nudge_trace_enabled() -> bool {
     std::env::var("MDH_HARD_PLANNER_NUDGE_TRACE")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
         .unwrap_or(false)
+}
+
+pub(crate) fn reset_mix_hint_bias_stats() {
+    MIX_HINT_BIAS.with(|cell| *cell.borrow_mut() = MixHintBiasStats::default());
+}
+
+fn record_mix_hint_bias(counter: MixHintBiasCounter) {
+    MIX_HINT_BIAS.with(|cell| {
+        let mut stats = cell.borrow_mut();
+        match counter {
+            MixHintBiasCounter::SnnhFeed => {
+                stats.snnh_feed_bonus_hits = stats.snnh_feed_bonus_hits.saturating_add(1);
+            }
+            MixHintBiasCounter::SnnhCapture => {
+                stats.snnh_capture_guard_hits = stats.snnh_capture_guard_hits.saturating_add(1);
+            }
+            MixHintBiasCounter::ShshFeed => {
+                stats.shsh_feed_bonus_hits = stats.shsh_feed_bonus_hits.saturating_add(1);
+            }
+            MixHintBiasCounter::ShshCapture => {
+                stats.shsh_capture_guard_hits = stats.shsh_capture_guard_hits.saturating_add(1);
+            }
+        }
+    });
+}
+
+pub(crate) fn take_mix_hint_bias_stats() -> Option<MixHintBiasStats> {
+    MIX_HINT_BIAS.with(|cell| {
+        let mut stats = cell.borrow_mut();
+        if stats.is_empty() {
+            return None;
+        }
+        let snapshot = *stats;
+        *stats = MixHintBiasStats::default();
+        Some(snapshot)
+    })
 }
 
 pub(crate) fn reset_hard_nudge_trace() {
@@ -185,10 +241,11 @@ impl PlayPlanner {
 
         reset_hard_nudge_hits();
         reset_hard_nudge_trace();
+        reset_mix_hint_bias_stats();
 
         let style = determine_style(ctx);
         let limit_ms = limit.and_then(|lim| lim.remaining_millis());
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
         let mut best: Option<(Card, i32)> = None;
 
@@ -332,11 +389,20 @@ impl PlayPlanner {
     }
 
     pub fn explain_candidates(legal: &[Card], ctx: &BotContext<'_>) -> Vec<(Card, i32)> {
+        Self::explain_candidates_with_limit(legal, ctx, None)
+    }
+
+    pub fn explain_candidates_with_limit(
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        limit_ms: Option<u32>,
+    ) -> Vec<(Card, i32)> {
         if legal.is_empty() {
             return Vec::new();
         }
+        reset_mix_hint_bias_stats();
         let style = determine_style(ctx);
-        let snapshot = snapshot_scores(ctx.scores);
+        let snapshot = snapshot_scores(&ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
         let mut out: Vec<(Card, i32)> = Vec::new();
         for &card in legal {
@@ -351,7 +417,7 @@ impl PlayPlanner {
                 lead_suit,
                 style,
                 &snapshot,
-                None,
+                limit_ms,
             );
             let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
             if suit_remaining <= 1 {
@@ -435,7 +501,7 @@ impl DebugParts {
 
 #[cfg(test)]
 pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> i32 {
-    let snapshot = snapshot_scores(ctx.scores);
+    let snapshot = snapshot_scores(&ctx.scores);
     let lead_suit = ctx.round.current_trick().lead_suit();
     let (winner, penalties) = simulate_trick(card, ctx, style, snapshot.max_player);
     let will_capture = winner == ctx.seat;
@@ -579,7 +645,7 @@ fn base_score(
         .map(|p| p.card.penalty_value() as i32)
         .sum();
     let limit_ms = limit_ms.unwrap_or(0);
-    let mix_hint = mix_hint_for_play().filter(|hint| hint.matches(ctx.seat));
+    let mix_hint = mix_hint_for_play();
 
     if will_capture {
         score -= 4_800;
@@ -641,32 +707,157 @@ fn base_score(
         score -= penalties_i32 * 90;
     }
 
+    if matches!(
+        ctx.seat,
+        PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
+    ) {
+        let leader_gap = snapshot
+            .max_score
+            .saturating_sub(ctx.scores.score(ctx.seat))
+            .min(60) as i32;
+        if !will_capture && penalties > 0 {
+            let leader_weight = if winner == snapshot.max_player {
+                260
+            } else {
+                110
+            };
+            let pursuit = leader_gap.max(1) * 45;
+            score += penalties_i32 * (leader_weight + pursuit);
+        }
+        if will_capture && penalties > 0 {
+            let lead_margin = ctx
+                .scores
+                .score(ctx.seat)
+                .saturating_sub(snapshot.min_score)
+                .min(60) as i32;
+            let malus = 250 + lead_margin * 25;
+            score -= penalties_i32 * malus;
+        }
+    }
+
     if let Some(hint) = mix_hint {
-        if limit_ms >= 15_000 {
-            match hint.mix {
-                MixTag::Snnh => {
-                    if matches!(ctx.seat, PlayerPosition::North | PlayerPosition::East) {
-                        if !will_capture && penalties > 0 && winner == snapshot.max_player {
-                            score += penalties_i32 * 350;
+        let target_seat = hint.seat.unwrap_or(ctx.seat);
+        let mid_limit = limit_ms >= 12_000;
+        let high_limit = limit_ms >= 15_000;
+        let ultra_limit = limit_ms >= 18_000;
+        match hint.mix {
+            MixTag::Snnh => {
+                if matches!(target_seat, PlayerPosition::North | PlayerPosition::East) && mid_limit
+                {
+                    if !will_capture && penalties > 0 {
+                        let leader_bonus = if winner == snapshot.max_player {
+                            250
+                        } else {
+                            60
+                        };
+                        let mut bonus = if high_limit { 520 } else { 360 };
+                        if ultra_limit {
+                            bonus += 140;
                         }
-                        if will_capture && penalties > 0 {
-                            score -= penalties_i32 * 250;
+                        score += penalties_i32 * (bonus + leader_bonus);
+                        record_mix_hint_bias(MixHintBiasCounter::SnnhFeed);
+                    }
+                    if will_capture && penalties > 0 {
+                        let malus = if ultra_limit {
+                            420
+                        } else if high_limit {
+                            360
+                        } else {
+                            280
+                        };
+                        if snapshot.max_player == ctx.seat {
+                            score -= penalties_i32 * 120;
                         }
+                        score -= penalties_i32 * malus;
+                        record_mix_hint_bias(MixHintBiasCounter::SnnhCapture);
                     }
                 }
-                MixTag::Shsh => {
-                    if matches!(ctx.seat, PlayerPosition::East | PlayerPosition::South) {
-                        if !will_capture && penalties > 0 {
-                            score += penalties_i32 * 300;
-                            if winner == snapshot.max_player {
-                                score += 150;
-                            }
+            }
+            MixTag::Shsh => {
+                if matches!(
+                    target_seat,
+                    PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
+                ) && (mid_limit || high_limit)
+                {
+                    if !will_capture && penalties > 0 {
+                        let leader_bonus = if winner == snapshot.max_player {
+                            240
+                        } else {
+                            90
+                        };
+                        let mut bonus = if high_limit { 420 } else { 300 };
+                        if ultra_limit {
+                            bonus += 110;
                         }
-                        if will_capture && penalties > 0 {
-                            score -= penalties_i32 * 200;
+                        let chase_gap = snapshot
+                            .max_score
+                            .saturating_sub(ctx.scores.score(ctx.seat))
+                            .min(25) as i32;
+                        let chase_bonus = chase_gap * 45;
+                        score += penalties_i32 * (bonus + leader_bonus + chase_bonus);
+                        if snapshot.leader_gap > 0 {
+                            let gap_units = (snapshot.leader_gap.min(40) / 5) as i32 + 1;
+                            score += penalties_i32 * gap_units * 80;
                         }
+                        if under_moon_pressure && snapshot.max_player != ctx.seat {
+                            score += penalties_i32 * 120;
+                        }
+                        record_mix_hint_bias(MixHintBiasCounter::ShshFeed);
+                    }
+                    if will_capture && penalties > 0 {
+                        let malus = if ultra_limit {
+                            320
+                        } else if high_limit {
+                            260
+                        } else {
+                            210
+                        };
+                        if snapshot.max_player == ctx.seat {
+                            score -= penalties_i32 * 160;
+                        }
+                        if snapshot.leader_gap <= 2 && snapshot.leader_gap > 0 {
+                            score -= penalties_i32 * 140;
+                        }
+                        if under_moon_pressure {
+                            score -= penalties_i32 * 120;
+                        }
+                        score -= penalties_i32 * malus;
+                        record_mix_hint_bias(MixHintBiasCounter::ShshCapture);
                     }
                 }
+            }
+        }
+    }
+
+    if let Some(hint) = mix_hint {
+        if matches!(hint.mix, MixTag::Shsh)
+            && matches!(
+                hint.seat.unwrap_or(ctx.seat),
+                PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
+            )
+            && limit_ms >= 12_000
+        {
+            let trailing_gap = snapshot
+                .max_score
+                .saturating_sub(ctx.scores.score(ctx.seat))
+                .min(40) as i32;
+            if !will_capture && penalties > 0 {
+                let pressure = trailing_gap.max(1) * 35;
+                let leader_weight = if snapshot.max_player == ctx.seat {
+                    40
+                } else {
+                    120
+                };
+                score += penalties_i32 * (pressure + leader_weight);
+            }
+            if will_capture {
+                let self_gap = ctx
+                    .scores
+                    .score(ctx.seat)
+                    .saturating_sub(snapshot.min_score)
+                    .min(50) as i32;
+                let malus = 210 + self_gap * 20;
+                score -= penalties_i32 * malus.max(210);
             }
         }
     }
@@ -895,6 +1086,9 @@ fn base_score(
         && penalties_on_table_now > 0
     {
         score -= penalties_i32 * weights().nonleader_feed_perpen;
+        if card.is_queen_of_spades() {
+            score -= 15_000;
+        }
     }
 
     // Endgame nuance
@@ -1011,7 +1205,7 @@ fn weights() -> &'static Weights {
         near100_shed_perpen: parse_env_i32("MDH_W_NEAR100_SHED_PERPEN").unwrap_or(250),
         hunt_feed_perpen: parse_env_i32("MDH_W_HUNT_FEED_PERPEN").unwrap_or(800),
         leader_feed_base: parse_env_i32("MDH_W_LEADER_FEED_BASE").unwrap_or(120),
-        nonleader_feed_perpen: parse_env_i32("MDH_W_NONLEADER_FEED_PERPEN").unwrap_or(1200),
+        nonleader_feed_perpen: parse_env_i32("MDH_W_NONLEADER_FEED_PERPEN").unwrap_or(2000),
         leader_feed_gap_per10: parse_env_i32("MDH_W_LEADER_FEED_GAP_PER10").unwrap_or(40),
         endgame_feed_cap_perpen: parse_env_i32("MDH_W_ENDGAME_FEED_CAP").unwrap_or(0),
     })
@@ -1851,6 +2045,13 @@ mod tests {
     use hearts_core::model::score::ScoreBoard;
     use hearts_core::model::suit::Suit;
     use hearts_core::model::trick::Trick;
+    use std::sync::{Mutex, MutexGuard};
+
+    static ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_GUARD.lock().unwrap()
+    }
 
     fn build_round(
         starting: PlayerPosition,
@@ -2226,6 +2427,7 @@ mod tests {
 
     #[test]
     fn stage2_avoid_heavy_dump_after_moon_bust() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_HARD_DETERMINISTIC", "1");
             std::env::set_var("MDH_HARD_TEST_STEPS", "80");
@@ -2312,6 +2514,7 @@ mod tests {
 
     #[test]
     fn stage2_follow_limit_halts_simulation() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_FEATURE_HARD_STAGE2", "1");
             std::env::set_var("MDH_HARD_DETERMINISTIC", "1");
@@ -2387,6 +2590,7 @@ mod tests {
     fn stage2_near_cap_prefers_overcallable_zero_penalty() {
         use hearts_core::model::trick::Trick;
 
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_FEATURE_HARD_STAGE2", "1");
             std::env::set_var("MDH_STAGE2_ROUND_GAP_CAP", "3");
@@ -2447,6 +2651,7 @@ mod tests {
     fn stage2_avoid_dump_discards_low_penalty_when_gap_zero() {
         use hearts_core::model::trick::Trick;
 
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_FEATURE_HARD_STAGE2", "1");
             std::env::set_var("MDH_STAGE2_ROUND_GAP_CAP", "4");
@@ -2537,6 +2742,7 @@ mod tests {
     fn stage2_near_cap_falls_back_to_lowest_penalty_overcallable() {
         use hearts_core::model::trick::Trick;
 
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_FEATURE_HARD_STAGE2", "1");
             std::env::set_var("MDH_STAGE2_ROUND_GAP_CAP", "2");
@@ -2592,6 +2798,7 @@ mod tests {
     fn stage2_runaway_leader_forces_low_overcall() {
         use hearts_core::model::trick::Trick;
 
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_FEATURE_HARD_STAGE2", "1");
             std::env::set_var("MDH_STAGE2_ROUND_GAP_CAP", "4");
@@ -2671,6 +2878,7 @@ mod tests {
 
     #[test]
     fn lead_simulation_avoids_penalty_when_followers_duck() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("MDH_TEST_PERMISSIVE_LEGAL", "1");
             std::env::set_var("MDH_STAGE2_MUST_LOSE_MAXTRICKS", "0");

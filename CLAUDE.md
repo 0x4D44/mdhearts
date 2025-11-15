@@ -75,10 +75,12 @@ The bot system (`crates/hearts-app/src/bot/`) consists of:
 - **`adviser.rs`**: Optional bias system for Hard AI candidate scoring
 
 #### Difficulty Levels
-- **Easy** (`BotDifficulty::EasyLegacy`): Legacy simple heuristics
-- **Normal** (`BotDifficulty::NormalHeuristic`): Feature-based heuristic planner (default)
-- **Hard** (`BotDifficulty::FutureHard`): Shallow search with continuation evaluation, deterministic when configured
-- **Search** (`BotDifficulty::SearchLookahead`): Reserved for future deeper search
+- **Easy** (`BotDifficulty::EasyLegacy`): Legacy simple heuristics (<1μs decisions)
+- **Normal** (`BotDifficulty::NormalHeuristic`): Feature-based heuristic planner (5-50μs, default)
+- **Hard** (`BotDifficulty::FutureHard`): Shallow search with continuation evaluation (2-15ms deterministic)
+- **Search** (`BotDifficulty::SearchLookahead`): Time-capped deeper search, extends Hard with configurable think limits
+
+**Note**: Search difficulty uses the same engine as Hard but with time-based budgets instead of step limits, enabling analysis of think-time vs. strength tradeoffs.
 
 #### Feature Flags (Continue-On-Main Strategy)
 To allow ongoing Hard AI development while keeping default behavior stable:
@@ -136,6 +138,34 @@ mdhearts --match-batch <seat> <seed_start> <count> [diffA] [diffB] --out results
 mdhearts --match-batch west 1000 50 normal hard \
   --hard-deterministic --hard-steps 120 \
   --out designs/tuning/match_west.csv
+
+# Mixed-seat evaluation (inline seed ranges)
+# <mix> is 4 chars (N,E,S,W) using e|n|h|s for Easy/Normal/Hard/Search
+mdhearts --match-mixed <seat> <seed_start> <count> <mix> --out results.csv --stats
+
+# Mixed-seat with seed file
+mdhearts --match-mixed-file <seat> <mix> --seeds-file seeds.txt --out results.csv
+```
+
+### Performance & Research
+```bash
+# Quick performance benchmarking
+mdhearts --bench-check <difficulty> <seat> <seed_start> <count>
+
+# Export play dataset for research (NDJSON)
+mdhearts --export-play-dataset <seat> <seed_start> <count> <difficulty> <out>
+
+# Show Hard AI telemetry
+mdhearts --show-hard-telemetry --out telemetry.ndjson
+```
+
+### Card Passing Analysis
+```bash
+# Explain card passing for one seed
+mdhearts --explain-pass-once <seed> <seat>
+
+# Batch analyze passing decisions
+mdhearts --explain-pass-batch <seat> <seed_start> <count>
 ```
 
 ### Hard AI Flags
@@ -146,7 +176,17 @@ Append these to control Hard AI behavior without env vars:
 - `--hard-next-branch-limit <n>`: Next-trick lead candidates to probe
 - `--hard-time-cap-ms <ms>`: Wall-clock cap per decision
 - `--hard-cutoff <margin>`: Early cutoff margin
+- `--hard-phaseb-topk <k>`: Compute continuation only for top-K candidates
+- `--hard-cont-boost-gap <n>`: Apply continuation boost within this gap
+- `--hard-cont-boost-factor <n>`: Multiplicative boost to continuation
 - `--hard-verbose`: Print continuation breakdown (with `MDH_DEBUG_LOGS=1`)
+
+**Additional Hard AI Environment Variables** (see `docs/CLI_TOOLS.md` for complete list):
+- Tiering: `MDH_HARD_TIERS_ENABLE=1`, `MDH_HARD_LEVERAGE_THRESH_NARROW`, `MDH_HARD_LEVERAGE_THRESH_NORMAL`
+- Belief cache: `MDH_HARD_BELIEF_CACHE_SIZE=128`
+- Next-trick probing: `MDH_HARD_NEXT3_ENABLE=1`, `MDH_HARD_PROBE_AB_MARGIN`
+- Adviser bias: `MDH_HARD_ADVISER_PLAY=1`
+- Promoted defaults: `MDH_HARD_PROMOTE_DEFAULTS=1`
 
 ### Evaluation Scripts
 ```bash
@@ -158,12 +198,23 @@ bash tools/run_eval.sh
 
 # Ultra-fast smoke test (1 seed per seat, for CI)
 bash tools/smoke_fast.sh 100
+
+# Search vs Hard sweeps with telemetry verification
+powershell -ExecutionPolicy Bypass -File tools/run_search_vs_hard.ps1 -VerifyTimeoutTelemetry
+
+# Mixed-seat sweeps (e.g., shsh, sshh)
+powershell -ExecutionPolicy Bypass -File tools/run_search_vs_mixed.ps1 -Mixes shsh -ThinkLimitsMs @(5000,0)
 ```
+
+**Output Locations:**
+- Main eval results: `designs/tuning/`
+- Smoke test archives: `designs/tuning/stage1/smoke_release/`
+- Summary reports: `designs/tuning/eval_summary_<timestamp>.md`
 
 ## Configuration via Environment Variables
 
 ### Core Settings
-- `MDH_BOT_DIFFICULTY`: `easy`, `normal`, `hard` (default: `normal`)
+- `MDH_BOT_DIFFICULTY`: `easy`, `normal`, `hard`, `search` (default: `normal`)
 - `MDH_DEBUG_LOGS=1`: Enable detailed decision logging to stderr
 - `MDH_CLI_POPUPS=1`: Enable Windows message boxes (default: off for automation)
 
@@ -222,10 +273,12 @@ Over 20+ tunable weights for Normal and Hard AI behavior, including:
 
 - `assets/`: Card atlas (`cards.png`), layout JSON, adviser bias files
 - `designs/`: Design docs, tuning plans, eval reports (prefix with `YYYY.MM.DD - `)
+- `designs/tuning/`: AI evaluation outputs (CSVs, summaries, smoke archives)
 - `docs/`: Setup guides, CLI docs, contributing guides
 - `tools/`: Evaluation scripts (PowerShell and Bash)
-- `designs/tuning/`: AI evaluation outputs (CSVs, summaries)
 - `snapshots/`: Exported game state snapshots for testing
+- `wrk_docs/`: Component architecture documentation (see index for navigation)
+- `installers/`: Inno Setup script and release packaging
 
 ## Platform-Specific Notes
 
@@ -263,6 +316,11 @@ Over 20+ tunable weights for Normal and Hard AI behavior, including:
 3. Check into repo if it's a regression test golden
 4. Reference in test documentation
 
+### Building Release Installer (Windows)
+1. Build release binary: `cargo build --release`
+2. Run Inno Setup: `iscc installers\Hearts.iss`
+3. Output: `installers/MDHearts-1.0.1-Setup.exe`
+
 ## Important Invariants
 
 1. **Determinism**: Core game logic must be deterministic given the same seed
@@ -270,3 +328,11 @@ Over 20+ tunable weights for Normal and Hard AI behavior, including:
 3. **No warnings**: All code must compile cleanly with `-D warnings`
 4. **Testing**: Changes to AI logic require either unit tests or documented eval validation
 5. **Feature flags**: New Hard AI features must be behind feature flags when on main branch
+
+## Additional Documentation
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)**: Comprehensive technical architecture overview
+- **[README.md](README.md)**: User-facing quick start and reference
+- **docs/CLI_TOOLS.md**: Complete CLI command reference (60+ env vars)
+- **docs/CONTRIBUTING_AI_TUNING.md**: AI tuning methodology
+- **wrk_docs/2025.11.06 - Architecture Documentation Index.md**: Entry point for component docs
