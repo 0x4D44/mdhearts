@@ -3194,15 +3194,15 @@ fn belief_sampling_enabled() -> bool {
 }
 
 /// Get the number of worlds to sample for belief-state search
-/// SearchLookahead difficulty: 30 samples (ultra-high accuracy)
+/// SearchLookahead difficulty: 50 samples (extreme accuracy)
 /// Default: 15 samples for strong play
 fn belief_sample_count(ctx: &BotContext<'_>) -> usize {
-    // Ultra-high sampling for SearchLookahead difficulty
+    // Extreme sampling for SearchLookahead difficulty
     if matches!(ctx.difficulty, BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_BELIEF_SAMPLE_COUNT")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(30) // ULTRA-HIGH: 30 samples for Search difficulty
+            .unwrap_or(50) // EXTREME: 50 samples for Search difficulty
             .max(1)
             .min(100); // Higher cap for Search mode
     }

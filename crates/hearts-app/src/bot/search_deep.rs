@@ -220,8 +220,11 @@ impl DeepSearch {
         let mut best_move = legal[0];
         let mut best_score = i32::MIN;
 
-        // Try each legal move
-        for &card in legal {
+        // CRITICAL: Order moves by heuristic for better alpha-beta pruning
+        let ordered_moves = self.order_moves(legal, ctx);
+
+        // Try each legal move in order of promise
+        for card in ordered_moves {
             if self.time_expired() {
                 return None;
             }
@@ -240,6 +243,51 @@ impl DeepSearch {
             nodes_searched: self.nodes_searched,
             depth_reached: depth,
         })
+    }
+
+    /// Order moves by heuristic evaluation (best first) for better alpha-beta pruning
+    fn order_moves(&self, legal: &[Card], ctx: &BotContext<'_>) -> Vec<Card> {
+        let mut evaluated = PlayPlanner::explain_candidates(legal, ctx);
+        // Sort by score descending (best moves first)
+        evaluated.sort_by(|a, b| b.1.cmp(&a.1));
+        evaluated.into_iter().map(|(card, _)| card).collect()
+    }
+
+    /// Order moves for opponent simulation (simple heuristic)
+    fn order_moves_simple(&self, legal: &[Card], _round: &RoundState, _seat: PlayerPosition) -> Vec<Card> {
+        let mut moves: Vec<_> = legal.iter().copied().collect();
+
+        // Simple ordering: prefer low cards to avoid taking penalties
+        // This is a rough heuristic for opponent play
+        moves.sort_by_key(|card| {
+            let rank_val = match card.rank {
+                hearts_core::model::rank::Rank::Two => 0,
+                hearts_core::model::rank::Rank::Three => 1,
+                hearts_core::model::rank::Rank::Four => 2,
+                hearts_core::model::rank::Rank::Five => 3,
+                hearts_core::model::rank::Rank::Six => 4,
+                hearts_core::model::rank::Rank::Seven => 5,
+                hearts_core::model::rank::Rank::Eight => 6,
+                hearts_core::model::rank::Rank::Nine => 7,
+                hearts_core::model::rank::Rank::Ten => 8,
+                hearts_core::model::rank::Rank::Jack => 9,
+                hearts_core::model::rank::Rank::Queen => 10,
+                hearts_core::model::rank::Rank::King => 11,
+                hearts_core::model::rank::Rank::Ace => 12,
+            };
+
+            // Prefer clubs, then diamonds, then spades, then hearts (to avoid penalties)
+            let suit_val = match card.suit {
+                hearts_core::model::suit::Suit::Clubs => 0,
+                hearts_core::model::suit::Suit::Diamonds => 1,
+                hearts_core::model::suit::Suit::Spades => 2,
+                hearts_core::model::suit::Suit::Hearts => 3,
+            };
+
+            (suit_val, rank_val)
+        });
+
+        moves
     }
 
     fn search_move(&mut self, card: Card, ctx: &BotContext<'_>, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
@@ -303,7 +351,10 @@ impl DeepSearch {
 
         let mut best_score = i32::MIN;
 
-        for card in &legal {
+        // Use move ordering for better pruning
+        let ordered = self.order_moves_simple(&legal, round, next);
+
+        for card in &ordered {
             let mut probe = round.clone();
             let outcome = match probe.play_card(next, *card) {
                 Ok(o) => o,
@@ -348,10 +399,106 @@ impl DeepSearch {
         Some(best_score)
     }
 
-    fn search_next_trick(&mut self, round: &RoundState, seat: PlayerPosition, _depth: u8, _alpha: i32, _beta: i32) -> Option<i32> {
-        // Simplified: just evaluate the position for now
-        // TODO: Recursively search the next trick
-        Some(self.evaluate_position(round, seat))
+    fn search_next_trick(&mut self, round: &RoundState, seat: PlayerPosition, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+        if depth == 0 {
+            return Some(self.evaluate_position(round, seat));
+        }
+
+        // Determine who leads the next trick
+        let next_leader = next_to_play(round);
+
+        if next_leader == seat {
+            // We lead the next trick - search our options
+            let legal = legal_moves_for(round, seat);
+            if legal.is_empty() {
+                return Some(0);
+            }
+
+            let mut best_score = i32::MIN;
+            let mut local_alpha = alpha;
+
+            // Use simple move ordering (we don't have BotContext here)
+            let ordered = self.order_moves_simple(&legal, round, seat);
+
+            for &card in &ordered {
+                if self.time_expired() {
+                    return None;
+                }
+
+                // Recursively search this move
+                let score = self.search_position_after_move(round, seat, card, depth, local_alpha, beta)?;
+                best_score = best_score.max(score);
+                local_alpha = local_alpha.max(score);
+
+                if local_alpha >= beta {
+                    break; // Beta cutoff
+                }
+            }
+
+            Some(best_score)
+        } else {
+            // Opponent leads - simulate their play
+            self.search_opponent(round, depth, alpha, beta)
+        }
+    }
+
+    fn search_position_after_move(&mut self, round: &RoundState, seat: PlayerPosition, card: Card, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+        self.nodes_searched += 1;
+
+        if self.time_expired() {
+            return None;
+        }
+
+        // Apply the move
+        let mut new_round = round.clone();
+        let outcome = match new_round.play_card(seat, card) {
+            Ok(o) => o,
+            Err(_) => return Some(i32::MIN), // Illegal move
+        };
+
+        // Check transposition table for cached result
+        let hash = hash_position(&new_round, seat);
+        if let Some(score) = self.tt.probe(hash, depth, alpha, beta) {
+            return Some(score);
+        }
+
+        let result = match outcome {
+            PlayOutcome::TrickCompleted { winner, penalties } => {
+                let penalty_delta = if winner == seat {
+                    -(penalties as i32) * 100
+                } else {
+                    0
+                };
+
+                if new_round.hand(seat).is_empty() || depth == 0 {
+                    penalty_delta + self.evaluate_position(&new_round, seat)
+                } else {
+                    // Continue to next trick
+                    penalty_delta + self.search_next_trick(&new_round, seat, depth - 1, alpha, beta)?
+                }
+            }
+            _ => {
+                // Trick in progress - simulate opponent moves
+                if depth == 0 {
+                    self.evaluate_position(&new_round, seat)
+                } else {
+                    self.search_opponent(&new_round, depth - 1, -beta, -alpha)
+                        .map(|score| -score)?
+                }
+            }
+        };
+
+        // Store result in transposition table
+        let node_type = if result <= alpha {
+            NodeType::UpperBound
+        } else if result >= beta {
+            NodeType::LowerBound
+        } else {
+            NodeType::Exact
+        };
+        self.tt.store(hash, depth, result, Some(card), node_type);
+
+        Some(result)
     }
 
     fn evaluate_position(&self, round: &RoundState, seat: PlayerPosition) -> i32 {
@@ -436,17 +583,17 @@ fn deep_search_enabled() -> bool {
 }
 
 /// Maximum search depth (number of plies to look ahead)
-/// SearchLookahead difficulty: 5 plies (ultra-deep)
+/// SearchLookahead difficulty: 7 plies (extreme depth!)
 /// Default: 3 plies for strong tactical play
 fn deep_search_max_depth(ctx: &BotContext<'_>) -> u8 {
-    // Ultra-aggressive for SearchLookahead difficulty
+    // Extreme depth for SearchLookahead difficulty
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_SEARCH_MAX_DEPTH")
             .ok()
             .and_then(|s| s.parse::<u8>().ok())
-            .unwrap_or(5) // ULTRA-DEEP: 5 plies for Search difficulty
+            .unwrap_or(7) // EXTREME: 7 plies for Search difficulty
             .max(1)
-            .min(8);
+            .min(10);
     }
 
     std::env::var("MDH_SEARCH_MAX_DEPTH")
@@ -458,15 +605,15 @@ fn deep_search_max_depth(ctx: &BotContext<'_>) -> u8 {
 }
 
 /// Transposition table size (number of positions to cache)
-/// SearchLookahead difficulty: 2M positions (massive cache)
+/// SearchLookahead difficulty: 5M positions (enormous cache)
 /// Default: 500k for good performance
 fn deep_search_tt_size(ctx: &BotContext<'_>) -> usize {
-    // Massive cache for SearchLookahead difficulty
+    // Enormous cache for SearchLookahead difficulty
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_SEARCH_TT_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(2_000_000) // MASSIVE: 2M positions for Search difficulty
+            .unwrap_or(5_000_000) // ENORMOUS: 5M positions for Search difficulty
             .max(1000)
             .min(10_000_000);
     }
@@ -480,7 +627,7 @@ fn deep_search_tt_size(ctx: &BotContext<'_>) -> usize {
 }
 
 /// Time budget per move in milliseconds
-/// SearchLookahead difficulty: 500ms (think deeply)
+/// SearchLookahead difficulty: 1000ms (think very deeply)
 /// Default: 100ms for strong but responsive play
 fn deep_search_time_ms(ctx: &BotContext<'_>) -> u32 {
     // Much longer thinking for SearchLookahead difficulty
@@ -488,9 +635,9 @@ fn deep_search_time_ms(ctx: &BotContext<'_>) -> u32 {
         return std::env::var("MDH_SEARCH_TIME_MS")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(500) // ULTRA-LONG: 500ms for Search difficulty
+            .unwrap_or(1000) // EXTREME: 1000ms for Search difficulty
             .max(10)
-            .min(10000);
+            .min(30000);
     }
 
     std::env::var("MDH_SEARCH_TIME_MS")

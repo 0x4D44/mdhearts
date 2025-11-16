@@ -316,15 +316,15 @@ fn endgame_enabled() -> bool {
 }
 
 /// Maximum number of cards for endgame perfect play
-/// SearchLookahead difficulty: 9 cards (ultra-deep endgame)
+/// SearchLookahead difficulty: 11 cards (near-perfect endgame)
 /// Default: 7 cards for strong endgame play
 fn endgame_max_cards(ctx: &BotContext<'_>) -> usize {
-    // Ultra-deep endgame for SearchLookahead difficulty
+    // Near-perfect endgame for SearchLookahead difficulty
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_ENDGAME_MAX_CARDS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(9) // ULTRA-DEEP: 9 cards for Search difficulty
+            .unwrap_or(11) // NEAR-PERFECT: 11 cards for Search difficulty
             .max(2)
             .min(13); // Can go up to all cards
     }
