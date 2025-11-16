@@ -3015,6 +3015,18 @@ unsafe extern "system" fn window_proc(
             };
             LRESULT(0)
         }
+        WM_NCDESTROY => {
+            // Free the AppState memory allocated in WM_NCCREATE
+            if let Some(ptr) = state_ptr(hwnd) {
+                unsafe {
+                    // Reconstruct the Box to properly deallocate
+                    let _ = Box::from_raw(ptr);
+                    // Clear the window data to prevent double-free
+                    windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                }
+            }
+            LRESULT(0)
+        }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
 }
