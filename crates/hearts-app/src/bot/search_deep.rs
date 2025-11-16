@@ -187,7 +187,8 @@ impl DeepSearch {
         self.nodes_searched = 0;
         self.tt.clear();
 
-        let max_depth = deep_search_max_depth();
+        // Get difficulty-dependent max depth
+        let max_depth = deep_search_max_depth(ctx);
         let mut best_result = None;
 
         // Iterative deepening: start at depth 1, increase until time runs out
@@ -435,34 +436,67 @@ fn deep_search_enabled() -> bool {
 }
 
 /// Maximum search depth (number of plies to look ahead)
-/// Default is 3 for strong tactical play
-fn deep_search_max_depth() -> u8 {
+/// SearchLookahead difficulty: 5 plies (ultra-deep)
+/// Default: 3 plies for strong tactical play
+fn deep_search_max_depth(ctx: &BotContext<'_>) -> u8 {
+    // Ultra-aggressive for SearchLookahead difficulty
+    if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
+        return std::env::var("MDH_SEARCH_MAX_DEPTH")
+            .ok()
+            .and_then(|s| s.parse::<u8>().ok())
+            .unwrap_or(5) // ULTRA-DEEP: 5 plies for Search difficulty
+            .max(1)
+            .min(8);
+    }
+
     std::env::var("MDH_SEARCH_MAX_DEPTH")
         .ok()
         .and_then(|s| s.parse::<u8>().ok())
-        .unwrap_or(3) // Increased from 2 for stronger default play
+        .unwrap_or(3) // Normal: 3 plies
         .max(1)
         .min(6)
 }
 
 /// Transposition table size (number of positions to cache)
-/// Default is 500k for good performance
-fn deep_search_tt_size() -> usize {
+/// SearchLookahead difficulty: 2M positions (massive cache)
+/// Default: 500k for good performance
+fn deep_search_tt_size(ctx: &BotContext<'_>) -> usize {
+    // Massive cache for SearchLookahead difficulty
+    if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
+        return std::env::var("MDH_SEARCH_TT_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(2_000_000) // MASSIVE: 2M positions for Search difficulty
+            .max(1000)
+            .min(10_000_000);
+    }
+
     std::env::var("MDH_SEARCH_TT_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(500_000) // Increased from 100k for better caching
+        .unwrap_or(500_000) // Normal: 500k
         .max(1000)
         .min(10_000_000)
 }
 
 /// Time budget per move in milliseconds
-/// Default is 100ms for strong but responsive play
-fn deep_search_time_ms() -> u32 {
+/// SearchLookahead difficulty: 500ms (think deeply)
+/// Default: 100ms for strong but responsive play
+fn deep_search_time_ms(ctx: &BotContext<'_>) -> u32 {
+    // Much longer thinking for SearchLookahead difficulty
+    if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
+        return std::env::var("MDH_SEARCH_TIME_MS")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(500) // ULTRA-LONG: 500ms for Search difficulty
+            .max(10)
+            .min(10000);
+    }
+
     std::env::var("MDH_SEARCH_TIME_MS")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(100) // Increased from 50ms for stronger default play
+        .unwrap_or(100) // Normal: 100ms
         .max(10)
         .min(5000)
 }
@@ -477,8 +511,9 @@ impl PlayPlannerHard {
             return None; // Fall back to existing search
         }
 
-        let tt_size = deep_search_tt_size();
-        let time_ms = deep_search_time_ms();
+        // Get difficulty-dependent parameters
+        let tt_size = deep_search_tt_size(ctx);
+        let time_ms = deep_search_time_ms(ctx);
 
         let mut search = DeepSearch::new(tt_size, time_ms);
         let result = search.choose_best_move(legal, ctx);

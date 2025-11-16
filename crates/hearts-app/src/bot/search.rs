@@ -1,5 +1,5 @@
 use super::{
-    BotContext, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure, snapshot_scores,
+    BotContext, BotDifficulty, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure, snapshot_scores,
 };
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -1372,7 +1372,7 @@ impl PlayPlannerHard {
         // Belief-state sampling: sample multiple possible worlds
         if belief_sampling_enabled() {
             let mut acc = 0i32;
-            let sample_count = belief_sample_count();
+            let sample_count = belief_sample_count(ctx);
             let mut successful_samples = 0;
 
             use rand::SeedableRng;
@@ -3194,13 +3194,23 @@ fn belief_sampling_enabled() -> bool {
 }
 
 /// Get the number of worlds to sample for belief-state search
-/// Default is 15 for strong play (balance between accuracy and performance)
-fn belief_sample_count() -> usize {
+/// SearchLookahead difficulty: 30 samples (ultra-high accuracy)
+/// Default: 15 samples for strong play
+fn belief_sample_count(ctx: &BotContext<'_>) -> usize {
+    // Ultra-high sampling for SearchLookahead difficulty
+    if matches!(ctx.difficulty, BotDifficulty::SearchLookahead) {
+        return std::env::var("MDH_BELIEF_SAMPLE_COUNT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(30) // ULTRA-HIGH: 30 samples for Search difficulty
+            .max(1)
+            .min(100); // Higher cap for Search mode
+    }
+
     std::env::var("MDH_BELIEF_SAMPLE_COUNT")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(15) // Increased from 10 for stronger default play
+        .unwrap_or(15) // Normal: 15 samples
         .max(1)
-        .min(50) // At least 1 sample
-        .min(50) // Cap at 50 for performance
+        .min(50) // Normal cap
 }
