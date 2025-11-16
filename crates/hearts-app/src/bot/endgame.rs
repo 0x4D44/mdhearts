@@ -117,7 +117,7 @@ impl EndgameSolver {
         }
 
         // Only solve if we're in the endgame (few cards remaining)
-        let max_cards = endgame_max_cards();
+        let max_cards = endgame_max_cards(ctx);
         if ctx.hand().len() > max_cards {
             return None; // Not in endgame yet
         }
@@ -316,12 +316,23 @@ fn endgame_enabled() -> bool {
 }
 
 /// Maximum number of cards for endgame perfect play
-/// Default is 7 for strong endgame play without excessive computation
-fn endgame_max_cards() -> usize {
+/// SearchLookahead difficulty: 9 cards (ultra-deep endgame)
+/// Default: 7 cards for strong endgame play
+fn endgame_max_cards(ctx: &BotContext<'_>) -> usize {
+    // Ultra-deep endgame for SearchLookahead difficulty
+    if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
+        return std::env::var("MDH_ENDGAME_MAX_CARDS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(9) // ULTRA-DEEP: 9 cards for Search difficulty
+            .max(2)
+            .min(13); // Can go up to all cards
+    }
+
     std::env::var("MDH_ENDGAME_MAX_CARDS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(7) // Increased from 6 for stronger default endgame
+        .unwrap_or(7) // Normal: 7 cards
         .max(2)
         .min(10)
 }
