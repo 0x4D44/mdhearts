@@ -3186,17 +3186,21 @@ fn det_sample_k() -> usize {
 
 // ----- Belief-State Sampling (Phase 1: Imperfect Information) -----
 /// Check if belief-state sampling is enabled
+/// DEFAULT: ENABLED (can be disabled with MDH_BELIEF_SAMPLING_ENABLED=0)
 fn belief_sampling_enabled() -> bool {
-    bool_env("MDH_BELIEF_SAMPLING_ENABLED")
+    std::env::var("MDH_BELIEF_SAMPLING_ENABLED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(true) // ENABLED BY DEFAULT
 }
 
 /// Get the number of worlds to sample for belief-state search
-/// Default is 10 for a balance between accuracy and performance
+/// Default is 15 for strong play (balance between accuracy and performance)
 fn belief_sample_count() -> usize {
     std::env::var("MDH_BELIEF_SAMPLE_COUNT")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(10)
-        .max(1) // At least 1 sample
+        .unwrap_or(15) // Increased from 10 for stronger default play
+        .max(1)
+        .min(50) // At least 1 sample
         .min(50) // Cap at 50 for performance
 }

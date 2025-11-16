@@ -307,17 +307,21 @@ impl EndgameSolver {
 // Configuration
 // ============================================================================
 
+/// Check if endgame solver is enabled
+/// DEFAULT: ENABLED (can be disabled with MDH_ENDGAME_SOLVER_ENABLED=0)
 fn endgame_enabled() -> bool {
     std::env::var("MDH_ENDGAME_SOLVER_ENABLED")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(true) // ENABLED BY DEFAULT
 }
 
+/// Maximum number of cards for endgame perfect play
+/// Default is 7 for strong endgame play without excessive computation
 fn endgame_max_cards() -> usize {
     std::env::var("MDH_ENDGAME_MAX_CARDS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(6)
+        .unwrap_or(7) // Increased from 6 for stronger default endgame
         .max(2)
         .min(10)
 }
