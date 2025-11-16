@@ -7,10 +7,12 @@
 // - Integration with belief-state sampling from Phase 1
 // - Configurable depth via MDH_SEARCH_MAX_DEPTH
 
-use super::{BotContext, PlayPlannerHard};
+use super::{BotContext, PlayPlanner, PlayPlannerHard};
 use hearts_core::model::card::Card;
+use hearts_core::model::passing::PassingDirection;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::{PlayOutcome, RoundState};
+use hearts_core::model::score::ScoreBoard;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -253,11 +255,6 @@ impl DeepSearch {
             Err(_) => return Some(i32::MIN), // Illegal move
         };
 
-        // Evaluate if trick completed or depth reached
-        if depth == 0 {
-            return Some(self.evaluate_position(&round, ctx.seat));
-        }
-
         match outcome {
             PlayOutcome::TrickCompleted { winner, penalties } => {
                 // Trick completed - evaluate and continue if cards remain
@@ -267,23 +264,29 @@ impl DeepSearch {
                     0 // Someone else won, neutral for us
                 };
 
-                if round.hand(ctx.seat).is_empty() {
-                    // Round over
-                    return Some(penalty_delta);
+                if round.hand(ctx.seat).is_empty() || depth == 0 {
+                    // Round over or depth limit reached
+                    return Some(penalty_delta + self.evaluate_position(&round, ctx.seat));
                 }
 
-                // Continue to next trick
-                Some(penalty_delta + self.search_next_trick(&round, ctx.seat, depth, alpha, beta)?)
+                // Continue to next trick with reduced depth
+                Some(penalty_delta + self.search_next_trick(&round, ctx.seat, depth - 1, alpha, beta)?)
             }
             _ => {
-                // Trick in progress - continue evaluating
-                Some(self.evaluate_position(&round, ctx.seat))
+                // Trick in progress - simulate opponent moves
+                if depth == 0 {
+                    return Some(self.evaluate_position(&round, ctx.seat));
+                }
+
+                // Continue searching opponent responses
+                self.search_opponent(&round, depth - 1, -beta, -alpha)
+                    .map(|score| -score) // Negate because it's opponent's score
             }
         }
     }
 
     #[allow(dead_code)]
-    fn search_opponent(&mut self, round: &RoundState, _depth: u8, mut alpha: i32, beta: i32) -> Option<i32> {
+    fn search_opponent(&mut self, round: &RoundState, depth: u8, mut alpha: i32, beta: i32) -> Option<i32> {
         self.nodes_searched += 1;
 
         if self.time_expired() {
@@ -301,9 +304,38 @@ impl DeepSearch {
 
         for card in &legal {
             let mut probe = round.clone();
-            let _ = probe.play_card(next, *card);
+            let outcome = match probe.play_card(next, *card) {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
 
-            let score = -self.evaluate_position(&probe, next);
+            let score = match outcome {
+                PlayOutcome::TrickCompleted { winner, penalties } => {
+                    // Opponent perspective: they want to avoid penalties
+                    let penalty_delta = if winner == next {
+                        -(penalties as i32) * 100
+                    } else {
+                        0
+                    };
+
+                    if probe.hand(next).is_empty() || depth == 0 {
+                        penalty_delta + self.evaluate_position(&probe, next)
+                    } else {
+                        // Continue to next trick
+                        penalty_delta + self.evaluate_position(&probe, next)
+                    }
+                }
+                _ => {
+                    // Trick continues
+                    if depth == 0 {
+                        self.evaluate_position(&probe, next)
+                    } else {
+                        // Recursively search deeper
+                        self.search_opponent(&probe, depth - 1, alpha, beta)?
+                    }
+                }
+            };
+
             best_score = best_score.max(score);
             alpha = alpha.max(score);
 
@@ -321,11 +353,40 @@ impl DeepSearch {
         Some(self.evaluate_position(round, seat))
     }
 
-    fn evaluate_position(&self, _round: &RoundState, _seat: PlayerPosition) -> i32 {
-        // Use heuristic evaluation from Phase 1
-        // This is a placeholder - we'll integrate with the existing evaluation later
-        // For now, just return 0 (neutral evaluation)
-        0
+    fn evaluate_position(&self, round: &RoundState, seat: PlayerPosition) -> i32 {
+        // Use heuristic evaluation from PlayPlanner
+        // We need to evaluate the current position from the given seat's perspective
+
+        // Get legal moves for this position
+        let legal = legal_moves_for(round, seat);
+        if legal.is_empty() {
+            return 0;
+        }
+
+        // We need a BotContext for evaluation, but we only have round/seat
+        // Create a minimal one with dummy scores and tracker
+        let dummy_scores = ScoreBoard::new();
+        let dummy_tracker = super::UnseenTracker::new();
+        let dummy_difficulty = super::BotDifficulty::FutureHard;
+
+        let temp_ctx = BotContext::new(
+            seat,
+            round,
+            &dummy_scores,
+            PassingDirection::Hold,
+            &dummy_tracker,
+            dummy_difficulty,
+        );
+
+        // Use PlayPlanner heuristic to evaluate each move
+        let evaluated = PlayPlanner::explain_candidates(&legal, &temp_ctx);
+
+        // Return the score of the best move (this represents the value of this position)
+        evaluated
+            .iter()
+            .map(|(_, score)| *score)
+            .max()
+            .unwrap_or(0)
     }
 
     fn time_expired(&self) -> bool {
