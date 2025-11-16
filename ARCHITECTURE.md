@@ -89,11 +89,17 @@ Clean separation: no circular dependencies, core is fully portable.
 - Leverage-based adaptive search depth
 - 2-15ms per decision (deterministic 120 steps)
 - 30+ tunable parameters
-- Optional perfect endgame solver
 
-**4. Search (Future)**
-- Deep search with alpha-beta pruning
-- Reserved for future implementation
+**4. Search (Ultra-Hard) - Expert**
+- Deep multi-ply search with alpha-beta pruning (up to 10 plies)
+- Transposition tables (10M positions, ~160MB)
+- Iterative deepening with aspiration windows
+- Killer move heuristic for move ordering
+- Belief-state sampling (100 samples for imperfect information)
+- Perfect endgame solver (up to 13 cards)
+- Moon shooting detection and scoring
+- 0.5-2 second decisions with timeout protection
+- 20+ tunable search parameters
 
 ### AI Decision Flow
 
@@ -113,13 +119,40 @@ Clean separation: no circular dependencies, core is fully portable.
 4. Total = base + continuation
 5. Select highest total
 
+**Search AI (Ultra-Hard):**
+1. Check if endgame (≤13 cards remaining)
+   - If yes: Use perfect minimax solver with belief sampling
+   - If no: Continue to deep search
+2. Generate 100 belief-state samples (opponent hand distributions)
+3. For each legal move:
+   - Iterative deepening (depth 1→10):
+     - Try aspiration window search first (narrow bounds)
+     - If fail, re-search with full window
+   - Alpha-beta pruning with transposition table
+   - Order moves by: killer moves → heuristic score
+   - Simulate opponent responses recursively
+   - Cache positions in transposition table (10M entries)
+4. Return best move from deepest completed depth
+5. Timeout protection: return best move found so far
+
+**Endgame Solver (Perfect Play):**
+1. Build position: hands + trick + penalties
+2. Minimax with memoization:
+   - Base case: all hands empty → return penalties (with moon check)
+   - Recursive case: try all legal moves
+   - Minimize our penalties, assume opponents minimize theirs
+3. Cache results by (position, perspective)
+4. Timeout protection: return None if exceeded
+
 ### Bot Components
 
 - **mod.rs:** Core types (BotContext, BotDifficulty, BotStyle, DecisionLimit)
 - **play.rs:** PlayPlanner (Normal heuristic AI, ~1,700 lines)
 - **search.rs:** PlayPlannerHard (Hard search AI, ~1,900 lines)
+- **search_deep.rs:** DeepSearchEngine (Search AI with alpha-beta, ~776 lines)
+- **endgame.rs:** EndgameSolver (Perfect endgame play, ~400 lines)
 - **pass.rs:** PassPlanner (card passing logic, ~600 lines)
-- **tracker.rs:** UnseenTracker (void inference, beliefs, ~640 lines)
+- **tracker.rs:** UnseenTracker (void inference, beliefs, sampling, ~700 lines)
 - **adviser.rs:** Optional external bias system (~65 lines)
 
 ---
