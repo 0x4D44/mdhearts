@@ -426,35 +426,43 @@ fn legal_moves_for(round: &RoundState, seat: PlayerPosition) -> Vec<Card> {
 // Configuration
 // ============================================================================
 
+/// Check if deep search is enabled
+/// DEFAULT: ENABLED (can be disabled with MDH_SEARCH_DEEPER_ENABLED=0)
 fn deep_search_enabled() -> bool {
     std::env::var("MDH_SEARCH_DEEPER_ENABLED")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(true) // ENABLED BY DEFAULT
 }
 
+/// Maximum search depth (number of plies to look ahead)
+/// Default is 3 for strong tactical play
 fn deep_search_max_depth() -> u8 {
     std::env::var("MDH_SEARCH_MAX_DEPTH")
         .ok()
         .and_then(|s| s.parse::<u8>().ok())
-        .unwrap_or(2)
+        .unwrap_or(3) // Increased from 2 for stronger default play
         .max(1)
         .min(6)
 }
 
+/// Transposition table size (number of positions to cache)
+/// Default is 500k for good performance
 fn deep_search_tt_size() -> usize {
     std::env::var("MDH_SEARCH_TT_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(100_000)
+        .unwrap_or(500_000) // Increased from 100k for better caching
         .max(1000)
         .min(10_000_000)
 }
 
+/// Time budget per move in milliseconds
+/// Default is 100ms for strong but responsive play
 fn deep_search_time_ms() -> u32 {
     std::env::var("MDH_SEARCH_TIME_MS")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(50)
+        .unwrap_or(100) // Increased from 50ms for stronger default play
         .max(10)
         .min(5000)
 }
