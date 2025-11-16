@@ -677,6 +677,12 @@ impl PlayPlannerHard {
         if limit.map_or(false, |limit| limit.expired()) {
             return None;
         }
+
+        // Phase 2: Try deeper search first if enabled
+        if let Some(card) = Self::choose_with_deep_search(legal, ctx) {
+            return Some(card);
+        }
+
         crate::telemetry::hard::record_pre_decision(ctx.seat, ctx.tracker, ctx.difficulty);
         let limit_ms_remaining = limit.and_then(|limit| limit.remaining_millis());
         let schedule_hints = schedule_hints_for(ctx.seat, limit_ms_remaining);
