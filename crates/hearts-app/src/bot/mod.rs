@@ -2,6 +2,7 @@ mod adviser;
 mod pass;
 pub(crate) mod play;
 pub mod search;
+pub mod search_deep;
 mod tracker;
 
 pub use adviser::play_bias;
