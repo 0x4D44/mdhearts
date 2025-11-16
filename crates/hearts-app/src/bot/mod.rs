@@ -1,4 +1,5 @@
 mod adviser;
+mod endgame;
 mod pass;
 pub(crate) mod play;
 pub mod search;
