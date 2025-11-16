@@ -219,11 +219,13 @@ impl SampledWorld {
         }
     }
 
+    #[allow(dead_code)]
     pub fn hand(&self, seat: PlayerPosition) -> &[Card] {
         &self.hands[seat.index()]
     }
 
     /// Get full hand for a player by combining known cards with sampled cards
+    #[allow(dead_code)]
     pub fn full_hand(&self, seat: PlayerPosition, round: &RoundState) -> Hand {
         let known_hand = round.hand(seat);
         let mut all_cards: Vec<Card> = known_hand.iter().copied().collect();
