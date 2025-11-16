@@ -1355,7 +1355,70 @@ impl PlayPlannerHard {
         limit_ms: Option<u32>,
         depth2_enabled: bool,
     ) -> i32 {
-        if det_enabled_for(ctx) {
+        // Belief-state sampling: sample multiple possible worlds
+        if belief_sampling_enabled() {
+            let mut acc = 0i32;
+            let sample_count = belief_sample_count();
+            let mut successful_samples = 0;
+
+            use rand::SeedableRng;
+            // Use deterministic seed based on position for reproducibility if needed
+            let seed = if std::env::var("MDH_HARD_DETERMINISTIC").ok().is_some() {
+                // Deterministic seed from position
+                let trick_idx = ctx.round.trick_history().len() as u64;
+                let seat_idx = ctx.seat as u8 as u64;
+                let card_val = (card.suit as u8 as u64) << 8 | (card.rank.value() as u64);
+                trick_idx.wrapping_mul(1000)
+                    .wrapping_add(seat_idx.wrapping_mul(100))
+                    .wrapping_add(card_val)
+            } else {
+                // Use system time for non-deterministic
+                use std::time::SystemTime;
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            };
+
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+            for sample_idx in 0..sample_count {
+                if budget.should_stop() || budget.timed_out(start) {
+                    break;
+                }
+
+                // Sample a possible world
+                let _sampled_world = ctx.tracker.sample_world(&mut rng, ctx.seat, ctx.round);
+
+                // For now, use the deterministic rollout
+                // TODO: Modify rollout to use sampled world for opponent hands
+                let value = Self::rollout_current_trick_core(
+                    card,
+                    ctx,
+                    leader_target,
+                    budget,
+                    start,
+                    next3_allowed,
+                    continuation_scale_permil,
+                    limit_ms,
+                    depth2_enabled,
+                );
+
+                acc += value;
+                successful_samples += 1;
+
+                // Increment seed for next sample
+                rng = rand::rngs::StdRng::seed_from_u64(seed.wrapping_add(sample_idx as u64 + 1));
+            }
+
+            if successful_samples > 0 {
+                acc / successful_samples
+            } else {
+                0
+            }
+        }
+        // Existing determinization path
+        else if det_enabled_for(ctx) {
             let mut acc = 0i32;
             let k = det_sample_k().max(1);
             for _ in 0..k {
@@ -3055,4 +3118,21 @@ fn det_sample_k() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(0)
+}
+
+// ----- Belief-State Sampling (Phase 1: Imperfect Information) -----
+/// Check if belief-state sampling is enabled
+fn belief_sampling_enabled() -> bool {
+    bool_env("MDH_BELIEF_SAMPLING_ENABLED")
+}
+
+/// Get the number of worlds to sample for belief-state search
+/// Default is 10 for a balance between accuracy and performance
+fn belief_sample_count() -> usize {
+    std::env::var("MDH_BELIEF_SAMPLE_COUNT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(10)
+        .max(1) // At least 1 sample
+        .min(50) // Cap at 50 for performance
 }
