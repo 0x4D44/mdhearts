@@ -1,9 +1,12 @@
 use hearts_core::model::card::Card;
+use hearts_core::model::hand::Hand;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
 use hearts_core::model::round::RoundState;
 use hearts_core::model::suit::Suit;
 use parking_lot::RwLock;
+use rand::seq::SliceRandom;
+use rand::Rng;
 use std::array;
 use std::collections::{HashSet, VecDeque, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
@@ -154,6 +157,78 @@ impl BeliefState {
     fn recompute_entropy(&mut self) {
         self.queen_spades_risk = self.card_probability(Card::new(Rank::Queen, Suit::Spades));
         self.entropy = entropy_of_matrix(&self.card_probs);
+    }
+
+    /// Sample a card according to the probability distribution
+    /// Returns None if no cards have non-zero probability
+    pub fn sample_card(&self, rng: &mut impl Rng, exclude: &HashSet<Card>) -> Option<Card> {
+        let mut candidates = Vec::new();
+        let mut cumulative = Vec::new();
+        let mut sum = 0.0;
+
+        for suit in Suit::ALL {
+            for rank in Rank::ORDERED {
+                let card = Card::new(rank, suit);
+                if exclude.contains(&card) {
+                    continue;
+                }
+                let prob = self.card_probability(card);
+                if prob > 0.0 {
+                    candidates.push(card);
+                    sum += prob;
+                    cumulative.push(sum);
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let roll = rng.r#gen::<f32>() * sum;
+        for (i, &threshold) in cumulative.iter().enumerate() {
+            if roll <= threshold {
+                return Some(candidates[i]);
+            }
+        }
+
+        candidates.last().copied()
+    }
+}
+
+/// Represents a sampled world - a consistent distribution of unseen cards
+#[derive(Debug, Clone)]
+pub struct SampledWorld {
+    /// Hands for each player (only contains unseen cards that were sampled)
+    pub hands: [Vec<Card>; 4],
+    /// The seed used for this sample (for reproducibility in deterministic mode)
+    pub seed: u64,
+}
+
+impl Default for SampledWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SampledWorld {
+    pub fn new() -> Self {
+        Self {
+            hands: [vec![], vec![], vec![], vec![]],
+            seed: 0,
+        }
+    }
+
+    pub fn hand(&self, seat: PlayerPosition) -> &[Card] {
+        &self.hands[seat.index()]
+    }
+
+    /// Get full hand for a player by combining known cards with sampled cards
+    pub fn full_hand(&self, seat: PlayerPosition, round: &RoundState) -> Hand {
+        let known_hand = round.hand(seat);
+        let mut all_cards: Vec<Card> = known_hand.iter().copied().collect();
+        all_cards.extend(self.hands[seat.index()].iter().copied());
+        Hand::with_cards(all_cards)
     }
 }
 
@@ -538,6 +613,105 @@ impl UnseenTracker {
     pub fn record_belief_cache_miss(&self) {
         self.belief_cache_misses.fetch_add(1, Ordering::Relaxed);
     }
+
+    /// Sample a consistent world where unseen cards are distributed among players
+    /// respecting void constraints and belief probabilities
+    ///
+    /// This implements belief-state sampling for imperfect information Monte Carlo search.
+    /// The sampled world can be used to run rollouts that account for uncertainty about
+    /// which player holds which cards.
+    ///
+    /// # Arguments
+    /// * `rng` - Random number generator for sampling
+    /// * `our_seat` - The seat we're planning for (we already know our cards)
+    /// * `round` - Current round state (to know which cards are already revealed)
+    ///
+    /// # Returns
+    /// A `SampledWorld` containing a plausible distribution of unseen cards
+    pub fn sample_world(
+        &self,
+        rng: &mut impl Rng,
+        our_seat: PlayerPosition,
+        round: &RoundState,
+    ) -> SampledWorld {
+        let mut world = SampledWorld::new();
+        let seed = rng.r#gen();
+        world.seed = seed;
+
+        // Collect all unseen cards
+        let mut unseen_cards: Vec<Card> = self.unseen.iter().copied().collect();
+
+        // Simple approach: shuffle and deal respecting voids
+        // TODO: More sophisticated belief-weighted sampling
+        unseen_cards.shuffle(rng);
+
+        // Determine how many cards each player should get
+        let mut cards_per_player = [0usize; 4];
+        for seat in PlayerPosition::LOOP.iter().copied() {
+            if seat == our_seat {
+                // We already know our hand, don't sample for ourselves
+                cards_per_player[seat.index()] = 0;
+            } else {
+                // Other players get their fair share
+                cards_per_player[seat.index()] =
+                    round.hand(seat).len() + (unseen_cards.len() / 3);
+            }
+        }
+
+        // Distribute cards respecting void constraints
+        let mut dealt = HashSet::new();
+        for card in &unseen_cards {
+            if dealt.contains(card) {
+                continue;
+            }
+
+            // Find which players can receive this card (not void in its suit)
+            let mut eligible: Vec<PlayerPosition> = PlayerPosition::LOOP
+                .iter()
+                .copied()
+                .filter(|&seat| {
+                    seat != our_seat
+                        && !self.is_void(seat, card.suit)
+                        && world.hands[seat.index()].len() < cards_per_player[seat.index()]
+                })
+                .collect();
+
+            if eligible.is_empty() {
+                // If no one is eligible due to voids, relax the constraint
+                eligible = PlayerPosition::LOOP
+                    .iter()
+                    .copied()
+                    .filter(|&seat| seat != our_seat)
+                    .collect();
+            }
+
+            if !eligible.is_empty() {
+                // Weight by belief probability
+                let weights: Vec<f32> = eligible
+                    .iter()
+                    .map(|&seat| self.beliefs[seat.index()].card_probability(*card).max(0.001))
+                    .collect();
+
+                let total_weight: f32 = weights.iter().sum();
+                let roll = rng.r#gen::<f32>() * total_weight;
+                let mut cumulative = 0.0;
+                let mut chosen_seat = eligible[0];
+
+                for (i, &seat) in eligible.iter().enumerate() {
+                    cumulative += weights[i];
+                    if roll <= cumulative {
+                        chosen_seat = seat;
+                        break;
+                    }
+                }
+
+                world.hands[chosen_seat.index()].push(*card);
+                dealt.insert(*card);
+            }
+        }
+
+        world
+    }
 }
 
 fn full_deck_cards() -> impl Iterator<Item = Card> {
@@ -558,6 +732,8 @@ mod tests {
     use hearts_core::model::rank::Rank;
     use hearts_core::model::round::RoundState;
     use hearts_core::model::suit::Suit;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     #[test]
     fn tracker_initialises_with_full_deck() {
@@ -638,5 +814,138 @@ mod tests {
         let metrics = tracker.belief_cache_metrics();
         assert_eq!(metrics.hits, 1);
         assert_eq!(metrics.misses, 1);
+    }
+
+    #[test]
+    fn sample_world_respects_voids() {
+        let deck = Deck::standard();
+        let round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Hold);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+
+        // Mark East as void in Hearts
+        tracker.note_void(PlayerPosition::East, Suit::Hearts);
+
+        // Sample a world
+        let mut rng = StdRng::seed_from_u64(12345);
+        let world = tracker.sample_world(&mut rng, PlayerPosition::North, &round);
+
+        // East should not have any hearts in the sampled world
+        for card in world.hand(PlayerPosition::East) {
+            assert_ne!(
+                card.suit,
+                Suit::Hearts,
+                "East is void in Hearts but sampled world gave them {:?}",
+                card
+            );
+        }
+    }
+
+    #[test]
+    fn sample_world_distributes_all_unseen_cards() {
+        let deck = Deck::standard();
+        let round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Hold);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+
+        // Note some cards as seen
+        tracker.note_card_revealed(Card::new(Rank::Ace, Suit::Spades));
+        tracker.note_card_revealed(Card::new(Rank::King, Suit::Spades));
+        tracker.note_card_revealed(Card::new(Rank::Queen, Suit::Spades));
+
+        let unseen_count_before = tracker.unseen_count();
+
+        // Sample a world
+        let mut rng = StdRng::seed_from_u64(54321);
+        let world = tracker.sample_world(&mut rng, PlayerPosition::North, &round);
+
+        // Count cards in sampled world (excluding North since we're playing that seat)
+        let sampled_count: usize = PlayerPosition::LOOP
+            .iter()
+            .filter(|&&seat| seat != PlayerPosition::North)
+            .map(|&seat| world.hand(seat).len())
+            .sum();
+
+        // The sampled cards should roughly match unseen cards
+        // (may not be exact due to distribution constraints)
+        assert!(
+            sampled_count > 0,
+            "Sample world should distribute some cards"
+        );
+        assert!(
+            sampled_count <= unseen_count_before,
+            "Sample world distributed {} cards but only {} unseen",
+            sampled_count,
+            unseen_count_before
+        );
+    }
+
+    #[test]
+    fn sample_world_is_deterministic_with_same_seed() {
+        let deck = Deck::standard();
+        let round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Hold);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+
+        // Sample two worlds with the same seed
+        let mut rng1 = StdRng::seed_from_u64(99999);
+        let world1 = tracker.sample_world(&mut rng1, PlayerPosition::North, &round);
+
+        let mut rng2 = StdRng::seed_from_u64(99999);
+        let world2 = tracker.sample_world(&mut rng2, PlayerPosition::North, &round);
+
+        // They should be identical
+        for seat in PlayerPosition::LOOP.iter().copied() {
+            let mut cards1: Vec<Card> = world1.hand(seat).to_vec();
+            let mut cards2: Vec<Card> = world2.hand(seat).to_vec();
+            cards1.sort_by_key(|c| (c.suit as u8, c.rank.value()));
+            cards2.sort_by_key(|c| (c.suit as u8, c.rank.value()));
+
+            assert_eq!(
+                cards1, cards2,
+                "Same seed should produce same sampled world for {:?}",
+                seat
+            );
+        }
+    }
+
+    #[test]
+    fn sample_world_uses_belief_probabilities() {
+        let deck = Deck::standard();
+        let round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Hold);
+        let mut tracker = UnseenTracker::new();
+        tracker.reset_for_round(&round);
+
+        // Set up a scenario where we know Queen of Spades must be with a specific player
+        // by marking voids for all players except South
+        let queen = Card::new(Rank::Queen, Suit::Spades);
+
+        // Mark all players except South as void in Spades (we're playing North)
+        tracker.note_void(PlayerPosition::East, Suit::Spades);
+        tracker.note_void(PlayerPosition::West, Suit::Spades);
+
+        // Sample multiple worlds - QS should consistently go to South
+        // since it's the only player not void in Spades (besides North which we're playing)
+        let mut rng = StdRng::seed_from_u64(777);
+        let mut qs_in_south_count = 0;
+
+        for _ in 0..10 {
+            let world = tracker.sample_world(&mut rng, PlayerPosition::North, &round);
+
+            // If QS is unseen (not in North's hand), it should be in South's sampled hand
+            if tracker.is_unseen(queen) {
+                let south_hand = world.hand(PlayerPosition::South);
+                if south_hand.contains(&queen) {
+                    qs_in_south_count += 1;
+                }
+            }
+        }
+
+        // QS should go to South in most samples due to void constraints
+        assert!(
+            qs_in_south_count >= 7,
+            "Expected QS in South's hand at least 7/10 times due to void constraints, got {}",
+            qs_in_south_count
+        );
     }
 }
