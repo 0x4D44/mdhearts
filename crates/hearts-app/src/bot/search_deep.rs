@@ -156,6 +156,7 @@ pub struct DeepSearch {
     nodes_searched: usize,
     time_budget: std::time::Duration,
     start_time: Instant,
+    killer_moves: Vec<Option<Card>>, // Killer moves indexed by depth
 }
 
 #[allow(dead_code)]
@@ -166,6 +167,7 @@ impl DeepSearch {
             nodes_searched: 0,
             time_budget: std::time::Duration::from_millis(time_budget_ms as u64),
             start_time: Instant::now(),
+            killer_moves: vec![None; 20], // Support up to 20 plies
         }
     }
 
@@ -186,19 +188,41 @@ impl DeepSearch {
         self.start_time = Instant::now();
         self.nodes_searched = 0;
         self.tt.clear();
+        self.killer_moves = vec![None; 20];
 
         // Get difficulty-dependent max depth
         let max_depth = deep_search_max_depth(ctx);
         let mut best_result = None;
+        let mut prev_score = 0;
 
-        // Iterative deepening: start at depth 1, increase until time runs out
+        // Iterative deepening with aspiration windows: start at depth 1, increase until time runs out
         for depth in 1..=max_depth {
             if self.time_expired() {
                 break;
             }
 
-            match self.search_root(legal, ctx, depth) {
+            // Aspiration window: search with narrow window first for speed
+            let window = if depth > 2 { 50 } else { i32::MAX / 2 };
+            let alpha = prev_score - window;
+            let beta = prev_score + window;
+
+            // Try search with aspiration window
+            let result = if depth > 2 {
+                // Try narrow window first
+                match self.search_root_windowed(legal, ctx, depth, alpha, beta) {
+                    Some(r) if r.score > alpha && r.score < beta => Some(r),
+                    _ => {
+                        // Re-search with full window if we fell outside
+                        self.search_root(legal, ctx, depth)
+                    }
+                }
+            } else {
+                self.search_root(legal, ctx, depth)
+            };
+
+            match result {
                 Some(result) => {
+                    prev_score = result.score;
                     best_result = Some(result);
                 }
                 None => break, // Timeout
@@ -216,12 +240,12 @@ impl DeepSearch {
         })
     }
 
-    fn search_root(&mut self, legal: &[Card], ctx: &BotContext<'_>, depth: u8) -> Option<SearchResult> {
+    fn search_root_windowed(&mut self, legal: &[Card], ctx: &BotContext<'_>, depth: u8, mut alpha: i32, beta: i32) -> Option<SearchResult> {
         let mut best_move = legal[0];
         let mut best_score = i32::MIN;
 
         // CRITICAL: Order moves by heuristic for better alpha-beta pruning
-        let ordered_moves = self.order_moves(legal, ctx);
+        let ordered_moves = self.order_moves_with_killer(legal, ctx, depth);
 
         // Try each legal move in order of promise
         for card in ordered_moves {
@@ -229,11 +253,21 @@ impl DeepSearch {
                 return None;
             }
 
-            let score = self.search_move(card, ctx, depth - 1, i32::MIN + 1, i32::MAX - 1)?;
+            let score = self.search_move(card, ctx, depth - 1, alpha, beta)?;
 
             if score > best_score {
                 best_score = score;
                 best_move = card;
+            }
+
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                // Store killer move
+                let depth_idx = depth as usize;
+                if depth_idx < self.killer_moves.len() {
+                    self.killer_moves[depth_idx] = Some(card);
+                }
+                break;
             }
         }
 
@@ -243,6 +277,66 @@ impl DeepSearch {
             nodes_searched: self.nodes_searched,
             depth_reached: depth,
         })
+    }
+
+    fn search_root(&mut self, legal: &[Card], ctx: &BotContext<'_>, depth: u8) -> Option<SearchResult> {
+        let mut best_move = legal[0];
+        let mut best_score = i32::MIN;
+        let mut alpha = i32::MIN + 1;
+        let beta = i32::MAX - 1;
+
+        // CRITICAL: Order moves by heuristic + killer moves for better alpha-beta pruning
+        let ordered_moves = self.order_moves_with_killer(legal, ctx, depth);
+
+        // Try each legal move in order of promise
+        for card in ordered_moves {
+            if self.time_expired() {
+                return None;
+            }
+
+            let score = self.search_move(card, ctx, depth - 1, alpha, beta)?;
+
+            if score > best_score {
+                best_score = score;
+                best_move = card;
+            }
+
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                // Store killer move
+                let depth_idx = depth as usize;
+                if depth_idx < self.killer_moves.len() {
+                    self.killer_moves[depth_idx] = Some(card);
+                }
+                break;
+            }
+        }
+
+        Some(SearchResult {
+            best_move,
+            score: best_score,
+            nodes_searched: self.nodes_searched,
+            depth_reached: depth,
+        })
+    }
+
+    /// Order moves by killer move + heuristic evaluation (best first) for better alpha-beta pruning
+    fn order_moves_with_killer(&self, legal: &[Card], ctx: &BotContext<'_>, depth: u8) -> Vec<Card> {
+        let mut evaluated = PlayPlanner::explain_candidates(legal, ctx);
+
+        // Boost killer move score massively to try it first
+        if let Some(killer) = self.killer_moves.get(depth as usize).and_then(|k| *k) {
+            for (card, score) in &mut evaluated {
+                if *card == killer {
+                    *score += 1_000_000; // Massive boost to try killer first
+                    break;
+                }
+            }
+        }
+
+        // Sort by score descending (killer move will be first if present)
+        evaluated.sort_by(|a, b| b.1.cmp(&a.1));
+        evaluated.into_iter().map(|(card, _)| card).collect()
     }
 
     /// Order moves by heuristic evaluation (best first) for better alpha-beta pruning
@@ -583,17 +677,17 @@ fn deep_search_enabled() -> bool {
 }
 
 /// Maximum search depth (number of plies to look ahead)
-/// SearchLookahead difficulty: 7 plies (extreme depth!)
+/// SearchLookahead difficulty: 10 plies (MAXIMUM DEPTH - near perfect play!)
 /// Default: 3 plies for strong tactical play
 fn deep_search_max_depth(ctx: &BotContext<'_>) -> u8 {
-    // Extreme depth for SearchLookahead difficulty
+    // MAXIMUM depth for SearchLookahead difficulty
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_SEARCH_MAX_DEPTH")
             .ok()
             .and_then(|s| s.parse::<u8>().ok())
-            .unwrap_or(7) // EXTREME: 7 plies for Search difficulty
+            .unwrap_or(10) // MAXIMUM: 10 plies for Search difficulty
             .max(1)
-            .min(10);
+            .min(13); // Can search whole hand
     }
 
     std::env::var("MDH_SEARCH_MAX_DEPTH")
@@ -605,17 +699,17 @@ fn deep_search_max_depth(ctx: &BotContext<'_>) -> u8 {
 }
 
 /// Transposition table size (number of positions to cache)
-/// SearchLookahead difficulty: 5M positions (enormous cache)
+/// SearchLookahead difficulty: 10M positions (MASSIVE cache)
 /// Default: 500k for good performance
 fn deep_search_tt_size(ctx: &BotContext<'_>) -> usize {
-    // Enormous cache for SearchLookahead difficulty
+    // MASSIVE cache for SearchLookahead difficulty
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_SEARCH_TT_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(5_000_000) // ENORMOUS: 5M positions for Search difficulty
+            .unwrap_or(10_000_000) // MAXIMUM: 10M positions for Search difficulty
             .max(1000)
-            .min(10_000_000);
+            .min(20_000_000);
     }
 
     std::env::var("MDH_SEARCH_TT_SIZE")
@@ -627,17 +721,17 @@ fn deep_search_tt_size(ctx: &BotContext<'_>) -> usize {
 }
 
 /// Time budget per move in milliseconds
-/// SearchLookahead difficulty: 1000ms (think very deeply)
+/// SearchLookahead difficulty: 2000ms (think EXTREMELY deeply)
 /// Default: 100ms for strong but responsive play
 fn deep_search_time_ms(ctx: &BotContext<'_>) -> u32 {
-    // Much longer thinking for SearchLookahead difficulty
+    // VERY long thinking for SearchLookahead difficulty
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_SEARCH_TIME_MS")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(1000) // EXTREME: 1000ms for Search difficulty
+            .unwrap_or(2000) // MAXIMUM: 2000ms for Search difficulty
             .max(10)
-            .min(30000);
+            .min(60000); // Up to 60 seconds
     }
 
     std::env::var("MDH_SEARCH_TIME_MS")
