@@ -128,6 +128,13 @@ fn hash_position(round: &RoundState, seat: PlayerPosition) -> u64 {
         play.card.hash(&mut hasher);
     }
 
+    // Hash the player-to-move (critical for correct transposition table lookups)
+    let next_to_play = round.current_trick().plays()
+        .last()
+        .map(|play| play.position.next())
+        .unwrap_or_else(|| round.current_trick().leader());
+    next_to_play.hash(&mut hasher);
+
     // Hash trick count (game phase)
     round.trick_history().len().hash(&mut hasher);
 
@@ -174,7 +181,14 @@ impl DeepSearch {
     /// Main entry point: iterative deepening search
     pub fn choose_best_move(&mut self, legal: &[Card], ctx: &BotContext<'_>) -> SearchResult {
         if legal.is_empty() {
-            panic!("No legal moves");
+            // Return graceful error instead of panic - this should never happen in valid game state
+            eprintln!("WARNING: choose_best_move called with empty legal moves");
+            return SearchResult {
+                best_move: Card::new(hearts_core::model::rank::Rank::Two, hearts_core::model::suit::Suit::Clubs),
+                score: 0,
+                nodes_searched: 0,
+                depth_reached: 0,
+            };
         }
         if legal.len() == 1 {
             return SearchResult {
@@ -193,7 +207,7 @@ impl DeepSearch {
         // Get difficulty-dependent max depth
         let max_depth = deep_search_max_depth(ctx);
         let mut best_result = None;
-        let mut prev_score = 0;
+        let mut prev_score: i32 = 0;
 
         // Iterative deepening with aspiration windows: start at depth 1, increase until time runs out
         for depth in 1..=max_depth {
@@ -203,8 +217,9 @@ impl DeepSearch {
 
             // Aspiration window: search with narrow window first for speed
             let window = if depth > 2 { 50 } else { i32::MAX / 2 };
-            let alpha = prev_score - window;
-            let beta = prev_score + window;
+            // Use saturating arithmetic to prevent overflow
+            let alpha = prev_score.saturating_sub(window);
+            let beta = prev_score.saturating_add(window);
 
             // Try search with aspiration window
             let result = if depth > 2 {
@@ -282,8 +297,9 @@ impl DeepSearch {
     fn search_root(&mut self, legal: &[Card], ctx: &BotContext<'_>, depth: u8) -> Option<SearchResult> {
         let mut best_move = legal[0];
         let mut best_score = i32::MIN;
-        let mut alpha = i32::MIN + 1;
-        let beta = i32::MAX - 1;
+        // Use safe bounds to prevent overflow when combined with penalty deltas
+        let mut alpha = -100_000;
+        let beta = 100_000;
 
         // CRITICAL: Order moves by heuristic + killer moves for better alpha-beta pruning
         let ordered_moves = self.order_moves_with_killer(legal, ctx, depth);
@@ -467,8 +483,8 @@ impl DeepSearch {
                     if probe.hand(next).is_empty() || depth == 0 {
                         penalty_delta + self.evaluate_position(&probe, next)
                     } else {
-                        // Continue to next trick
-                        penalty_delta + self.evaluate_position(&probe, next)
+                        // Continue to next trick with recursive search
+                        penalty_delta + self.search_opponent(&probe, depth - 1, alpha, beta)?
                     }
                 }
                 _ => {

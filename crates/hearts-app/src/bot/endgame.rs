@@ -15,6 +15,7 @@ use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::RoundState;
 use std::collections::HashMap;
+use std::time::Instant;
 
 // ============================================================================
 // Position Hashing
@@ -30,37 +31,56 @@ struct EndgamePosition {
     hearts_broken: bool,
     // Who leads next (if trick is empty)
     leader: PlayerPosition,
+    // Accumulated penalty points for each player
+    accumulated_penalties: [u8; 4],
 }
 
 impl EndgamePosition {
-    fn from_round(round: &RoundState, our_seat: PlayerPosition, tracker: &UnseenTracker) -> Self {
+    fn from_round(round: &RoundState, our_seat: PlayerPosition, tracker: &UnseenTracker, use_sampling: bool) -> Self {
         let mut hands: [Vec<Card>; 4] = Default::default();
 
         // Our hand is known
         let our_cards: Vec<Card> = round.hand(our_seat).iter().copied().collect();
         hands[our_seat.index()] = our_cards;
 
-        // For opponents, we need to know their exact cards
-        // In an imperfect information game, we don't know this for certain
-        // For now, just use what the round state knows (this will be perfect info in testing)
-        // TODO: Sample from belief state for proper imperfect information handling
-        let _tracker = tracker; // Suppress unused warning
+        if use_sampling && tracker.unseen_count() > 0 {
+            // Use belief-state sampling for imperfect information
+            use rand::SeedableRng;
+            let mut rng = rand::rngs::SmallRng::from_entropy();
+            let sampled = tracker.sample_world(&mut rng, our_seat, round);
 
-        // Get opponent hands from round state
-        // NOTE: This gives us perfect information, which is only valid in testing
-        // or when we've deduced holdings through play
-        for pos in [
-            PlayerPosition::North,
-            PlayerPosition::East,
-            PlayerPosition::South,
-            PlayerPosition::West,
-        ] {
-            if pos == our_seat {
-                continue; // Already set
+            // Merge sampled hands with known cards from round
+            for pos in [
+                PlayerPosition::North,
+                PlayerPosition::East,
+                PlayerPosition::South,
+                PlayerPosition::West,
+            ] {
+                if pos == our_seat {
+                    continue; // Already set
+                }
+
+                // Get visible cards for this opponent (cards they've already played in current trick)
+                let mut visible_cards: Vec<Card> = round.hand(pos).iter().copied().collect();
+                // Add sampled cards
+                visible_cards.extend(sampled.hands[pos.index()].iter().copied());
+                hands[pos.index()] = visible_cards;
             }
+        } else {
+            // Use perfect information (for testing or when all cards are known)
+            for pos in [
+                PlayerPosition::North,
+                PlayerPosition::East,
+                PlayerPosition::South,
+                PlayerPosition::West,
+            ] {
+                if pos == our_seat {
+                    continue; // Already set
+                }
 
-            let opponent_cards: Vec<Card> = round.hand(pos).iter().copied().collect();
-            hands[pos.index()] = opponent_cards;
+                let opponent_cards: Vec<Card> = round.hand(pos).iter().copied().collect();
+                hands[pos.index()] = opponent_cards;
+            }
         }
 
         // Current trick
@@ -83,6 +103,7 @@ impl EndgamePosition {
             trick_cards,
             hearts_broken: round.hearts_broken(),
             leader,
+            accumulated_penalties: [0, 0, 0, 0], // Start with zero penalties
         }
     }
 }
@@ -92,8 +113,11 @@ impl EndgamePosition {
 // ============================================================================
 
 pub struct EndgameSolver {
-    memo: HashMap<EndgamePosition, EndgameResult>,
+    // Memo key includes perspective (our_seat) because evaluation depends on viewpoint
+    memo: HashMap<(EndgamePosition, PlayerPosition), EndgameResult>,
     nodes_evaluated: usize,
+    // Optional deadline for timeout protection
+    deadline: Option<Instant>,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +131,22 @@ impl EndgameSolver {
         Self {
             memo: HashMap::new(),
             nodes_evaluated: 0,
+            deadline: None,
+        }
+    }
+
+    /// Set a timeout deadline for this solver
+    #[allow(dead_code)]
+    pub fn set_deadline(&mut self, deadline: Instant) {
+        self.deadline = Some(deadline);
+    }
+
+    /// Check if deadline has been exceeded
+    fn time_expired(&self) -> bool {
+        if let Some(deadline) = self.deadline {
+            Instant::now() >= deadline
+        } else {
+            false
         }
     }
 
@@ -122,7 +162,9 @@ impl EndgameSolver {
             return None; // Not in endgame yet
         }
 
-        let pos = EndgamePosition::from_round(ctx.round, ctx.seat, ctx.tracker);
+        // Use belief-state sampling for imperfect information endgame solving
+        let use_sampling = endgame_use_sampling();
+        let pos = EndgamePosition::from_round(ctx.round, ctx.seat, ctx.tracker, use_sampling);
 
         let result = self.minimax(&pos, ctx.seat, true)?;
 
@@ -142,19 +184,36 @@ impl EndgameSolver {
     ) -> Option<EndgameResult> {
         self.nodes_evaluated += 1;
 
-        // Check memo
-        if let Some(result) = self.memo.get(pos) {
+        // Check for timeout
+        if self.time_expired() {
+            return None;
+        }
+
+        // Check memo (keyed by position + perspective)
+        if let Some(result) = self.memo.get(&(pos.clone(), our_seat)) {
             return Some(result.clone());
         }
 
         // Base case: all hands empty
         if pos.hands.iter().all(|h| h.is_empty()) {
+            let mut final_penalties = pos.accumulated_penalties;
+
+            // Check for moon shooting: if any player took all 26 points
+            for player_idx in 0..4 {
+                if final_penalties[player_idx] == 26 {
+                    // Moon shot! Shooter gets 0, all others get 26
+                    final_penalties = [26, 26, 26, 26];
+                    final_penalties[player_idx] = 0;
+                    break;
+                }
+            }
+
             let result = EndgameResult {
                 best_move: Card::new(
                     hearts_core::model::rank::Rank::Two,
                     hearts_core::model::suit::Suit::Clubs,
                 ), // Dummy
-                expected_penalties: [0, 0, 0, 0],
+                expected_penalties: final_penalties,
             };
             return Some(result);
         }
@@ -178,8 +237,15 @@ impl EndgameSolver {
             // Apply the move
             let next_pos = self.apply_move(pos, to_play, card);
 
+            // Determine who plays next in the new position
+            let next_to_play = if next_pos.trick_cards.is_empty() {
+                next_pos.leader  // Trick completed, new leader plays
+            } else {
+                next_pos.trick_cards.last().unwrap().0.next()  // Trick in progress
+            };
+
             // Recursively evaluate
-            let result = self.minimax(&next_pos, our_seat, to_play.next() == our_seat)?;
+            let result = self.minimax(&next_pos, our_seat, next_to_play == our_seat)?;
 
             // Choose best move based on whose turn it is
             if is_our_turn {
@@ -208,7 +274,7 @@ impl EndgameSolver {
         }
 
         if let Some(ref result) = best_result {
-            self.memo.insert(pos.clone(), result.clone());
+            self.memo.insert((pos.clone(), our_seat), result.clone());
         }
 
         best_result
@@ -268,16 +334,15 @@ impl EndgameSolver {
                 }
             }
 
-            // Calculate penalties
-            let _penalties: u8 = new_pos
+            // Calculate and accumulate penalties
+            let penalties: u8 = new_pos
                 .trick_cards
                 .iter()
                 .map(|(_, c)| c.penalty_value())
                 .sum();
 
-            // Update expected penalties (this is simplified - we'd need to track accumulated penalties)
-            // For now, just note this trick's penalties go to winner
-            // In a full implementation, we'd carry penalty state through the position
+            // Add penalties to winner's accumulated total
+            new_pos.accumulated_penalties[winner.index()] += penalties;
 
             // Clear trick and set new leader
             new_pos.trick_cards.clear();
@@ -313,6 +378,14 @@ fn endgame_enabled() -> bool {
     std::env::var("MDH_ENDGAME_SOLVER_ENABLED")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
         .unwrap_or(true) // ENABLED BY DEFAULT
+}
+
+/// Check if endgame solver should use belief-state sampling
+/// DEFAULT: ENABLED for imperfect information (can be disabled with MDH_ENDGAME_USE_SAMPLING=0)
+fn endgame_use_sampling() -> bool {
+    std::env::var("MDH_ENDGAME_USE_SAMPLING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(true) // ENABLED BY DEFAULT for proper imperfect information handling
 }
 
 /// Maximum number of cards for endgame perfect play
