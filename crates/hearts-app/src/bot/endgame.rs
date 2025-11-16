@@ -316,17 +316,17 @@ fn endgame_enabled() -> bool {
 }
 
 /// Maximum number of cards for endgame perfect play
-/// SearchLookahead difficulty: 11 cards (near-perfect endgame)
+/// SearchLookahead difficulty: 13 cards (PERFECT ENDGAME - entire hand!)
 /// Default: 7 cards for strong endgame play
 fn endgame_max_cards(ctx: &BotContext<'_>) -> usize {
-    // Near-perfect endgame for SearchLookahead difficulty
+    // PERFECT endgame for SearchLookahead difficulty - entire hand!
     if matches!(ctx.difficulty, super::BotDifficulty::SearchLookahead) {
         return std::env::var("MDH_ENDGAME_MAX_CARDS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(11) // NEAR-PERFECT: 11 cards for Search difficulty
+            .unwrap_or(13) // PERFECT: 13 cards = entire hand for Search difficulty
             .max(2)
-            .min(13); // Can go up to all cards
+            .min(13);
     }
 
     std::env::var("MDH_ENDGAME_MAX_CARDS")
