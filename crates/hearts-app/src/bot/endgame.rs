@@ -344,9 +344,26 @@ fn endgame_max_cards(ctx: &BotContext<'_>) -> usize {
 use super::PlayPlannerHard;
 
 impl PlayPlannerHard {
-    pub fn choose_with_endgame_solver(legal: &[Card], ctx: &BotContext<'_>) -> Option<Card> {
+    pub fn choose_with_endgame_solver(
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        limit: Option<&super::DecisionLimit<'_>>,
+    ) -> Option<Card> {
         if !endgame_enabled() {
             return None;
+        }
+
+        // Check if we have time budget remaining
+        if let Some(l) = limit {
+            if l.expired() {
+                return None; // No time left
+            }
+            // If we have very little time left (< 5ms), skip endgame solver
+            if let Some(remaining) = l.remaining_millis() {
+                if remaining < 5 {
+                    return None;
+                }
+            }
         }
 
         let mut solver = EndgameSolver::new();

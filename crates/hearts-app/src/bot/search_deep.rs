@@ -506,14 +506,26 @@ fn deep_search_time_ms(ctx: &BotContext<'_>) -> u32 {
 // ============================================================================
 
 impl PlayPlannerHard {
-    pub fn choose_with_deep_search(legal: &[Card], ctx: &BotContext<'_>) -> Option<Card> {
+    pub fn choose_with_deep_search(
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        limit: Option<&super::DecisionLimit<'_>>,
+    ) -> Option<Card> {
         if !deep_search_enabled() {
             return None; // Fall back to existing search
         }
 
         // Get difficulty-dependent parameters
         let tt_size = deep_search_tt_size(ctx);
-        let time_ms = deep_search_time_ms(ctx);
+
+        // Use UI time limit if available, otherwise use difficulty-based default
+        let time_ms = if let Some(remaining) = limit.and_then(|l| l.remaining_millis()) {
+            // Use the actual remaining time from UI setting
+            remaining.max(10) // At least 10ms
+        } else {
+            // Fallback to difficulty-based default
+            deep_search_time_ms(ctx)
+        };
 
         let mut search = DeepSearch::new(tt_size, time_ms);
         let result = search.choose_best_move(legal, ctx);

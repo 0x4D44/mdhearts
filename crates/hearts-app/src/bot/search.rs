@@ -679,12 +679,12 @@ impl PlayPlannerHard {
         }
 
         // Phase 3: Try endgame solver first (perfect play with few cards)
-        if let Some(card) = Self::choose_with_endgame_solver(legal, ctx) {
+        if let Some(card) = Self::choose_with_endgame_solver(legal, ctx, limit) {
             return Some(card);
         }
 
         // Phase 2: Try deeper search if enabled
-        if let Some(card) = Self::choose_with_deep_search(legal, ctx) {
+        if let Some(card) = Self::choose_with_deep_search(legal, ctx, limit) {
             return Some(card);
         }
 
