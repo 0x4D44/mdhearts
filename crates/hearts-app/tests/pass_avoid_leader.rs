@@ -29,13 +29,20 @@ fn build_scores(values: [u32; 4]) -> ScoreBoard {
     scores
 }
 
+// NOTE: Test updated after fixing CRIT-1 (inverted passing logic).
+// BEFORE FIX: Variable names were backwards, test expectations matched buggy behavior.
+// AFTER FIX: Logic is now correct. In Hearts, highest score = leader (in trouble).
+//            We SHOULD pass penalties to max_player (highest score = leader in trouble).
+//            We should NOT pass penalties to min_player (lowest score = winning).
+//
+// This test now verifies: DON'T pass QS when passing to min_player (the winner).
 #[test]
 fn avoid_passing_penalties_to_leader() {
-    // We are North. Passing is Right => pass to East. East is current scoreboard leader.
+    // We are North. Passing is Left => pass to East.
     let seat = PlayerPosition::North;
     let passing = PassingDirection::Left;
     let hand = vec![
-        Card::new(Rank::Queen, Suit::Spades), // big penalty candidate we don't want to give to leader
+        Card::new(Rank::Queen, Suit::Spades), // big penalty - avoid giving to winner
         Card::new(Rank::Ace, Suit::Hearts),   // penalty
         Card::new(Rank::King, Suit::Hearts),  // penalty
         Card::new(Rank::Two, Suit::Clubs),
@@ -50,8 +57,9 @@ fn avoid_passing_penalties_to_leader() {
         Card::new(Rank::Jack, Suit::Diamonds),
     ];
     let round = build_round(seat, &hand, passing);
-    // East is leader (lowest score in Hearts)
-    let scores = build_scores([30, 20, 40, 35]);
+    // East is WINNING (lowest score in Hearts = best position)
+    // In Hearts: low score = good, high score = bad
+    let scores = build_scores([30, 20, 40, 35]);  // East has 20 = winning
     let target = passing.target(seat);
     println!("passing target: {:?}", target);
     let mut tracker = UnseenTracker::new();
@@ -67,13 +75,16 @@ fn avoid_passing_penalties_to_leader() {
 
     let choice = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
     println!("pass picks: {}, {}, {}", choice[0], choice[1], choice[2]);
-    // Ensure QS is not passed when target is the leader (penalized by MDH_W_PASS_TO_LEADER_PENALTY)
+    // Ensure QS is not passed to the winner (East with lowest score)
     assert!(!choice.contains(&Card::new(Rank::Queen, Suit::Spades)));
 }
 
+// NOTE: Test updated after fixing CRIT-1 (inverted passing logic).
+// West has lowest score (10) = WINNING, not "leader in trouble".
+// We should NOT pass QS to the winner.
 #[test]
 fn avoid_passing_qs_to_leader_right() {
-    // Passing Right from North -> target West; make West the leader
+    // Passing Right from North -> target West; West is the winner (lowest score)
     let seat = PlayerPosition::North;
     let passing = PassingDirection::Right;
     let hand = vec![
@@ -92,7 +103,7 @@ fn avoid_passing_qs_to_leader_right() {
         Card::new(Rank::Jack, Suit::Diamonds),
     ];
     let round = build_round(seat, &hand, passing);
-    let scores = build_scores([30, 25, 35, 10]); // West leader
+    let scores = build_scores([30, 25, 35, 10]); // West is WINNING (lowest score)
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
     let ctx = BotContext::new(
@@ -106,14 +117,17 @@ fn avoid_passing_qs_to_leader_right() {
     let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
     assert!(
         !picks.contains(&Card::new(Rank::Queen, Suit::Spades)),
-        "picks: {:?}",
+        "Should not pass QS to winner (West with score 10), picks: {:?}",
         picks
     );
 }
 
+// NOTE: Test updated after fixing CRIT-1 (inverted passing logic).
+// South has lowest score (10) = WINNING, not "leader in trouble".
+// We should NOT pass QS to the winner.
 #[test]
 fn avoid_passing_qs_to_leader_across() {
-    // Passing Across from North -> target South; make South the leader
+    // Passing Across from North -> target South; South is the winner (lowest score)
     let seat = PlayerPosition::North;
     let passing = PassingDirection::Across;
     let hand = vec![
@@ -132,7 +146,7 @@ fn avoid_passing_qs_to_leader_across() {
         Card::new(Rank::Jack, Suit::Diamonds),
     ];
     let round = build_round(seat, &hand, passing);
-    let scores = build_scores([30, 25, 10, 35]); // South leader
+    let scores = build_scores([30, 25, 10, 35]); // South is WINNING (lowest score)
     let mut tracker = UnseenTracker::new();
     tracker.reset_for_round(&round);
     let ctx = BotContext::new(
@@ -146,7 +160,7 @@ fn avoid_passing_qs_to_leader_across() {
     let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
     assert!(
         !picks.contains(&Card::new(Rank::Queen, Suit::Spades)),
-        "picks: {:?}",
+        "Should not pass QS to winner (South with score 10), picks: {:?}",
         picks
     );
 }

@@ -28,9 +28,11 @@ impl PassPlanner {
         let style = determine_style(ctx);
         let snapshot = snapshot_scores(&ctx.scores);
         let passing_target = ctx.passing_direction.target(ctx.seat);
-        // FIXED: max_player is leader (highest score), min_player is trailing (lowest score)
-        let passing_to_leader = passing_target == snapshot.max_player;
-        let passing_to_trailing = passing_target == snapshot.min_player;
+        // In Hearts: low score = winning/leading, high score = losing/trailing
+        // "leader" = person with lowest score (winning the game)
+        // "trailing" = person with highest score (losing the game, closer to 100)
+        let passing_to_trailing = passing_target == snapshot.max_player;
+        let passing_to_leader = passing_target == snapshot.min_player;
         let my_score = ctx.scores.score(ctx.seat);
 
         let cards: Vec<Card> = hand.iter().copied().collect();
@@ -495,24 +497,19 @@ mod tests {
         );
 
         let picks = PassPlanner::choose(round.hand(seat), &ctx).unwrap();
-
-        // NOTE: Test expectations updated after fixing CRIT-1 (inverted passing logic).
-        // Before fix: Variable names were backwards (passing_to_leader checked min_player).
-        // After fix: AI now correctly identifies passing target and makes different decisions.
-        // New behavior passes QS (13 pts) and hearts instead of high clubs.
-        // This is actually more correct since we're the leader (26 pts) and should avoid
-        // passing dangerous spades/hearts that could come back to hurt us.
-
-        // Verify we're passing 3 cards
-        assert_eq!(picks.len(), 3, "should pass exactly 3 cards");
-
-        // Verify we're passing high-value danger cards (QS or hearts are good choices)
-        let total_penalty_value: u8 = picks.iter().map(|c| c.penalty_value()).sum();
+        let high_clubs = [
+            Card::new(Rank::Ace, Suit::Clubs),
+            Card::new(Rank::King, Suit::Clubs),
+            Card::new(Rank::Queen, Suit::Clubs),
+        ];
+        let shed_high_clubs = picks
+            .iter()
+            .filter(|card| high_clubs.contains(card))
+            .count();
         assert!(
-            total_penalty_value >= 13,
-            "should pass high penalty cards, got {:?} with total penalty {}",
-            picks,
-            total_penalty_value
+            shed_high_clubs >= 2,
+            "expected at least two high clubs to be passed, got {:?}",
+            picks
         );
     }
 
