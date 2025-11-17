@@ -138,6 +138,9 @@ fn set_stage1_env() {
         std::env::set_var("MDH_HARD_PLANNER_NUDGE_NEAR100", "95");
         std::env::set_var("MDH_HARD_PLANNER_NUDGE_GAP_MIN", "4");
         std::env::set_var("MDH_HARD_PLANNER_NUDGE_TRACE", "1");
+        // Disable endgame solver and deep search to test original Hard search behavior
+        std::env::set_var("MDH_ENDGAME_SOLVER_ENABLED", "0");
+        std::env::set_var("MDH_SEARCH_DEEPER_ENABLED", "0");
     }
 }
 
@@ -150,6 +153,8 @@ fn clear_stage1_env() {
         std::env::remove_var("MDH_HARD_PLANNER_NUDGE_NEAR100");
         std::env::remove_var("MDH_HARD_PLANNER_NUDGE_GAP_MIN");
         std::env::remove_var("MDH_HARD_PLANNER_NUDGE_TRACE");
+        std::env::remove_var("MDH_ENDGAME_SOLVER_ENABLED");
+        std::env::remove_var("MDH_SEARCH_DEEPER_ENABLED");
     }
 }
 

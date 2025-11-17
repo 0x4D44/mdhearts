@@ -3873,16 +3873,14 @@ fn save_card_back(id: CardBackId) {
         }
         let value_name = string_to_wide_z(REG_VALUE_CARD_BACK);
         let raw = id.as_u32();
-        let data = std::slice::from_raw_parts(
-            (&raw as *const u32) as *const u8,
-            std::mem::size_of::<u32>(),
-        );
+        // Use Vec to ensure data lives long enough for potentially async API
+        let data: Vec<u8> = raw.to_le_bytes().to_vec();
         let _ = RegSetValueExW(
             hkey,
             PCWSTR(value_name.as_ptr()),
             Some(0),
             REG_BINARY,
-            Some(data),
+            Some(&data),
         );
         let _ = RegCloseKey(hkey);
     }
@@ -4139,16 +4137,18 @@ fn save_window_placement(hwnd: HWND) {
         }
 
         let value_name = string_to_wide_z(REG_VALUE_WINDOW_PLACEMENT);
-        let data = std::slice::from_raw_parts(
-            (&placement as *const WINDOWPLACEMENT) as *const u8,
-            std::mem::size_of::<WINDOWPLACEMENT>(),
-        );
+        // Use Vec to ensure data lives long enough for potentially async API
+        let data: Vec<u8> = {
+            let ptr = &placement as *const WINDOWPLACEMENT as *const u8;
+            let size = std::mem::size_of::<WINDOWPLACEMENT>();
+            std::slice::from_raw_parts(ptr, size).to_vec()
+        };
         let _ = RegSetValueExW(
             hkey,
             PCWSTR(value_name.as_ptr()),
             Some(0),
             REG_BINARY,
-            Some(data),
+            Some(&data),
         );
         let _ = RegCloseKey(hkey);
     }
