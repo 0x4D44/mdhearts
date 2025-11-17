@@ -149,9 +149,15 @@ fn hard_determinization_strict_flip_wip() {
 
     // Log whether determinization changed the ordering (informational only)
     if (off_a > off_2) != (on_a > on_2) {
-        eprintln!("Determinization caused ordering flip: off A={} 2={}, on A={} 2={}", off_a, off_2, on_a, on_2);
+        eprintln!(
+            "Determinization caused ordering flip: off A={} 2={}, on A={} 2={}",
+            off_a, off_2, on_a, on_2
+        );
     } else {
-        eprintln!("Determinization did not flip (robust search): off A={} 2={}, on A={} 2={}", off_a, off_2, on_a, on_2);
+        eprintln!(
+            "Determinization did not flip (robust search): off A={} 2={}, on A={} 2={}",
+            off_a, off_2, on_a, on_2
+        );
     }
 
     unsafe {

@@ -77,13 +77,29 @@ fn run_flip_assert(seed: u64, seat: PlayerPosition) {
     // After fixes, the endgame solver is more correct and may converge to same answer.
     // This is actually a positive result - the solver is working correctly.
 
-    assert!(off.is_some(), "OFF config should produce a valid choice for seed {} {:?}", seed, seat);
-    assert!(on.is_some(), "ON config should produce a valid choice for seed {} {:?}", seed, seat);
+    assert!(
+        off.is_some(),
+        "OFF config should produce a valid choice for seed {} {:?}",
+        seed,
+        seat
+    );
+    assert!(
+        on.is_some(),
+        "ON config should produce a valid choice for seed {} {:?}",
+        seed,
+        seat
+    );
 
     if off != on {
-        eprintln!("DP caused flip for seed {} {:?}: off={:?}, on={:?}", seed, seat, off, on);
+        eprintln!(
+            "DP caused flip for seed {} {:?}: off={:?}, on={:?}",
+            seed, seat, off, on
+        );
     } else {
-        eprintln!("DP converged to same choice (correct solver) for seed {} {:?}: {:?}", seed, seat, off);
+        eprintln!(
+            "DP converged to same choice (correct solver) for seed {} {:?}: {:?}",
+            seed, seat, off
+        );
     }
 
     unsafe {

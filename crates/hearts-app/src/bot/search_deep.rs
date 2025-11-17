@@ -73,7 +73,14 @@ impl TranspositionTable {
         None
     }
 
-    pub fn store(&mut self, hash: u64, depth: u8, score: i32, best_move: Option<Card>, node_type: NodeType) {
+    pub fn store(
+        &mut self,
+        hash: u64,
+        depth: u8,
+        score: i32,
+        best_move: Option<Card>,
+        node_type: NodeType,
+    ) {
         // Evict random entry if table is full
         if self.entries.len() >= self.max_size {
             if let Some(&key) = self.entries.keys().next() {
@@ -129,7 +136,9 @@ fn hash_position(round: &RoundState, seat: PlayerPosition) -> u64 {
     }
 
     // Hash the player-to-move (critical for correct transposition table lookups)
-    let next_to_play = round.current_trick().plays()
+    let next_to_play = round
+        .current_trick()
+        .plays()
         .last()
         .map(|play| play.position.next())
         .unwrap_or_else(|| round.current_trick().leader());
@@ -184,7 +193,10 @@ impl DeepSearch {
             // Return graceful error instead of panic - this should never happen in valid game state
             eprintln!("WARNING: choose_best_move called with empty legal moves");
             return SearchResult {
-                best_move: Card::new(hearts_core::model::rank::Rank::Two, hearts_core::model::suit::Suit::Clubs),
+                best_move: Card::new(
+                    hearts_core::model::rank::Rank::Two,
+                    hearts_core::model::suit::Suit::Clubs,
+                ),
                 score: 0,
                 nodes_searched: 0,
                 depth_reached: 0,
@@ -255,7 +267,14 @@ impl DeepSearch {
         })
     }
 
-    fn search_root_windowed(&mut self, legal: &[Card], ctx: &BotContext<'_>, depth: u8, mut alpha: i32, beta: i32) -> Option<SearchResult> {
+    fn search_root_windowed(
+        &mut self,
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        depth: u8,
+        mut alpha: i32,
+        beta: i32,
+    ) -> Option<SearchResult> {
         let mut best_move = legal[0];
         let mut best_score = i32::MIN;
 
@@ -294,7 +313,12 @@ impl DeepSearch {
         })
     }
 
-    fn search_root(&mut self, legal: &[Card], ctx: &BotContext<'_>, depth: u8) -> Option<SearchResult> {
+    fn search_root(
+        &mut self,
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        depth: u8,
+    ) -> Option<SearchResult> {
         let mut best_move = legal[0];
         let mut best_score = i32::MIN;
         // Use safe bounds to prevent overflow when combined with penalty deltas
@@ -337,7 +361,12 @@ impl DeepSearch {
     }
 
     /// Order moves by killer move + heuristic evaluation (best first) for better alpha-beta pruning
-    fn order_moves_with_killer(&self, legal: &[Card], ctx: &BotContext<'_>, depth: u8) -> Vec<Card> {
+    fn order_moves_with_killer(
+        &self,
+        legal: &[Card],
+        ctx: &BotContext<'_>,
+        depth: u8,
+    ) -> Vec<Card> {
         let mut evaluated = PlayPlanner::explain_candidates(legal, ctx);
 
         // Boost killer move score massively to try it first
@@ -364,7 +393,12 @@ impl DeepSearch {
     }
 
     /// Order moves for opponent simulation (simple heuristic)
-    fn order_moves_simple(&self, legal: &[Card], _round: &RoundState, _seat: PlayerPosition) -> Vec<Card> {
+    fn order_moves_simple(
+        &self,
+        legal: &[Card],
+        _round: &RoundState,
+        _seat: PlayerPosition,
+    ) -> Vec<Card> {
         let mut moves: Vec<_> = legal.iter().copied().collect();
 
         // Simple ordering: prefer low cards to avoid taking penalties
@@ -400,7 +434,14 @@ impl DeepSearch {
         moves
     }
 
-    fn search_move(&mut self, card: Card, ctx: &BotContext<'_>, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+    fn search_move(
+        &mut self,
+        card: Card,
+        ctx: &BotContext<'_>,
+        depth: u8,
+        alpha: i32,
+        beta: i32,
+    ) -> Option<i32> {
         self.nodes_searched += 1;
 
         if self.time_expired() {
@@ -429,7 +470,10 @@ impl DeepSearch {
                 }
 
                 // Continue to next trick with reduced depth
-                Some(penalty_delta + self.search_next_trick(&round, ctx.seat, depth - 1, alpha, beta)?)
+                Some(
+                    penalty_delta
+                        + self.search_next_trick(&round, ctx.seat, depth - 1, alpha, beta)?,
+                )
             }
             _ => {
                 // Trick in progress - simulate opponent moves
@@ -445,7 +489,13 @@ impl DeepSearch {
     }
 
     #[allow(dead_code)]
-    fn search_opponent(&mut self, round: &RoundState, depth: u8, mut alpha: i32, beta: i32) -> Option<i32> {
+    fn search_opponent(
+        &mut self,
+        round: &RoundState,
+        depth: u8,
+        mut alpha: i32,
+        beta: i32,
+    ) -> Option<i32> {
         self.nodes_searched += 1;
 
         if self.time_expired() {
@@ -509,7 +559,14 @@ impl DeepSearch {
         Some(best_score)
     }
 
-    fn search_next_trick(&mut self, round: &RoundState, seat: PlayerPosition, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+    fn search_next_trick(
+        &mut self,
+        round: &RoundState,
+        seat: PlayerPosition,
+        depth: u8,
+        alpha: i32,
+        beta: i32,
+    ) -> Option<i32> {
         if depth == 0 {
             return Some(self.evaluate_position(round, seat));
         }
@@ -536,7 +593,8 @@ impl DeepSearch {
                 }
 
                 // Recursively search this move
-                let score = self.search_position_after_move(round, seat, card, depth, local_alpha, beta)?;
+                let score =
+                    self.search_position_after_move(round, seat, card, depth, local_alpha, beta)?;
                 best_score = best_score.max(score);
                 local_alpha = local_alpha.max(score);
 
@@ -552,7 +610,15 @@ impl DeepSearch {
         }
     }
 
-    fn search_position_after_move(&mut self, round: &RoundState, seat: PlayerPosition, card: Card, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
+    fn search_position_after_move(
+        &mut self,
+        round: &RoundState,
+        seat: PlayerPosition,
+        card: Card,
+        depth: u8,
+        alpha: i32,
+        beta: i32,
+    ) -> Option<i32> {
         self.nodes_searched += 1;
 
         if self.time_expired() {
@@ -584,7 +650,8 @@ impl DeepSearch {
                     penalty_delta + self.evaluate_position(&new_round, seat)
                 } else {
                     // Continue to next trick
-                    penalty_delta + self.search_next_trick(&new_round, seat, depth - 1, alpha, beta)?
+                    penalty_delta
+                        + self.search_next_trick(&new_round, seat, depth - 1, alpha, beta)?
                 }
             }
             _ => {
@@ -640,11 +707,7 @@ impl DeepSearch {
         let evaluated = PlayPlanner::explain_candidates(&legal, &temp_ctx);
 
         // Return the score of the best move (this represents the value of this position)
-        evaluated
-            .iter()
-            .map(|(_, score)| *score)
-            .max()
-            .unwrap_or(0)
+        evaluated.iter().map(|(_, score)| *score).max().unwrap_or(0)
     }
 
     fn time_expired(&self) -> bool {

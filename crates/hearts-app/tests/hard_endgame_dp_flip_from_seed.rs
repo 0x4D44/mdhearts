@@ -167,7 +167,10 @@ fn hard_endgame_dp_flip_from_seed_2269_east() {
     assert!(on.is_some(), "ON config should produce a valid choice");
 
     if off != on {
-        eprintln!("DP caused flip for seed 2269 east: off={:?}, on={:?}", off, on);
+        eprintln!(
+            "DP caused flip for seed 2269 east: off={:?}, on={:?}",
+            off, on
+        );
     } else {
         eprintln!("DP converged to same choice (correct solver): {:?}", off);
     }

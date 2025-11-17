@@ -3022,7 +3022,11 @@ unsafe extern "system" fn window_proc(
                     // Reconstruct the Box to properly deallocate
                     let _ = Box::from_raw(ptr);
                     // Clear the window data to prevent double-free
-                    windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                    windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(
+                        hwnd,
+                        GWLP_USERDATA,
+                        0,
+                    );
                 }
             }
             LRESULT(0)

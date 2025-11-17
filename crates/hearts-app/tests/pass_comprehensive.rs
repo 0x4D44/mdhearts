@@ -37,9 +37,21 @@ fn build_round(seat: PlayerPosition, hand: &[Card], passing: PassingDirection) -
     for i in 0..4 {
         if i != seat.index() {
             let mut cards = Vec::new();
-            for rank in [Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
-                        Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack,
-                        Rank::Queen, Rank::King, Rank::Ace] {
+            for rank in [
+                Rank::Two,
+                Rank::Three,
+                Rank::Four,
+                Rank::Five,
+                Rank::Six,
+                Rank::Seven,
+                Rank::Eight,
+                Rank::Nine,
+                Rank::Ten,
+                Rank::Jack,
+                Rank::Queen,
+                Rank::King,
+                Rank::Ace,
+            ] {
                 if cards.len() < 13 {
                     cards.push(Card::new(rank, Suit::Diamonds));
                 }
@@ -350,7 +362,7 @@ fn pass_always_includes_queen_of_spades() {
 #[test]
 fn pass_avoids_creating_dangerous_void_in_spades() {
     let hand_short_spades = vec![
-        Card::new(Rank::Two, Suit::Spades),  // Only low spade - dangerous to void
+        Card::new(Rank::Two, Suit::Spades), // Only low spade - dangerous to void
         Card::new(Rank::Ace, Suit::Hearts),
         Card::new(Rank::King, Suit::Hearts),
         Card::new(Rank::Queen, Suit::Hearts),

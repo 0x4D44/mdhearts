@@ -1,5 +1,6 @@
 use super::{
-    BotContext, BotDifficulty, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure, snapshot_scores,
+    BotContext, BotDifficulty, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure,
+    snapshot_scores,
 };
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -1382,7 +1383,8 @@ impl PlayPlannerHard {
                 let trick_idx = ctx.round.trick_history().len() as u64;
                 let seat_idx = ctx.seat as u8 as u64;
                 let card_val = (card.suit as u8 as u64) << 8 | (card.rank.value() as u64);
-                trick_idx.wrapping_mul(1000)
+                trick_idx
+                    .wrapping_mul(1000)
                     .wrapping_add(seat_idx.wrapping_mul(100))
                     .wrapping_add(card_val)
             } else {
@@ -2455,8 +2457,14 @@ fn micro_endgame_bonus(
         // Play until this trick completes
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
             let nxt = next_to_play(&round);
-            let r =
-                choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target), None);
+            let r = choose_followup_search(
+                &round,
+                nxt,
+                Some(ctx.tracker),
+                leader,
+                Some(leader_target),
+                None,
+            );
             outcome = match round.play_card(nxt, r) {
                 Ok(o) => Some(o),
                 Err(_) => break,
@@ -2510,8 +2518,14 @@ fn micro_endgame_bonus(
         let mut outcome: Option<PlayOutcome> = None; // will hold TrickCompleted
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
             let nxt = next_to_play(&round);
-            let r =
-                choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target), None);
+            let r = choose_followup_search(
+                &round,
+                nxt,
+                Some(ctx.tracker),
+                leader,
+                Some(leader_target),
+                None,
+            );
             outcome = match round.play_card(nxt, r) {
                 Ok(o) => Some(o),
                 Err(_) => break,
