@@ -11,7 +11,8 @@ impl ScoreBoard {
     }
 
     pub fn add_penalty(&mut self, seat: PlayerPosition, points: u32) {
-        self.totals[seat.index()] += points;
+        // Use saturating_add to prevent overflow in very long matches
+        self.totals[seat.index()] = self.totals[seat.index()].saturating_add(points);
     }
 
     pub fn set_score(&mut self, seat: PlayerPosition, points: u32) {
