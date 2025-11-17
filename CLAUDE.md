@@ -68,19 +68,21 @@ The project uses a Cargo workspace with three crates:
 The bot system (`crates/hearts-app/src/bot/`) consists of:
 
 - **`mod.rs`**: Core bot types, difficulty levels (`BotDifficulty`), bot context, and style determination (Cautious, AggressiveMoon, HuntLeader)
-- **`play.rs`**: `PlayPlanner` - Normal difficulty heuristic planner with feature-based scoring
-- **`search.rs`**: `PlayPlannerHard` - Hard difficulty with shallow search, continuation scoring, and configurable branch limits
-- **`pass.rs`**: `PassPlanner` - Card passing logic for all difficulties
-- **`tracker.rs`**: `UnseenTracker` - Tracks unseen cards and moon-shooting state
-- **`adviser.rs`**: Optional bias system for Hard AI candidate scoring
+- **`play.rs`**: `PlayPlanner` - Normal difficulty heuristic planner with feature-based scoring (~1,700 lines)
+- **`search.rs`**: `PlayPlannerHard` - Hard difficulty with shallow search, continuation scoring, and configurable branch limits (~1,900 lines)
+- **`search_deep.rs`**: `DeepSearchEngine` - Search (Ultra-Hard) difficulty with alpha-beta pruning, transposition tables, iterative deepening up to 10 plies, killer move heuristic, and aspiration windows (~776 lines)
+- **`endgame.rs`**: `EndgameSolver` - Perfect play minimax solver for endgame positions (≤13 cards), with memoization, timeout protection, belief-state sampling, and moon shooting detection (~400 lines)
+- **`pass.rs`**: `PassPlanner` - Card passing logic for all difficulties (~600 lines)
+- **`tracker.rs`**: `UnseenTracker` - Tracks unseen cards, moon-shooting state, and provides belief-state sampling via `sample_world()` (~700 lines)
+- **`adviser.rs`**: Optional bias system for Hard AI candidate scoring (~65 lines)
 
 #### Difficulty Levels
 - **Easy** (`BotDifficulty::EasyLegacy`): Legacy simple heuristics (<1μs decisions)
 - **Normal** (`BotDifficulty::NormalHeuristic`): Feature-based heuristic planner (5-50μs, default)
 - **Hard** (`BotDifficulty::FutureHard`): Shallow search with continuation evaluation (2-15ms deterministic)
-- **Search** (`BotDifficulty::SearchLookahead`): Time-capped deeper search, extends Hard with configurable think limits
+- **Search** (`BotDifficulty::SearchLookahead`): Ultra-Hard AI with deep alpha-beta search (up to 10 plies), transposition tables, belief-state sampling (100 samples), and perfect endgame solver (0.5-2 sec decisions)
 
-**Note**: Search difficulty uses the same engine as Hard but with time-based budgets instead of step limits, enabling analysis of think-time vs. strength tradeoffs.
+**Note**: Search difficulty represents the strongest AI, combining deep search, perfect endgame play, and sophisticated imperfect information handling through belief-state sampling.
 
 #### Feature Flags (Continue-On-Main Strategy)
 To allow ongoing Hard AI development while keeping default behavior stable:

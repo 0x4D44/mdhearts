@@ -28,6 +28,9 @@ impl PassPlanner {
         let style = determine_style(ctx);
         let snapshot = snapshot_scores(&ctx.scores);
         let passing_target = ctx.passing_direction.target(ctx.seat);
+        // In Hearts: low score = winning/leading, high score = losing/trailing
+        // "leader" = person with lowest score (winning the game)
+        // "trailing" = person with highest score (losing the game, closer to 100)
         let passing_to_trailing = passing_target == snapshot.max_player;
         let passing_to_leader = passing_target == snapshot.min_player;
         let my_score = ctx.scores.score(ctx.seat);

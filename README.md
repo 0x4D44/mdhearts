@@ -77,9 +77,9 @@ The bot system implements 4 difficulty levels:
 | **Easy** | Legacy heuristics | <1 μs | Beginner |
 | **Normal** (default) | Feature-based heuristic | 5-50 μs | Intermediate |
 | **Hard** | Shallow search + continuation | 2-15 ms | Advanced |
-| **Search** | Deep search (future) | TBD | Expert |
+| **Search** | Deep search + endgame solver | 0.5-2 sec | Expert |
 
-**Normal AI** uses ~15 weighted features with single-trick simulation. **Hard AI** uses shallow search with top-K candidate selection, continuation scoring, belief-guided opponent modeling, and optional perfect endgame solving.
+**Normal AI** uses ~15 weighted features with single-trick simulation. **Hard AI** uses shallow search with top-K candidate selection and continuation scoring. **Search AI** (Ultra-Hard) uses deep multi-ply search with alpha-beta pruning, transposition tables, iterative deepening (up to 10 plies), belief-state sampling (100 samples), and perfect endgame solver (up to 13 cards).
 
 📚 **For complete architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md)**
 

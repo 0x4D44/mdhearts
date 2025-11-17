@@ -526,7 +526,8 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
         if card.suit == lead {
             score -= (card.rank.value() as i32) * 24;
         } else {
-            score += card.penalty_value() as i32 * 500;
+            // Use same weight as production code (was hardcoded 500, now uses actual weight)
+            score += card.penalty_value() as i32 * weights().off_suit_dump_bonus;
         }
     } else {
         score -= (card.rank.value() as i32) * 10;

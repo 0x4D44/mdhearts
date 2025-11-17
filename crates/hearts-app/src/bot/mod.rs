@@ -1,14 +1,17 @@
 mod adviser;
+mod endgame;
 mod pass;
 pub(crate) mod play;
 pub mod search;
+pub mod search_deep;
 mod tracker;
 
 pub use adviser::play_bias;
 pub use pass::PassPlanner;
 pub use play::{PlayPlanner, debug_weights_string};
 pub use search::{PlayPlannerHard, debug_hard_weights_string};
-pub use tracker::{MoonState, UnseenTracker};
+#[allow(unused_imports)]
+pub use tracker::{MoonState, SampledWorld, UnseenTracker};
 
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;

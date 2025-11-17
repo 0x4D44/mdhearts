@@ -1,5 +1,6 @@
 use super::{
-    BotContext, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure, snapshot_scores,
+    BotContext, BotDifficulty, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure,
+    snapshot_scores,
 };
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
@@ -677,6 +678,17 @@ impl PlayPlannerHard {
         if limit.map_or(false, |limit| limit.expired()) {
             return None;
         }
+
+        // Phase 3: Try endgame solver first (perfect play with few cards)
+        if let Some(card) = Self::choose_with_endgame_solver(legal, ctx, limit) {
+            return Some(card);
+        }
+
+        // Phase 2: Try deeper search if enabled
+        if let Some(card) = Self::choose_with_deep_search(legal, ctx, limit) {
+            return Some(card);
+        }
+
         crate::telemetry::hard::record_pre_decision(ctx.seat, ctx.tracker, ctx.difficulty);
         let limit_ms_remaining = limit.and_then(|limit| limit.remaining_millis());
         let schedule_hints = schedule_hints_for(ctx.seat, limit_ms_remaining);
@@ -890,6 +902,7 @@ impl PlayPlannerHard {
                             continuation_scale_permil,
                             limit_ms_remaining,
                             depth2_enabled,
+                            None,
                         ) {
                             Some((value, res)) => {
                                 depth2_resolution = Some(res);
@@ -1165,6 +1178,7 @@ impl PlayPlannerHard {
                 continuation_scale_permil,
                 limit_ms_remaining,
                 depth2_enabled,
+                None,
             );
             let delta = budget.probe_calls.saturating_sub(before);
             if delta > 0 {
@@ -1330,6 +1344,7 @@ impl PlayPlannerHard {
                     continuation_scale_permil,
                     None,
                     false,
+                    None,
                 )
             } else {
                 (0, ContParts::default())
@@ -1355,7 +1370,70 @@ impl PlayPlannerHard {
         limit_ms: Option<u32>,
         depth2_enabled: bool,
     ) -> i32 {
-        if det_enabled_for(ctx) {
+        // Belief-state sampling: sample multiple possible worlds
+        if belief_sampling_enabled() {
+            let mut acc = 0i32;
+            let sample_count = belief_sample_count(ctx);
+            let mut successful_samples = 0;
+
+            use rand::SeedableRng;
+            // Use deterministic seed based on position for reproducibility if needed
+            let seed = if std::env::var("MDH_HARD_DETERMINISTIC").ok().is_some() {
+                // Deterministic seed from position
+                let trick_idx = ctx.round.trick_history().len() as u64;
+                let seat_idx = ctx.seat as u8 as u64;
+                let card_val = (card.suit as u8 as u64) << 8 | (card.rank.value() as u64);
+                trick_idx
+                    .wrapping_mul(1000)
+                    .wrapping_add(seat_idx.wrapping_mul(100))
+                    .wrapping_add(card_val)
+            } else {
+                // Use system time for non-deterministic
+                use std::time::SystemTime;
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+            };
+
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+            for sample_idx in 0..sample_count {
+                if budget.should_stop() || budget.timed_out(start) {
+                    break;
+                }
+
+                // Sample a possible world and use it for opponent hands in rollout
+                let sampled_world = ctx.tracker.sample_world(&mut rng, ctx.seat, ctx.round);
+
+                let value = Self::rollout_current_trick_core(
+                    card,
+                    ctx,
+                    leader_target,
+                    budget,
+                    start,
+                    next3_allowed,
+                    continuation_scale_permil,
+                    limit_ms,
+                    depth2_enabled,
+                    Some(&sampled_world),
+                );
+
+                acc += value;
+                successful_samples += 1;
+
+                // Increment seed for next sample
+                rng = rand::rngs::StdRng::seed_from_u64(seed.wrapping_add(sample_idx as u64 + 1));
+            }
+
+            if successful_samples > 0 {
+                acc / successful_samples
+            } else {
+                0
+            }
+        }
+        // Existing determinization path
+        else if det_enabled_for(ctx) {
             let mut acc = 0i32;
             let k = det_sample_k().max(1);
             for _ in 0..k {
@@ -1372,6 +1450,7 @@ impl PlayPlannerHard {
                     continuation_scale_permil,
                     limit_ms,
                     depth2_enabled,
+                    None,
                 );
             }
             if k > 0 { acc / (k as i32) } else { 0 }
@@ -1386,6 +1465,7 @@ impl PlayPlannerHard {
                 continuation_scale_permil,
                 limit_ms,
                 depth2_enabled,
+                None,
             )
         }
     }
@@ -1401,6 +1481,7 @@ impl PlayPlannerHard {
         continuation_scale_permil: i32,
         limit_ms: Option<u32>,
         depth2_enabled: bool,
+        sampled_world: Option<&crate::bot::SampledWorld>,
     ) -> i32 {
         match rollout_current_trick_with_resolution(
             card,
@@ -1412,6 +1493,7 @@ impl PlayPlannerHard {
             continuation_scale_permil,
             limit_ms,
             depth2_enabled,
+            sampled_world,
         ) {
             Some((value, _)) => value,
             None => 0,
@@ -1428,6 +1510,7 @@ impl PlayPlannerHard {
         continuation_scale_permil: i32,
         limit_ms: Option<u32>,
         depth2_enabled: bool,
+        sampled_world: Option<&crate::bot::SampledWorld>,
     ) -> (i32, ContParts) {
         if det_enabled() {
             let mut acc = 0i32;
@@ -1447,6 +1530,7 @@ impl PlayPlannerHard {
                     continuation_scale_permil,
                     limit_ms,
                     depth2_enabled,
+                    sampled_world,
                 );
                 acc += v;
                 acc_parts.feed += p.feed;
@@ -1485,6 +1569,7 @@ impl PlayPlannerHard {
                 continuation_scale_permil,
                 limit_ms,
                 depth2_enabled,
+                sampled_world,
             )
         }
     }
@@ -1500,6 +1585,7 @@ impl PlayPlannerHard {
         continuation_scale_permil: i32,
         limit_ms: Option<u32>,
         depth2_enabled: bool,
+        sampled_world: Option<&crate::bot::SampledWorld>,
     ) -> (i32, ContParts) {
         let mut parts = ContParts::default();
         // Simulate only the remainder of the current trick with a simple, void-aware policy.
@@ -1529,9 +1615,17 @@ impl PlayPlannerHard {
                     seat,
                     Some(leader_target),
                     budget,
+                    sampled_world,
                 )
             } else {
-                choose_followup_search(&sim, next, Some(ctx.tracker), seat, Some(leader_target))
+                choose_followup_search(
+                    &sim,
+                    next,
+                    Some(ctx.tracker),
+                    seat,
+                    Some(leader_target),
+                    sampled_world,
+                )
             };
             outcome = match sim.play_card(next, reply) {
                 Ok(o) => o,
@@ -1647,9 +1741,26 @@ fn choose_followup_search(
     tracker: Option<&crate::bot::tracker::UnseenTracker>,
     origin: PlayerPosition,
     leader_target: Option<PlayerPosition>,
+    sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Card {
     // Minimal, void-aware heuristic response.
-    let legal = legal_moves_for(round, seat);
+    let mut legal = legal_moves_for(round, seat);
+
+    // If we have a sampled world, filter legal moves to only include cards
+    // that are in the opponent's sampled hand (belief-state sampling)
+    if let Some(world) = sampled_world {
+        let sampled_hand = world.hand(seat);
+        if !sampled_hand.is_empty() {
+            // Only keep cards that are both legal and in the sampled hand
+            legal.retain(|card| sampled_hand.contains(card));
+
+            // If filtering removed all cards (shouldn't happen but defensive),
+            // fall back to full legal set
+            if legal.is_empty() {
+                legal = legal_moves_for(round, seat);
+            }
+        }
+    }
     let lead_suit = round.current_trick().lead_suit();
     if let Some(lead) = lead_suit {
         if let Some(card) = legal
@@ -1769,8 +1880,9 @@ fn choose_followup_search_sampled(
     origin: PlayerPosition,
     leader_target: Option<PlayerPosition>,
     budget: &mut Budget,
+    sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Card {
-    let canon = choose_followup_search(round, seat, tracker, origin, leader_target);
+    let canon = choose_followup_search(round, seat, tracker, origin, leader_target, sampled_world);
     let legal = legal_moves_for(round, seat);
     if legal.is_empty() {
         return canon;
@@ -2095,6 +2207,7 @@ fn next_trick_probe(
             Some(ctx.tracker),
             leader,
             Some(leader_target),
+            None,
         );
         replies.push(canon);
         // Alternate: max-penalty dump if available when not following suit
@@ -2132,6 +2245,7 @@ fn next_trick_probe(
                 Some(ctx.tracker),
                 leader,
                 Some(leader_target),
+                None,
             );
             replies2.push(canon2);
             if let Some(lead_suit2) = branch.current_trick().lead_suit() {
@@ -2184,6 +2298,7 @@ fn next_trick_probe(
                         Some(ctx.tracker),
                         leader,
                         Some(leader_target),
+                        None,
                     );
                     replies3.push(canon3);
                     if let Some(lead_suit3) = branch2.current_trick().lead_suit() {
@@ -2220,6 +2335,7 @@ fn next_trick_probe(
                                 Some(ctx.tracker),
                                 leader,
                                 Some(leader_target),
+                                None,
                             );
                             outcome3 = match branch3.play_card(nxt, r) {
                                 Ok(o) => o,
@@ -2252,6 +2368,7 @@ fn next_trick_probe(
                             Some(ctx.tracker),
                             leader,
                             Some(leader_target),
+                            None,
                         );
                         outcome2 = match branch2.play_card(nxt, r) {
                             Ok(o) => o,
@@ -2340,8 +2457,14 @@ fn micro_endgame_bonus(
         // Play until this trick completes
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
             let nxt = next_to_play(&round);
-            let r =
-                choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target));
+            let r = choose_followup_search(
+                &round,
+                nxt,
+                Some(ctx.tracker),
+                leader,
+                Some(leader_target),
+                None,
+            );
             outcome = match round.play_card(nxt, r) {
                 Ok(o) => Some(o),
                 Err(_) => break,
@@ -2395,8 +2518,14 @@ fn micro_endgame_bonus(
         let mut outcome: Option<PlayOutcome> = None; // will hold TrickCompleted
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
             let nxt = next_to_play(&round);
-            let r =
-                choose_followup_search(&round, nxt, Some(ctx.tracker), leader, Some(leader_target));
+            let r = choose_followup_search(
+                &round,
+                nxt,
+                Some(ctx.tracker),
+                leader,
+                Some(leader_target),
+                None,
+            );
             outcome = match round.play_card(nxt, r) {
                 Ok(o) => Some(o),
                 Err(_) => break,
@@ -2623,6 +2752,7 @@ fn simulate_trick_resolution(
     budget: &mut Budget,
     start: Instant,
     _next3_allowed: bool,
+    sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Option<TrickResolution> {
     let mut sim = round.clone();
     let mut outcome = match sim.play_card(seat, card) {
@@ -2643,9 +2773,17 @@ fn simulate_trick_resolution(
                 seat,
                 Some(leader_target),
                 budget,
+                sampled_world,
             )
         } else {
-            choose_followup_search(&sim, next, Some(ctx.tracker), seat, Some(leader_target))
+            choose_followup_search(
+                &sim,
+                next,
+                Some(ctx.tracker),
+                seat,
+                Some(leader_target),
+                sampled_world,
+            )
         };
         outcome = match sim.play_card(next, reply) {
             Ok(o) => o,
@@ -2762,6 +2900,7 @@ fn rollout_current_trick_with_resolution(
     continuation_scale_permil: i32,
     limit_ms: Option<u32>,
     depth2_enabled: bool,
+    sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Option<(i32, TrickResolution)> {
     let seat = ctx.seat;
     let snapshot = snapshot_scores(&ctx.scores);
@@ -2779,6 +2918,7 @@ fn rollout_current_trick_with_resolution(
         budget,
         start,
         next3_allowed,
+        sampled_world,
     )?;
     let cont = continuation_from_resolution(
         &resolution,
@@ -2856,6 +2996,7 @@ fn evaluate_depth2_bonus(
             budget,
             start,
             true,
+            None,
         );
         let cont_child = match maybe {
             Some(child_res) => continuation_from_resolution(
@@ -3055,4 +3196,35 @@ fn det_sample_k() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(0)
+}
+
+// ----- Belief-State Sampling (Phase 1: Imperfect Information) -----
+/// Check if belief-state sampling is enabled
+/// DEFAULT: ENABLED (can be disabled with MDH_BELIEF_SAMPLING_ENABLED=0)
+fn belief_sampling_enabled() -> bool {
+    std::env::var("MDH_BELIEF_SAMPLING_ENABLED")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
+        .unwrap_or(true) // ENABLED BY DEFAULT
+}
+
+/// Get the number of worlds to sample for belief-state search
+/// SearchLookahead difficulty: 100 samples (MAXIMUM accuracy!)
+/// Default: 15 samples for strong play
+fn belief_sample_count(ctx: &BotContext<'_>) -> usize {
+    // MAXIMUM sampling for SearchLookahead difficulty
+    if matches!(ctx.difficulty, BotDifficulty::SearchLookahead) {
+        return std::env::var("MDH_BELIEF_SAMPLE_COUNT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(100) // MAXIMUM: 100 samples for Search difficulty
+            .max(1)
+            .min(200); // Much higher cap for Search mode
+    }
+
+    std::env::var("MDH_BELIEF_SAMPLE_COUNT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(15) // Normal: 15 samples
+        .max(1)
+        .min(50) // Normal cap
 }

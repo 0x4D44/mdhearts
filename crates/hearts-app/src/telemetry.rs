@@ -162,7 +162,7 @@ impl HardTelemetryRecord {
             search_stats: None,
             fallback: None,
             notes: None,
-             controller_bias_delta: None,
+            controller_bias_delta: None,
         }
     }
 }
