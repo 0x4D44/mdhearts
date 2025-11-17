@@ -36,7 +36,12 @@ struct EndgamePosition {
 }
 
 impl EndgamePosition {
-    fn from_round(round: &RoundState, our_seat: PlayerPosition, tracker: &UnseenTracker, use_sampling: bool) -> Self {
+    fn from_round(
+        round: &RoundState,
+        our_seat: PlayerPosition,
+        tracker: &UnseenTracker,
+        use_sampling: bool,
+    ) -> Self {
         let mut hands: [Vec<Card>; 4] = Default::default();
 
         // Our hand is known
@@ -239,9 +244,9 @@ impl EndgameSolver {
 
             // Determine who plays next in the new position
             let next_to_play = if next_pos.trick_cards.is_empty() {
-                next_pos.leader  // Trick completed, new leader plays
+                next_pos.leader // Trick completed, new leader plays
             } else {
-                next_pos.trick_cards.last().unwrap().0.next()  // Trick in progress
+                next_pos.trick_cards.last().unwrap().0.next() // Trick in progress
             };
 
             // Recursively evaluate
@@ -302,7 +307,11 @@ impl EndgameSolver {
         } else {
             // Following - must follow suit if possible
             let lead_suit = pos.trick_cards[0].1.suit;
-            let following: Vec<Card> = hand.iter().copied().filter(|c| c.suit == lead_suit).collect();
+            let following: Vec<Card> = hand
+                .iter()
+                .copied()
+                .filter(|c| c.suit == lead_suit)
+                .collect();
             if following.is_empty() {
                 hand.clone() // Can play anything
             } else {
@@ -311,7 +320,12 @@ impl EndgameSolver {
         }
     }
 
-    fn apply_move(&self, pos: &EndgamePosition, seat: PlayerPosition, card: Card) -> EndgamePosition {
+    fn apply_move(
+        &self,
+        pos: &EndgamePosition,
+        seat: PlayerPosition,
+        card: Card,
+    ) -> EndgamePosition {
         let mut new_pos = pos.clone();
 
         // Remove card from hand

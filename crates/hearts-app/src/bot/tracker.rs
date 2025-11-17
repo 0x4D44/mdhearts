@@ -5,8 +5,8 @@ use hearts_core::model::rank::Rank;
 use hearts_core::model::round::RoundState;
 use hearts_core::model::suit::Suit;
 use parking_lot::RwLock;
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::SliceRandom;
 use std::array;
 use std::collections::{HashSet, VecDeque, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
@@ -655,8 +655,7 @@ impl UnseenTracker {
                 cards_per_player[seat.index()] = 0;
             } else {
                 // Other players get their fair share
-                cards_per_player[seat.index()] =
-                    round.hand(seat).len() + (unseen_cards.len() / 3);
+                cards_per_player[seat.index()] = round.hand(seat).len() + (unseen_cards.len() / 3);
             }
         }
 
@@ -691,7 +690,11 @@ impl UnseenTracker {
                 // Weight by belief probability
                 let weights: Vec<f32> = eligible
                     .iter()
-                    .map(|&seat| self.beliefs[seat.index()].card_probability(*card).max(0.001))
+                    .map(|&seat| {
+                        self.beliefs[seat.index()]
+                            .card_probability(*card)
+                            .max(0.001)
+                    })
                     .collect();
 
                 let total_weight: f32 = weights.iter().sum();
@@ -734,8 +737,8 @@ mod tests {
     use hearts_core::model::rank::Rank;
     use hearts_core::model::round::RoundState;
     use hearts_core::model::suit::Suit;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn tracker_initialises_with_full_deck() {
