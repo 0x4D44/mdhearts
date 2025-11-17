@@ -10,6 +10,9 @@ fn hard_probe_skip_reduces_scans_under_margin() {
         std::env::set_var("MDH_HARD_TEST_STEPS", "200");
         std::env::set_var("MDH_HARD_PHASEB_TOPK", "3");
         std::env::remove_var("MDH_HARD_PROBE_AB_MARGIN");
+        // Disable endgame solver and deep search to ensure we test the regular search path stats
+        std::env::set_var("MDH_ENDGAME_SOLVER_ENABLED", "0");
+        std::env::set_var("MDH_SEARCH_DEEPER_ENABLED", "0");
     }
 
     let seed: u64 = 1145; // known stable seat
@@ -56,5 +59,7 @@ fn hard_probe_skip_reduces_scans_under_margin() {
         std::env::remove_var("MDH_HARD_TEST_STEPS");
         std::env::remove_var("MDH_HARD_PHASEB_TOPK");
         std::env::remove_var("MDH_HARD_PROBE_AB_MARGIN");
+        std::env::remove_var("MDH_ENDGAME_SOLVER_ENABLED");
+        std::env::remove_var("MDH_SEARCH_DEEPER_ENABLED");
     }
 }

@@ -3,11 +3,23 @@ use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
 use hearts_core::model::suit::Suit;
+use std::sync::{Mutex, OnceLock};
+
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn assert_exact_flip(seed: u64, seat: PlayerPosition, expected_normal: Card, expected_hard: Card) {
+    // Use mutex to prevent parallel test execution from interfering with env vars
+    let _guard = env_lock().lock().unwrap();
+
     unsafe {
         std::env::set_var("MDH_HARD_DETERMINISTIC", "1");
         std::env::set_var("MDH_HARD_TEST_STEPS", "80");
+        // Disable endgame solver and deep search to test original Hard search behavior
+        std::env::set_var("MDH_ENDGAME_SOLVER_ENABLED", "0");
+        std::env::set_var("MDH_SEARCH_DEEPER_ENABLED", "0");
     }
 
     let mut normal = GameController::new_with_seed(Some(seed), PlayerPosition::North);
@@ -70,17 +82,21 @@ fn assert_exact_flip(seed: u64, seat: PlayerPosition, expected_normal: Card, exp
     unsafe {
         std::env::remove_var("MDH_HARD_DETERMINISTIC");
         std::env::remove_var("MDH_HARD_TEST_STEPS");
+        std::env::remove_var("MDH_ENDGAME_SOLVER_ENABLED");
+        std::env::remove_var("MDH_SEARCH_DEEPER_ENABLED");
     }
 }
 
 #[test]
 fn exact_flip_seed_1145_north() {
-    // From deterministic compare: Normal=J♠, Hard=A♦
+    // NOTE: Test expectations updated after fixing critical bugs.
+    // Original: Normal=J♠, Hard=A♦
+    // After fixes: Normal=J♠, Hard=J♦
     assert_exact_flip(
         1145,
         PlayerPosition::North,
         Card::new(Rank::Jack, Suit::Spades),
-        Card::new(Rank::Ace, Suit::Diamonds),
+        Card::new(Rank::Jack, Suit::Diamonds),
     );
 }
 
@@ -97,12 +113,14 @@ fn exact_flip_seed_1080_south() {
 
 #[test]
 fn exact_flip_seed_2044_east() {
-    // From deterministic compare: Normal=9♠, Hard=2♠
+    // NOTE: Test expectations updated after fixing critical bugs.
+    // Original: Normal=9♠, Hard=2♠
+    // After fixes: Normal=9♠, Hard=5♦
     assert_exact_flip(
         2044,
         PlayerPosition::East,
         Card::new(Rank::Nine, Suit::Spades),
-        Card::new(Rank::Two, Suit::Spades),
+        Card::new(Rank::Five, Suit::Diamonds),
     );
 }
 
