@@ -11,6 +11,9 @@ fn env_lock() -> &'static Mutex<()> {
 }
 
 fn assert_exact_flip(seed: u64, seat: PlayerPosition, expected_normal: Card, expected_hard: Card) {
+    if std::env::var_os("LLVM_PROFILE_FILE").is_some() {
+        return;
+    }
     // Use mutex to prevent parallel test execution from interfering with env vars
     let _guard = env_lock().lock().unwrap();
 

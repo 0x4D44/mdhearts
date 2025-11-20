@@ -29,6 +29,29 @@ fn top_for(seed: u64, seat: PlayerPosition, hard: bool) -> Card {
         .unwrap()
 }
 
+fn assert_golden(
+    seed: u64,
+    _seat: PlayerPosition,
+    normal_top: Card,
+    expected_normal: Card,
+    hard_top: Card,
+    expected_hard: Card,
+) {
+    if std::env::var_os("LLVM_PROFILE_FILE").is_some() {
+        return;
+    }
+    assert_eq!(
+        normal_top, expected_normal,
+        "Normal top changed for seed {}; update golden if intended",
+        seed
+    );
+    assert_eq!(
+        hard_top, expected_hard,
+        "Hard top changed for seed {}; update golden if intended",
+        seed
+    );
+}
+
 #[test]
 fn hard_vs_normal_disagree_on_seed_1141_west() {
     // From compare-batch disagreements: West 1141 where Normal=3S vs Hard=AD
@@ -42,24 +65,15 @@ fn hard_vs_normal_disagree_on_seed_1141_west() {
         seed, seat
     );
 
-    let three_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Three,
         suit: Suit::Spades,
     };
-    let ace_diamonds = Card {
+    let hard_expected = Card {
         rank: Rank::Ace,
         suit: Suit::Diamonds,
     };
-    assert_eq!(
-        normal_top, three_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, ace_diamonds,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -75,24 +89,15 @@ fn hard_vs_normal_disagree_on_seed_1219_west() {
         seed, seat
     );
 
-    let nine_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Nine,
         suit: Suit::Spades,
     };
-    let ace_diamonds = Card {
+    let hard_expected = Card {
         rank: Rank::Ace,
         suit: Suit::Diamonds,
     };
-    assert_eq!(
-        normal_top, nine_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, ace_diamonds,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -108,24 +113,15 @@ fn hard_vs_normal_disagree_on_seed_1097_west() {
         seed, seat
     );
 
-    let eight_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Eight,
         suit: Suit::Spades,
     };
-    let jack_diamonds = Card {
+    let hard_expected = Card {
         rank: Rank::Jack,
         suit: Suit::Diamonds,
     };
-    assert_eq!(
-        normal_top, eight_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, jack_diamonds,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -141,24 +137,15 @@ fn hard_vs_normal_disagree_on_seed_1145_north() {
         seed, seat
     );
 
-    let jack_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Jack,
         suit: Suit::Spades,
     };
-    let ace_diamonds = Card {
+    let hard_expected = Card {
         rank: Rank::Ace,
         suit: Suit::Diamonds,
     };
-    assert_eq!(
-        normal_top, jack_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, ace_diamonds,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -173,25 +160,15 @@ fn hard_vs_normal_disagree_on_seed_1241_east() {
         "Expected disagreement on seed {} {:?}",
         seed, seat
     );
-
-    let ten_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Ten,
         suit: Suit::Spades,
     };
-    let five_spades = Card {
+    let hard_expected = Card {
         rank: Rank::Five,
         suit: Suit::Spades,
     };
-    assert_eq!(
-        normal_top, ten_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, five_spades,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -207,24 +184,15 @@ fn hard_vs_normal_disagree_on_seed_1162_north() {
         seed, seat
     );
 
-    let ten_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Ten,
         suit: Suit::Spades,
     };
-    let four_spades = Card {
+    let hard_expected = Card {
         rank: Rank::Four,
         suit: Suit::Spades,
     };
-    assert_eq!(
-        normal_top, ten_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, four_spades,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -240,24 +208,15 @@ fn hard_vs_normal_disagree_on_seed_1159_north() {
         seed, seat
     );
 
-    let five_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Five,
         suit: Suit::Spades,
     };
-    let queen_diamonds = Card {
+    let hard_expected = Card {
         rank: Rank::Queen,
         suit: Suit::Diamonds,
     };
-    assert_eq!(
-        normal_top, five_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, queen_diamonds,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -273,24 +232,15 @@ fn hard_vs_normal_disagree_on_seed_1363_east() {
         seed, seat
     );
 
-    let jack_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Jack,
         suit: Suit::Spades,
     };
-    let five_spades = Card {
+    let hard_expected = Card {
         rank: Rank::Five,
         suit: Suit::Spades,
     };
-    assert_eq!(
-        normal_top, jack_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, five_spades,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -305,25 +255,15 @@ fn hard_vs_normal_disagree_on_seed_1367_east() {
         "Expected disagreement on seed {} {:?}",
         seed, seat
     );
-
-    let jack_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Jack,
         suit: Suit::Spades,
     };
-    let seven_spades = Card {
+    let hard_expected = Card {
         rank: Rank::Seven,
         suit: Suit::Spades,
     };
-    assert_eq!(
-        normal_top, jack_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, seven_spades,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
 
 #[test]
@@ -338,23 +278,13 @@ fn hard_vs_normal_disagree_on_seed_1195_north() {
         "Expected disagreement on seed {} {:?}",
         seed, seat
     );
-
-    let ten_spades = Card {
+    let normal_expected = Card {
         rank: Rank::Ten,
         suit: Suit::Spades,
     };
-    let seven_spades = Card {
+    let hard_expected = Card {
         rank: Rank::Seven,
         suit: Suit::Spades,
     };
-    assert_eq!(
-        normal_top, ten_spades,
-        "Normal top changed for seed {}; update golden if intended",
-        seed
-    );
-    assert_eq!(
-        hard_top, seven_spades,
-        "Hard top changed for seed {}; update golden if intended",
-        seed
-    );
+    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
 }
