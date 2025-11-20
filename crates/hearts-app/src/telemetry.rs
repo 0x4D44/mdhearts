@@ -94,7 +94,12 @@ impl TelemetrySink {
     }
 
     pub fn push(&self, record: HardTelemetryRecord) {
-        self.records.write().push(record);
+        let mut records = self.records.write();
+        records.push(record);
+        if records.len() > self.retention {
+            let overflow = records.len() - self.retention;
+            records.drain(0..overflow);
+        }
     }
 
     pub fn snapshot(&self) -> Vec<HardTelemetryRecord> {
@@ -299,15 +304,40 @@ fn enforce_retention(dir: &Path, retention: usize) -> io::Result<()> {
 pub mod hard {
     pub use super::SearchTelemetrySnapshot;
     use super::*;
+    #[cfg(test)]
+    use std::cell::RefCell;
+
+    #[cfg(test)]
+    thread_local! {
+        static THREAD_LOCAL_SINK: RefCell<Option<TelemetrySink>> = RefCell::new(None);
+    }
 
     pub fn sink() -> &'static TelemetrySink {
-        HARD_SINK.get_or_init(|| {
-            let retention = std::env::var("MDH_HARD_TELEMETRY_KEEP")
-                .ok()
-                .and_then(|raw| raw.trim().parse::<usize>().ok())
-                .unwrap_or(20);
-            TelemetrySink::new(retention)
-        })
+        HARD_SINK.get_or_init(|| TelemetrySink::new(default_retention()))
+    }
+
+    fn default_retention() -> usize {
+        std::env::var("MDH_HARD_TELEMETRY_KEEP")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .unwrap_or(20)
+    }
+
+    fn with_active_sink<R>(f: impl FnOnce(&TelemetrySink) -> R) -> R {
+        #[cfg(test)]
+        {
+            return THREAD_LOCAL_SINK.with(|cell| {
+                if let Some(ref sink) = *cell.borrow() {
+                    f(sink)
+                } else {
+                    f(sink())
+                }
+            });
+        }
+        #[cfg(not(test))]
+        {
+            f(sink())
+        }
     }
 
     pub fn reset() {
@@ -322,7 +352,7 @@ pub mod hard {
     ) {
         let record =
             HardTelemetryRecord::from_tracker(seat, tracker, Some(difficulty), Some("pre"));
-        sink().push(record);
+        with_active_sink(|sink| sink.push(record));
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -345,7 +375,7 @@ pub mod hard {
         record.fallback = fallback.map(|f| f.to_string());
         record.search_stats = search_stats;
         record.controller_bias_delta = controller_bias_delta;
-        sink().push(record);
+        with_active_sink(|sink| sink.push(record));
     }
 
     pub fn export(destination: Option<PathBuf>) -> io::Result<(PathBuf, HardTelemetrySummary)> {
@@ -355,6 +385,24 @@ pub mod hard {
     #[allow(dead_code)]
     pub fn summary() -> HardTelemetrySummary {
         sink().summarize()
+    }
+
+    #[cfg(test)]
+    pub fn capture_for_test<F, R>(f: F) -> (R, Vec<HardTelemetryRecord>)
+    where
+        F: FnOnce() -> R,
+    {
+        THREAD_LOCAL_SINK.with(|cell| {
+            assert!(
+                cell.borrow().is_none(),
+                "nested telemetry capture not supported"
+            );
+            *cell.borrow_mut() = Some(TelemetrySink::new(default_retention()));
+            let result = f();
+            let sink = cell.borrow_mut().take().unwrap();
+            let records = sink.snapshot();
+            (result, records)
+        })
     }
 }
 
@@ -416,5 +464,37 @@ mod tests {
         assert_eq!(summary.record_count, 2);
         assert!((summary.avg_entropy - 0.75).abs() < 1e-6);
         assert!((summary.cache_hit_rate - (3.0 / 4.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn telemetry_sink_enforces_retention_on_push() {
+        let sink = TelemetrySink::new(2);
+        let make_record =
+            |idx: u64| HardTelemetryRecord {
+                timestamp_ms: idx as u128,
+                decision_index: idx,
+                seat: "North".to_string(),
+                belief_entropy: [0.0; 4],
+                belief_cache_size: 0,
+                belief_cache_capacity: 0,
+                belief_cache_hits: 0,
+                belief_cache_misses: 0,
+                difficulty: None,
+                phase: None,
+                think_limit_ms: None,
+                elapsed_ms: None,
+                timed_out: None,
+                fallback: None,
+                search_stats: None,
+                notes: None,
+                controller_bias_delta: None,
+            };
+        sink.push(make_record(1));
+        sink.push(make_record(2));
+        sink.push(make_record(3));
+        let snapshot = sink.snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot[0].decision_index, 2);
+        assert_eq!(snapshot[1].decision_index, 3);
     }
 }

@@ -389,7 +389,13 @@ Controller spawns worker thread
 - ✅ External adviser bias
 - ✅ Feature flags for staging work
 
----
+
+## Reliability Enhancements (2025-11-18)
+
+- **Rules Fidelity:** `RoundState::validate_play`/`legal_cards` centralize legality checks so bots/UI share the same logic without cloning entire rounds.
+- **Tracker Integrity:** Passing no longer reveals cards; `UnseenTracker` rebuilds after passes so the unseen set always reflects 52 minus played cards.
+- **Telemetry Retention:** `TelemetrySink::push` now enforces retention caps immediately, turning the sink into a ring buffer for long GUI sessions.
+- **Regression Coverage:** Stage 1 guard tests (`hard_guard_round_leader_saturated_blocks_feed`, `hard_flat_scores_uses_round_leader_penalties_gt0`) run in CI via deterministic fixtures guarded by feature flags and mutexes.---
 
 ## Component Documentation
 
@@ -467,3 +473,6 @@ MDHearts demonstrates a **production-quality architecture** for a sophisticated 
 - Rust game development patterns
 
 This architecture proves that **well-engineered heuristics + shallow search + opponent modeling** can produce expert-level play without deep search or machine learning, while maintaining real-time performance and full explainability.
+
+
+

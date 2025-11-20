@@ -486,10 +486,8 @@ impl UnseenTracker {
         }
     }
 
-    pub fn note_pass_selection(&mut self, _seat: PlayerPosition, cards: &[Card]) {
-        for &card in cards {
-            self.note_card_revealed(card);
-        }
+    pub fn note_pass_selection(&mut self, _seat: PlayerPosition, _cards: &[Card]) {
+        // Passing moves cards between hidden hands; it should not reveal them.
     }
 
     pub fn note_card_played(&mut self, _seat: PlayerPosition, card: Card) {
@@ -759,6 +757,16 @@ mod tests {
         assert_eq!(tracker.unseen_count(), 51);
         let north = tracker.belief_state(PlayerPosition::North);
         assert_eq!(north.card_probability(queen), 0.0);
+    }
+
+    #[test]
+    fn pass_selection_does_not_remove_cards_from_unseen() {
+        let mut tracker = UnseenTracker::new();
+        let queen = Card::new(Rank::Queen, Suit::Spades);
+        assert!(tracker.is_unseen(queen));
+        tracker.note_pass_selection(PlayerPosition::North, &[queen]);
+        assert!(tracker.is_unseen(queen));
+        assert_eq!(tracker.unseen_count(), 52);
     }
 
     #[test]

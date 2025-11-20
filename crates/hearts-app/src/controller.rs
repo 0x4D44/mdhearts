@@ -398,15 +398,7 @@ impl GameController {
     }
 
     pub fn legal_moves(&self, seat: PlayerPosition) -> Vec<Card> {
-        let round = self.match_state.round();
-        let hand = round.hand(seat);
-        hand.iter()
-            .copied()
-            .filter(|&card| {
-                let mut probe = round.clone();
-                probe.play_card(seat, card).is_ok()
-            })
-            .collect()
+        self.match_state.round().legal_cards(seat)
     }
 
     pub fn play(&mut self, seat: PlayerPosition, card: Card) -> Result<PlayOutcome, PlayError> {
@@ -1080,6 +1072,29 @@ mod tests {
     use hearts_core::model::suit::Suit;
     use std::time::Duration;
 
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(ref value) = self.original {
+                unsafe { std::env::set_var(self.key, value) };
+            } else {
+                unsafe { std::env::remove_var(self.key) };
+            }
+        }
+    }
+
     #[test]
     fn easy_legacy_pass_returns_first_three() {
         let mut controller = GameController::new_with_seed(Some(42), PlayerPosition::North);
@@ -1120,7 +1135,6 @@ mod tests {
 
     #[test]
     fn search_autoplay_records_think_limit() {
-        crate::telemetry::hard::reset();
         let mut controller = GameController::new_with_seed(Some(321), PlayerPosition::North);
         controller.set_bot_difficulty(BotDifficulty::SearchLookahead);
         let mut config = controller.think_config();
@@ -1139,19 +1153,16 @@ mod tests {
             controller.resolve_passes().unwrap();
         }
 
-        let _ = controller.autoplay_one(PlayerPosition::South);
-        let records = crate::telemetry::hard::sink().snapshot();
+        let (_, records) = crate::telemetry::hard::capture_for_test(|| {
+            let _ = controller.autoplay_one(PlayerPosition::South);
+        });
         assert!(!records.is_empty(), "expected telemetry record");
         let last = records.last().unwrap();
         assert_eq!(last.think_limit_ms, Some(5));
-        crate::telemetry::hard::reset();
     }
 
     #[test]
     fn autoplay_timeout_records_fallback() {
-        crate::telemetry::hard::reset();
-        let prev = std::env::var("MDH_TEST_FORCE_AUTOP_TIMEOUT").ok();
-
         let mut controller = GameController::new_with_seed(Some(98765), PlayerPosition::North);
         controller.set_bot_difficulty(BotDifficulty::SearchLookahead);
         let mut cfg = controller.think_config();
@@ -1173,33 +1184,27 @@ mod tests {
         let prep_stop = controller.expected_to_play().next();
         let prep_play = controller.autoplay_one(prep_stop);
         assert!(prep_play.is_some(), "setup autoplay should succeed");
-        crate::telemetry::hard::reset();
+        let _timeout_guard = EnvVarGuard::set("MDH_TEST_FORCE_AUTOP_TIMEOUT", "1");
 
-        unsafe { std::env::set_var("MDH_TEST_FORCE_AUTOP_TIMEOUT", "1") };
+        let seat_to_play = controller.expected_to_play();
+        let stop_seat = seat_to_play.next();
         assert!(
             super::test_force_autoplay_timeout(),
             "force timeout flag should be active"
         );
-
-        let seat_to_play = controller.expected_to_play();
-        let stop_seat = seat_to_play.next();
-        let result = controller.autoplay_one(stop_seat);
+        let (result, records) = crate::telemetry::hard::capture_for_test(|| {
+            controller.autoplay_one(stop_seat)
+        });
         assert!(result.is_some(), "expected autoplay move");
 
-        let records = crate::telemetry::hard::sink().snapshot();
-        assert!(records.len() >= 2, "expected at least pre and post records");
         assert!(!records.is_empty(), "expected telemetry records");
+        assert!(
+            records.len() >= 2,
+            "expected at least pre and post records"
+        );
         let last = records.last().unwrap();
         assert_eq!(last.timed_out, Some(true));
         assert_eq!(last.fallback.as_deref(), Some("first_legal"));
-        assert_eq!(last.timed_out, Some(true));
-
-        crate::telemetry::hard::reset();
-        if let Some(val) = prev {
-            unsafe { std::env::set_var("MDH_TEST_FORCE_AUTOP_TIMEOUT", val) };
-        } else {
-            unsafe { std::env::remove_var("MDH_TEST_FORCE_AUTOP_TIMEOUT") };
-        }
     }
 
     #[test]

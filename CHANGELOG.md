@@ -1,6 +1,12 @@
 Changelog
 
 All notable changes to this project will be documented here.
+2025-11-18 - Core Rules & AI Reliability
+- **Rules**: First-trick guard now lets a club-void follower shed hearts/QS only when no safe cards remain; regression tests cover both branches.
+- **Tracker**: Passing no longer removes cards from `UnseenTracker`, keeping unseen counts accurate until cards are actually played.
+- **Telemetry**: `TelemetrySink::push` enforces retention caps immediately, preventing unbounded memory use; added retention unit test.
+- **Controller/Core**: Added `RoundState::legal_cards`/`can_play_card` helpers and wired `GameController::legal_moves` to them, eliminating per-card round clones.
+- **Tests**: Reactivated Stage1 guard tests (`hard_guard_round_leader_saturated_blocks_feed`, `hard_flat_scores_uses_round_leader_penalties_gt0`) so planner nudges stay covered in CI.
 
 2025-11-16 — Critical Bug Fixes
 - **Search Deep**: Fixed recursion bug in search_opponent (was evaluating instead of recursing)
@@ -55,3 +61,4 @@ Phase 1 (2025-11) — Belief-State Sampling for Imperfect Information
 Notes:
 - Env‑gated toggles (tie‑break, probe/pruning) remain off by default to preserve goldens.
 - Use the evaluation helpers to reproduce CSVs/summary under `designs/tuning/`.
+

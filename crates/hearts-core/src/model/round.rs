@@ -218,11 +218,7 @@ impl RoundState {
         !hand.iter().any(|c| !c.suit.is_heart())
     }
 
-    pub fn play_card(
-        &mut self,
-        seat: PlayerPosition,
-        card: Card,
-    ) -> Result<PlayOutcome, PlayError> {
+    fn validate_play(&self, seat: PlayerPosition, card: Card) -> Result<(), PlayError> {
         if !matches!(self.phase, RoundPhase::Playing) {
             return Err(PlayError::NotInPlayPhase);
         }
@@ -231,7 +227,6 @@ impl RoundState {
             return Err(PlayError::CardNotInHand(card));
         }
 
-        // Determine expected seat
         let expected = self
             .current_trick
             .plays()
@@ -248,7 +243,6 @@ impl RoundState {
         let lead_suit = self.current_trick.lead_suit();
         let is_lead = lead_suit.is_none();
 
-        // First trick constraints
         if self.is_first_trick() {
             if is_lead {
                 let two_of_clubs = Card::new(Rank::Two, Suit::Clubs);
@@ -258,31 +252,45 @@ impl RoundState {
             } else if lead_suit == Some(Suit::Clubs) {
                 let hand = &self.hands[seat.index()];
                 let can_follow = hand.iter().any(|c| c.suit == Suit::Clubs);
-                if !can_follow {
-                    let is_qs = card.is_queen_of_spades();
-                    if card.suit.is_heart() || is_qs {
-                        let only_hearts = hand.iter().all(|c| c.suit.is_heart());
-                        if !(only_hearts && card.suit.is_heart()) {
-                            return Err(PlayError::NoPointsOnFirstTrick);
-                        }
+                if !can_follow && card.is_penalty() {
+                    let has_non_penalty_option = hand.iter().any(|c| !c.is_penalty());
+                    if has_non_penalty_option {
+                        return Err(PlayError::NoPointsOnFirstTrick);
                     }
                 }
             }
         }
 
-        // Follow suit enforcement
         if let Some(suit) = lead_suit {
             if card.suit != suit && self.hands[seat.index()].iter().any(|c| c.suit == suit) {
                 return Err(PlayError::MustFollowSuit(suit));
             }
-        } else {
-            // Leader constraints: cannot lead hearts before broken unless only hearts
-            if card.suit == Suit::Hearts && !self.legal_to_lead_hearts(seat) {
-                return Err(PlayError::HeartsNotBroken);
-            }
+        } else if card.suit == Suit::Hearts && !self.legal_to_lead_hearts(seat) {
+            return Err(PlayError::HeartsNotBroken);
         }
 
-        // Remove and record play
+        Ok(())
+    }
+
+    pub fn can_play_card(&self, seat: PlayerPosition, card: Card) -> bool {
+        self.validate_play(seat, card).is_ok()
+    }
+
+    pub fn legal_cards(&self, seat: PlayerPosition) -> Vec<Card> {
+        self.hands[seat.index()]
+            .iter()
+            .copied()
+            .filter(|&card| self.can_play_card(seat, card))
+            .collect()
+    }
+
+    pub fn play_card(
+        &mut self,
+        seat: PlayerPosition,
+        card: Card,
+    ) -> Result<PlayOutcome, PlayError> {
+        self.validate_play(seat, card)?;
+
         let _ = self.hands[seat.index()].remove(card);
         if card.suit == Suit::Hearts {
             self.hearts_broken = true;
@@ -331,6 +339,7 @@ mod tests {
     use super::{PassingDirection, PlayError, PlayOutcome, RoundPhase, RoundState};
     use crate::model::card::Card;
     use crate::model::deck::Deck;
+    use crate::model::hand::Hand;
     use crate::model::player::PlayerPosition;
     use crate::model::rank::Rank;
     use crate::model::suit::Suit;
@@ -511,6 +520,82 @@ mod tests {
         round
             .play_card(PlayerPosition::East, Card::new(Rank::Three, Suit::Clubs))
             .unwrap();
+    }
+
+    #[test]
+    fn legal_cards_matches_play_requirements() {
+        let deck = Deck::standard();
+        let round = RoundState::deal(&deck, PlayerPosition::North, PassingDirection::Hold);
+        let legal = round.legal_cards(PlayerPosition::North);
+        assert_eq!(legal.len(), 1);
+        assert_eq!(legal[0], Card::new(Rank::Two, Suit::Clubs));
+    }
+
+    #[test]
+    fn first_trick_allows_penalty_when_only_penalties_available() {
+        let hands = [
+            Hand::with_cards(vec![
+                Card::new(Rank::Two, Suit::Clubs),
+                Card::new(Rank::Three, Suit::Diamonds),
+            ]),
+            Hand::with_cards(vec![
+                Card::new(Rank::Queen, Suit::Spades),
+                Card::new(Rank::Four, Suit::Hearts),
+                Card::new(Rank::Five, Suit::Hearts),
+            ]),
+            Hand::with_cards(vec![Card::new(Rank::Six, Suit::Clubs)]),
+            Hand::with_cards(vec![Card::new(Rank::Seven, Suit::Clubs)]),
+        ];
+        let mut round = RoundState::from_hands(
+            hands,
+            PlayerPosition::North,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+        );
+        round
+            .play_card(PlayerPosition::North, Card::new(Rank::Two, Suit::Clubs))
+            .unwrap();
+        assert!(matches!(
+            round.play_card(PlayerPosition::East, Card::new(Rank::Queen, Suit::Spades)),
+            Ok(PlayOutcome::Played)
+        ));
+        assert!(matches!(
+            round.play_card(PlayerPosition::South, Card::new(Rank::Six, Suit::Clubs)),
+            Ok(PlayOutcome::Played)
+        ));
+    }
+
+    #[test]
+    fn first_trick_blocks_penalty_when_safe_card_available() {
+        let hands = [
+            Hand::with_cards(vec![
+                Card::new(Rank::Two, Suit::Clubs),
+                Card::new(Rank::Three, Suit::Diamonds),
+            ]),
+            Hand::with_cards(vec![
+                Card::new(Rank::Four, Suit::Hearts),
+                Card::new(Rank::Six, Suit::Diamonds),
+            ]),
+            Hand::with_cards(vec![Card::new(Rank::Six, Suit::Clubs)]),
+            Hand::with_cards(vec![Card::new(Rank::Seven, Suit::Clubs)]),
+        ];
+        let mut round = RoundState::from_hands(
+            hands,
+            PlayerPosition::North,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+        );
+        round
+            .play_card(PlayerPosition::North, Card::new(Rank::Two, Suit::Clubs))
+            .unwrap();
+        assert!(matches!(
+            round.play_card(PlayerPosition::East, Card::new(Rank::Four, Suit::Hearts)),
+            Err(PlayError::NoPointsOnFirstTrick)
+        ));
+        assert!(matches!(
+            round.play_card(PlayerPosition::East, Card::new(Rank::Six, Suit::Diamonds)),
+            Ok(PlayOutcome::Played)
+        ));
     }
 
     #[test]
