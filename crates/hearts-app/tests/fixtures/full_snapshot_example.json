@@ -1,0 +1,28 @@
+{
+  "seed": 1,
+  "round_number": 1,
+  "passing_direction": "Left",
+  "scores": [0, 0, 0, 0],
+  "round_starting_player": "North",
+  "passing_index": 0,
+  "round": {
+    "hands": [
+      ["2C", "3C", "4C"],
+      ["2D", "3D", "4D"],
+      ["2S", "3S", "4S"],
+      ["2H", "3H", "4H"]
+    ],
+    "current_trick": {
+      "leader": "North",
+      "plays": []
+    },
+    "trick_history": [],
+    "phase": {
+      "Passing": {
+        "submissions": [null, null, null, null]
+      }
+    },
+    "hearts_broken": false,
+    "starting_player": "North"
+  }
+}

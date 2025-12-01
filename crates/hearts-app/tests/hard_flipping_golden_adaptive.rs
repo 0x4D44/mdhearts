@@ -66,7 +66,7 @@ fn west_seed_1141_expected_tops_under_adaptive_and_sampling() {
         "Normal top changed; update golden if intentional"
     );
     let expected = [
-        Card::new(Rank::Five, Suit::Diamonds),
+        Card::new(Rank::Four, Suit::Diamonds),
         Card::new(Rank::Ace, Suit::Diamonds),
     ];
     assert!(

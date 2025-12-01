@@ -638,7 +638,10 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 .ok_or(CliError::MissingArgument(
                     "--export-snapshot <path> [seed] [seat]",
                 ))?;
-            let seed = args.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or_else(rand::random);
             let seat = args
                 .next()
                 .map(|s| parse_seat(&s))
@@ -647,12 +650,40 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             export_snapshot(path, seed, seat)?;
             Ok(CliOutcome::Handled)
         }
+        "--export-seed" => {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .ok_or(CliError::MissingArgument(
+                    "--export-seed <path> [seed] [seat]",
+                ))?;
+            let seed = args
+                .next()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or_else(rand::random);
+            let seat = args
+                .next()
+                .map(|s| parse_seat(&s))
+                .transpose()?
+                .unwrap_or(PlayerPosition::North);
+            export_seed_snapshot(path, seed, seat)?;
+            Ok(CliOutcome::Handled)
+        }
         "--import-snapshot" => {
             let path = args
                 .next()
                 .map(PathBuf::from)
-                .ok_or(CliError::MissingArgument("--import-snapshot <path>"))?;
-            import_snapshot(path)?;
+                .ok_or(CliError::MissingArgument(
+                    "--import-snapshot <path> [--legacy-ok]",
+                ))?;
+            let mut legacy_ok = false;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--legacy-ok" => legacy_ok = true,
+                    other => return Err(CliError::UnknownCommand(other.to_string())),
+                }
+            }
+            import_snapshot(path, legacy_ok)?;
             Ok(CliOutcome::Handled)
         }
         "--explain-snapshot" => {
@@ -668,7 +699,11 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             parse_hard_cli_flags(&mut args)?;
             let json = fs::read_to_string(&path)?;
             let snapshot = MatchSnapshot::from_json(&json)?;
-            let match_state = snapshot.restore();
+            let match_state = if snapshot.round.is_some() {
+                snapshot.clone().restore_full()
+            } else {
+                snapshot.clone().restore()
+            };
             let controller = crate::controller::GameController::new_from_match_state(match_state);
             let legal = controller.legal_moves(seat);
             if legal.is_empty() {
@@ -1663,7 +1698,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             Ok(CliOutcome::Handled)
         }
         "--help" | "-h" => {
-            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --import-snapshot <path>\n  --show-weights\n  --explain-once <seed> <seat> [difficulty] [Hard flags]\n  --explain-batch <seat> <seed_start> <count> [difficulty] [Hard flags]\n  --explain-snapshot <path> <seat> [Hard flags]\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat> [Hard flags]\n  --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree] [Hard flags]\n  --explain-json <seed> <seat> <path> [difficulty] [Hard flags]\n  --bench-check <difficulty> <seat> <seed_start> <count> [Hard flags]\n  --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]\n  --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [--stats] [Hard flags]\n  --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [--stats] [Hard flags]\n\nHard flags (can follow many commands):\n  --hard-deterministic             Enable deterministic mode (step-capped)\n  --hard-steps <n>                 Deterministic step cap for Hard\n  --hard-phaseb-topk <k>           Top-K candidates for continuation scoring\n  --hard-branch-limit <n>          Candidate branch limit (base ordering)\n  --hard-next-branch-limit <n>     Next-trick probe branch limit\n  --hard-time-cap-ms <ms>          Wall-clock cap (non-deterministic mode)\n  --hard-cutoff <margin>           Early cutoff margin for choose()\n  --hard-cont-boost-gap <n>        Gap threshold to boost continuation in near ties\n  --hard-cont-boost-factor <n>     Multiplier applied to continuation in near ties\n  --hard-det | --hard-det-enable   Enable determinization sampling (env-gated)\n  --hard-det-k <n>                 Number of determinization samples (K)\n  --hard-det-probe                 Widen next-trick probe under determinization\n  --hard-verbose                   Print verbose continuation parts (requires MDH_DEBUG_LOGS=1)\n  --help";
+            let help = "Available commands:\n  --export-snapshot <path> [seed] [seat]\n  --export-seed <path> [seed] [seat]\n  --import-snapshot <path> [--legacy-ok]\n  --show-weights\n  --explain-once <seed> <seat> [difficulty] [Hard flags]\n  --explain-batch <seat> <seed_start> <count> [difficulty] [Hard flags]\n  --explain-snapshot <path> <seat> [Hard flags]\n  --explain-pass-once <seed> <seat>\n  --explain-pass-batch <seat> <seed_start> <count>\n  --compare-once <seed> <seat> [Hard flags]\n  --compare-batch <seat> <seed_start> <count> [--out <path>] [--only-disagree] [Hard flags]\n  --explain-json <seed> <seat> <path> [difficulty] [Hard flags]\n  --bench-check <difficulty> <seat> <seed_start> <count> [Hard flags]\n  --match-batch <seat> <seed_start> <count> [difficultyA difficultyB] [--out <path>] [Hard flags]\n  --match-mixed <seat> <seed_start> <count> <mix> [--out <path>] [--stats] [Hard flags]\n  --match-mixed-file <seat> <mix> --seeds-file <path> [--out <path>] [--stats] [Hard flags]\n\nHard flags (can follow many commands):\n  --hard-deterministic             Enable deterministic mode (step-capped)\n  --hard-steps <n>                 Deterministic step cap for Hard\n  --hard-phaseb-topk <k>           Top-K candidates for continuation scoring\n  --hard-branch-limit <n>          Candidate branch limit (base ordering)\n  --hard-next-branch-limit <n>     Next-trick probe branch limit\n  --hard-time-cap-ms <ms>          Wall-clock cap (non-deterministic mode)\n  --hard-cutoff <margin>           Early cutoff margin for choose()\n  --hard-cont-boost-gap <n>        Gap threshold to boost continuation in near ties\n  --hard-cont-boost-factor <n>     Multiplier applied to continuation in near ties\n  --hard-det | --hard-det-enable   Enable determinization sampling (env-gated)\n  --hard-det-k <n>                 Number of determinization samples (K)\n  --hard-det-probe                 Widen next-trick probe under determinization\n  --hard-verbose                   Print verbose continuation parts (requires MDH_DEBUG_LOGS=1)\n  --help";
             println!("{help}");
             show_info_box("mdhearts CLI", help);
             Ok(CliOutcome::Handled)
@@ -1680,14 +1715,14 @@ fn debug_logs_enabled() -> bool {
 
 fn export_snapshot(path: PathBuf, seed: u64, seat: PlayerPosition) -> Result<(), CliError> {
     let state = MatchState::with_seed(seat, seed);
-    let json = MatchSnapshot::to_json(&state)?;
+    let json = MatchSnapshot::to_json_full(&state)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(&path, json)?;
 
     let message = format!(
-        "Snapshot saved to {}\nSeed: {}\nSeat: {:?}",
+        "Snapshot saved to {}\nSeed: {}\nSeat: {:?}\nFormat: full-state",
         path.display(),
         seed,
         seat
@@ -1697,7 +1732,30 @@ fn export_snapshot(path: PathBuf, seed: u64, seat: PlayerPosition) -> Result<(),
     Ok(())
 }
 
-fn import_snapshot(path: PathBuf) -> Result<(), CliError> {
+fn export_seed_snapshot(
+    path: PathBuf,
+    seed: u64,
+    seat: PlayerPosition,
+) -> Result<(), CliError> {
+    let state = MatchState::with_seed(seat, seed);
+    let json = MatchSnapshot::to_json(&state)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, json)?;
+
+    let message = format!(
+        "Seed snapshot saved to {}\nSeed: {}\nSeat: {:?}\nFormat: legacy (seed-only)",
+        path.display(),
+        seed,
+        seat
+    );
+    println!("{message}");
+    show_info_box("Snapshot Exported", &message);
+    Ok(())
+}
+
+fn import_snapshot(path: PathBuf, legacy_ok: bool) -> Result<(), CliError> {
     if !path.exists() {
         return Err(CliError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -1707,13 +1765,25 @@ fn import_snapshot(path: PathBuf) -> Result<(), CliError> {
 
     let json = fs::read_to_string(&path)?;
     let snapshot = MatchSnapshot::from_json(&json)?;
-    let restored = snapshot.clone().restore();
+    let is_legacy = snapshot.round.is_none();
+    if is_legacy && !legacy_ok {
+        return Err(CliError::InvalidValue {
+            flag: "--import-snapshot".into(),
+            value: "legacy snapshot (missing round data); rerun with --legacy-ok or re-export using --export-snapshot".into(),
+        });
+    }
+    let restored = if is_legacy {
+        snapshot.clone().restore()
+    } else {
+        snapshot.clone().restore_full()
+    };
     let message = format!(
-        "Snapshot loaded from {}\nSeed: {}\nPassing: {}\nScores: {:?}",
+        "Snapshot loaded from {}\nSeed: {}\nPassing: {}\nScores: {:?}\nFormat: {}",
         path.display(),
         restored.seed(),
         restored.passing_direction().as_str(),
-        restored.scores().standings()
+        restored.scores().standings(),
+        if is_legacy { "legacy" } else { "full-state" }
     );
     println!("{message}");
     show_info_box("Snapshot Loaded", &message);
@@ -2022,7 +2092,13 @@ fn simulate_one_round(
             break;
         }
         let to_play = controller.expected_to_play();
-        let _ = controller.autoplay_one(to_play.next());
+        if !matches!(
+            controller.autoplay_one_with_status(to_play.next()),
+            crate::controller::AutoplayOutcome::Played(_, _)
+        ) {
+            // No progress (timeout or no legal); bail out to avoid hang.
+            break;
+        }
     }
     let totals = controller.penalties_this_round();
     Ok(totals[seat.index()])
@@ -2052,7 +2128,12 @@ fn simulate_one_round_mixed(
         }
         let to_play = controller.expected_to_play();
         controller.set_bot_difficulty(diffs[to_play.index()]);
-        let _ = controller.autoplay_one(to_play.next());
+        if !matches!(
+            controller.autoplay_one_with_status(to_play.next()),
+            crate::controller::AutoplayOutcome::Played(_, _)
+        ) {
+            break;
+        }
     }
     let totals = controller.penalties_this_round();
     Ok(totals[seat.index()])

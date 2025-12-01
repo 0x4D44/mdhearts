@@ -292,7 +292,7 @@ impl RoundState {
         self.validate_play(seat, card)?;
 
         let _ = self.hands[seat.index()].remove(card);
-        if card.suit == Suit::Hearts {
+        if card.is_penalty() {
             self.hearts_broken = true;
         }
         self.current_trick
@@ -629,5 +629,38 @@ mod tests {
                 Err(PlayError::HeartsNotBroken)
             ));
         }
+    }
+
+    #[test]
+    fn queen_of_spades_breaks_hearts() {
+        // Construct a minimal round where QS is sloughed on the first trick
+        // (East has no clubs, only the queen of spades).
+        let hands = [
+            Hand::with_cards(vec![Card::new(Rank::Two, Suit::Clubs)]), // North leads 2C
+            Hand::with_cards(vec![Card::new(Rank::Queen, Suit::Spades)]), // East can only play QS
+            Hand::with_cards(vec![Card::new(Rank::Three, Suit::Clubs)]), // South follows
+            Hand::with_cards(vec![Card::new(Rank::Four, Suit::Clubs)]), // West follows
+        ];
+        let mut round = RoundState::from_hands(
+            hands,
+            PlayerPosition::North,
+            PassingDirection::Hold,
+            RoundPhase::Playing,
+        );
+
+        round
+            .play_card(PlayerPosition::North, Card::new(Rank::Two, Suit::Clubs))
+            .unwrap();
+        round
+            .play_card(PlayerPosition::East, Card::new(Rank::Queen, Suit::Spades))
+            .unwrap();
+        assert!(round.hearts_broken(), "QS should break hearts");
+        round
+            .play_card(PlayerPosition::South, Card::new(Rank::Three, Suit::Clubs))
+            .unwrap();
+        round
+            .play_card(PlayerPosition::West, Card::new(Rank::Four, Suit::Clubs))
+            .unwrap();
+        assert!(round.hearts_broken());
     }
 }
