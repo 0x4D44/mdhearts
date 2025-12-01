@@ -3,7 +3,7 @@
 // killer moves, aspiration windows, and time-bound search.
 
 use hearts_app::bot::{BotDifficulty, PlayPlannerHard};
-use hearts_app::controller::GameController;
+use hearts_app::controller::{AutoplayOutcome, GameController};
 use hearts_core::model::player::PlayerPosition;
 use std::sync::{Mutex, OnceLock};
 
@@ -40,7 +40,10 @@ fn search_deep_produces_valid_move() {
     }
 
     while controller.expected_to_play() != seat {
-        if controller.autoplay_one(seat).is_none() {
+        if !matches!(
+            controller.autoplay_one_with_status(seat),
+            AutoplayOutcome::Played(_, _)
+        ) {
             break;
         }
     }

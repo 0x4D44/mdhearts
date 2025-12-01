@@ -100,6 +100,10 @@ impl MatchState {
         Self::passing_sequence()[self.passing_index % Self::passing_sequence().len()]
     }
 
+    pub fn passing_index(&self) -> usize {
+        self.passing_index
+    }
+
     pub fn round_penalties(&self) -> [u8; 4] {
         self.current_round.penalty_totals()
     }
@@ -121,6 +125,14 @@ impl MatchState {
         let deck = Deck::shuffled(&mut self.rng);
         self.current_round = RoundState::deal(&deck, next_starting_player, next_passing);
         None
+    }
+
+    pub fn set_round(&mut self, round: RoundState) {
+        self.current_round = round;
+    }
+
+    pub fn set_passing_index(&mut self, index: usize) {
+        self.passing_index = index;
     }
 
     pub fn is_round_ready_for_scoring(&self) -> bool {

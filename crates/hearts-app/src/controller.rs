@@ -174,6 +174,14 @@ pub struct BotThinkResult {
     pub timed_out: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoplayOutcome {
+    Played(PlayerPosition, Card),
+    SkippedTimeout,
+    NoLegal,
+    NotExpected,
+}
+
 pub struct GameController {
     match_state: MatchState,
     last_trick: Option<TrickSummary>,
@@ -390,7 +398,7 @@ impl GameController {
         let passing = self.match_state.passing_direction().as_str();
         let leader = round.current_trick().leader();
         format!(
-            "Round {} • Passing: {} • Leader: {}",
+            "Round {} | Passing: {} | Leader: {}",
             self.match_state.round_number(),
             passing,
             leader
@@ -839,17 +847,20 @@ impl GameController {
     }
 
     // Play a single AI move (if it's not stop_seat's turn). Returns the (seat, card) played.
-    pub fn autoplay_one(&mut self, stop_seat: PlayerPosition) -> Option<(PlayerPosition, Card)> {
+    pub fn autoplay_one_with_status(
+        &mut self,
+        stop_seat: PlayerPosition,
+    ) -> AutoplayOutcome {
         if self.in_passing_phase() {
-            return None;
+            return AutoplayOutcome::NotExpected;
         }
         let seat = self.expected_to_play();
         if seat == stop_seat {
-            return None;
+            return AutoplayOutcome::NotExpected;
         }
         let legal = self.legal_moves(seat);
         if legal.is_empty() {
-            return None;
+            return AutoplayOutcome::NoLegal;
         }
         let enforce_two = {
             let round = self.match_state.round();
@@ -973,9 +984,18 @@ impl GameController {
         if let Some(card) = card_to_play {
             Self::dbg(&format!("mdhearts: AI {:?} plays {}", seat, card));
             let _ = self.play(seat, card);
-            Some((seat, card))
+            AutoplayOutcome::Played(seat, card)
+        } else if timed_out {
+            AutoplayOutcome::SkippedTimeout
         } else {
-            None
+            AutoplayOutcome::NoLegal
+        }
+    }
+
+    pub fn autoplay_one(&mut self, stop_seat: PlayerPosition) -> Option<(PlayerPosition, Card)> {
+        match self.autoplay_one_with_status(stop_seat) {
+            AutoplayOutcome::Played(seat, card) => Some((seat, card)),
+            _ => None,
         }
     }
     pub fn hand(&self, seat: PlayerPosition) -> Vec<Card> {
@@ -1573,3 +1593,5 @@ mod tests {
     }
     */
 }
+
+

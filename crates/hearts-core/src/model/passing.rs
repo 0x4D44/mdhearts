@@ -89,8 +89,23 @@ impl PassingState {
         }
     }
 
+    /// Construct a passing state with pre-filled submissions (used for snapshot restore).
+    pub fn with_submissions(
+        direction: PassingDirection,
+        submissions: [Option<[Card; 3]>; 4],
+    ) -> Self {
+        Self {
+            direction,
+            submissions,
+        }
+    }
+
     pub fn direction(&self) -> PassingDirection {
         self.direction
+    }
+
+    pub fn submissions(&self) -> &[Option<[Card; 3]>; 4] {
+        &self.submissions
     }
 
     pub fn submit(
