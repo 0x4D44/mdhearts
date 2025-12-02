@@ -71,7 +71,14 @@ fn hard_vs_normal_disagree_on_seed_1141_west() {
         rank: Rank::Two,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -90,7 +97,14 @@ fn hard_vs_normal_disagree_on_seed_1219_west() {
         rank: Rank::Three,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -109,7 +123,14 @@ fn hard_vs_normal_disagree_on_seed_1097_west() {
         rank: Rank::Two,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -128,7 +149,14 @@ fn hard_vs_normal_disagree_on_seed_1145_north() {
         rank: Rank::Four,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -146,7 +174,14 @@ fn hard_vs_normal_disagree_on_seed_1241_east() {
         rank: Rank::Nine,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -165,7 +200,14 @@ fn hard_vs_normal_disagree_on_seed_1162_north() {
         rank: Rank::Three,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -184,7 +226,14 @@ fn hard_vs_normal_disagree_on_seed_1159_north() {
         rank: Rank::Two,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -203,7 +252,14 @@ fn hard_vs_normal_disagree_on_seed_1363_east() {
         rank: Rank::Three,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -221,7 +277,14 @@ fn hard_vs_normal_disagree_on_seed_1367_east() {
         rank: Rank::Four,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }
 
 #[test]
@@ -239,5 +302,12 @@ fn hard_vs_normal_disagree_on_seed_1195_north() {
         rank: Rank::Two,
         suit: Suit::Diamonds,
     };
-    assert_golden(seed, seat, normal_top, normal_expected, hard_top, hard_expected);
+    assert_golden(
+        seed,
+        seat,
+        normal_top,
+        normal_expected,
+        hard_top,
+        hard_expected,
+    );
 }

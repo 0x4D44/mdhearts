@@ -239,10 +239,8 @@ impl EndgameExport {
             for seat in PlayerPosition::LOOP.iter().copied() {
                 if let Some(flags) = voids.get(seat_key(seat)) {
                     for (idx, flag) in flags.iter().copied().enumerate() {
-                        if flag {
-                            if let Some(suit) = Suit::from_index(idx) {
-                                tracker.note_void(seat, suit);
-                            }
+                        if flag && let Some(suit) = Suit::from_index(idx) {
+                            tracker.note_void(seat, suit);
                         }
                     }
                 }

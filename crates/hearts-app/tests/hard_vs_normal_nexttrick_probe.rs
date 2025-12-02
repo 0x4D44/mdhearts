@@ -114,11 +114,8 @@ fn hard_prefers_lead_setting_up_feed_nexttrick() {
 
     let _norm = PlayPlanner::explain_candidates(&legal, &ctx_norm);
     let hard = PlayPlannerHard::explain_candidates(&legal, &ctx_hard);
-    let score_of = |list: &[(Card, i32)], c: Card| {
-        list.iter()
-            .find(|(cc, _)| *cc == c)
-            .map(|(_, s)| *s)
-    };
+    let score_of =
+        |list: &[(Card, i32)], c: Card| list.iter().find(|(cc, _)| *cc == c).map(|(_, s)| *s);
     let _guard = std::env::var_os("LLVM_PROFILE_FILE").is_some();
     let s2_hard = match score_of(&hard, Card::new(Rank::Two, Suit::Spades)) {
         Some(val) => val,

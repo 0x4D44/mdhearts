@@ -59,7 +59,7 @@ fn avoid_passing_penalties_to_leader() {
     let round = build_round(seat, &hand, passing);
     // East is WINNING (lowest score in Hearts = best position)
     // In Hearts: low score = good, high score = bad
-    let scores = build_scores([30, 20, 40, 35]);  // East has 20 = winning
+    let scores = build_scores([30, 20, 40, 35]); // East has 20 = winning
     let target = passing.target(seat);
     println!("passing target: {:?}", target);
     let mut tracker = UnseenTracker::new();

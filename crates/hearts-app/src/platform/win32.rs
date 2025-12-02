@@ -15,6 +15,7 @@ use crate::bot::{DecisionLimit, PlayPlanner, PlayPlannerHard};
 use crate::controller::{
     BotThinkRequest, BotThinkResult, GameController, ThinkConfig, TimeoutFallback,
 };
+use crate::debug::debug_enabled;
 use hearts_core::model::card::Card as ModelCard;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
@@ -429,10 +430,9 @@ pub fn run() -> Result<()> {
     // Ensure difficulty radiomarks reflect persisted/default state now that menu exists
     let initial_diff = load_bot_difficulty().unwrap_or(crate::bot::BotDifficulty::EasyLegacy);
     update_difficulty_menu(hwnd, initial_diff);
-    let limit_cfg = load_think_limit().map_or(ThinkConfig::default(), |limit| {
-        let mut cfg = ThinkConfig::default();
-        cfg.max_duration = limit;
-        cfg
+    let limit_cfg = load_think_limit().map_or(ThinkConfig::default(), |limit| ThinkConfig {
+        max_duration: limit,
+        ..Default::default()
     });
     update_think_limit_menu(hwnd, limit_cfg);
     restore_window_placement(hwnd);
@@ -682,12 +682,14 @@ fn spawn_bot_worker(
             seat,
             snapshot.tracker(),
             difficulty,
-            think_limit_ms,
-            elapsed_ms,
-            timed_out,
-            fallback_label,
-            search_stats,
-            controller_bias_delta,
+            crate::telemetry::PostDecisionData {
+                think_limit_ms,
+                elapsed_ms,
+                timed_out,
+                fallback: fallback_label,
+                search_stats,
+                controller_bias_delta,
+            },
         );
         let result = BotThinkResult {
             seat,
@@ -1053,18 +1055,18 @@ impl AppState {
     }
 
     fn status_header_text(&mut self) -> String {
-        if self.controller.match_over() {
-            if let Some(winner) = self.controller.match_winner() {
-                let seat = seat_name(winner);
-                let scores = self.controller.standings();
-                return format!(
-                    "{seat} wins the match! Final scores N:{} E:{} S:{} W:{} — choose Game → New to play again.",
-                    scores[PlayerPosition::North.index()],
-                    scores[PlayerPosition::East.index()],
-                    scores[PlayerPosition::South.index()],
-                    scores[PlayerPosition::West.index()]
-                );
-            }
+        if self.controller.match_over()
+            && let Some(winner) = self.controller.match_winner()
+        {
+            let seat = seat_name(winner);
+            let scores = self.controller.standings();
+            return format!(
+                "{seat} wins the match! Final scores N:{} E:{} S:{} W:{} — choose Game → New to play again.",
+                scores[PlayerPosition::North.index()],
+                scores[PlayerPosition::East.index()],
+                scores[PlayerPosition::South.index()],
+                scores[PlayerPosition::West.index()]
+            );
         }
         let base = self.controller.status_text();
         if let Some(thinking) = self.thinking.as_ref() {
@@ -1075,26 +1077,27 @@ impl AppState {
             } else {
                 format!("{seat} is thinking... {}s ({base})", elapsed)
             };
-            if let Some(banner) = self.timeout_banner.as_mut() {
-                if banner.seat == thinking.seat && !banner.status_shown {
-                    text.push_str(" - timed out, applying fallback");
-                    banner.status_shown = true;
-                }
+            if let Some(banner) = self.timeout_banner.as_mut()
+                && banner.seat == thinking.seat
+                && !banner.status_shown
+            {
+                text.push_str(" - timed out, applying fallback");
+                banner.status_shown = true;
             }
             text
         } else {
             let mut text = base;
-            if let Some(banner) = self.timeout_banner.as_mut() {
-                if !banner.status_shown {
-                    let seat = seat_name(banner.seat);
-                    let extra = fallback_description(banner.fallback);
-                    if text.is_empty() {
-                        text = format!("{seat} timeout: {extra}");
-                    } else {
-                        text.push_str(&format!(" - {seat} timeout: {extra}"));
-                    }
-                    banner.status_shown = true;
+            if let Some(banner) = self.timeout_banner.as_mut()
+                && !banner.status_shown
+            {
+                let seat = seat_name(banner.seat);
+                let extra = fallback_description(banner.fallback);
+                if text.is_empty() {
+                    text = format!("{seat} timeout: {extra}");
+                } else {
+                    text.push_str(&format!(" - {seat} timeout: {extra}"));
                 }
+                banner.status_shown = true;
             }
             text
         }
@@ -1154,11 +1157,12 @@ impl AppState {
             } else {
                 format!("{seat} is thinking... {elapsed}s so far.")
             };
-            if let Some(banner) = self.timeout_banner.as_mut() {
-                if banner.seat == thinking.seat && !banner.hint_shown {
-                    text.push_str(" Using timeout fallback.");
-                    banner.hint_shown = true;
-                }
+            if let Some(banner) = self.timeout_banner.as_mut()
+                && banner.seat == thinking.seat
+                && !banner.hint_shown
+            {
+                text.push_str(" Using timeout fallback.");
+                banner.hint_shown = true;
             }
             Cow::Owned(text)
         } else if let Some(banner) = self.timeout_banner.as_mut() {
@@ -1175,12 +1179,11 @@ impl AppState {
     }
 
     fn maybe_clear_timeout_banner(&mut self) {
-        if let Some(banner) = self.timeout_banner.as_ref() {
-            if (banner.status_shown && banner.hint_shown)
-                || banner.triggered_at.elapsed() > Duration::from_secs(6)
-            {
-                self.timeout_banner = None;
-            }
+        if let Some(banner) = self.timeout_banner.as_ref()
+            && ((banner.status_shown && banner.hint_shown)
+                || banner.triggered_at.elapsed() > Duration::from_secs(6))
+        {
+            self.timeout_banner = None;
         }
     }
 
@@ -1810,22 +1813,21 @@ impl AppState {
                     radiusY: radius,
                 };
                 let mut drew_face = false;
-                if let Some(ref bmp) = atlas_bmp_opt {
-                    if let Some(card) = south_hand.get(i).copied() {
-                        if let Some(src) = self.atlas.src_rect_for(card) {
-                            let src = inset_rect(src, 0.5, 0.5);
-                            draw_bitmap_with_round_corners(
-                                &factory,
-                                &rt,
-                                &rounded,
-                                bmp,
-                                Some(&src),
-                                1.0,
-                                D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-                            )?;
-                            drew_face = true;
-                        }
-                    }
+                if let Some(ref bmp) = atlas_bmp_opt
+                    && let Some(card) = south_hand.get(i).copied()
+                    && let Some(src) = self.atlas.src_rect_for(card)
+                {
+                    let src = inset_rect(src, 0.5, 0.5);
+                    draw_bitmap_with_round_corners(
+                        &factory,
+                        &rt,
+                        &rounded,
+                        bmp,
+                        Some(&src),
+                        1.0,
+                        D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                    )?;
+                    drew_face = true;
                 }
                 if !drew_face {
                     let placeholder = rt.CreateSolidColorBrush(
@@ -1856,17 +1858,18 @@ impl AppState {
             // draw the prior trick's cards so they don't pop away.
             if let Some(ref bmp) = atlas_bmp_opt {
                 let mut plays = self.controller.trick_plays();
-                if plays.is_empty() && self.collect.is_none() {
-                    if let Some(summary) = self.controller.last_trick() {
-                        plays = summary.plays.clone();
-                    }
+                if plays.is_empty()
+                    && self.collect.is_none()
+                    && let Some(summary) = self.controller.last_trick()
+                {
+                    plays = summary.plays.clone();
                 }
                 let leading_so_far = current_trick_leader_so_far(&plays);
                 for (pos, card) in plays {
-                    if let Some(anim) = &self.anim {
-                        if anim.seat == pos {
-                            continue;
-                        }
+                    if let Some(anim) = &self.anim
+                        && anim.seat == pos
+                    {
+                        continue;
                     }
                     if let Some(src) = self.atlas.src_rect_for(card) {
                         let dest = snap_rect(compute_trick_rect_for(layout, pos));
@@ -2001,35 +2004,35 @@ impl AppState {
                                 let elapsed = (now - pass.start).as_millis() as u64;
                                 let moved = elapsed.saturating_sub(s.delay_ms);
                                 let u = (moved as f32 / pass.out_dur_ms as f32).clamp(0.0, 1.0);
-                                if let Some(card) = s.card {
-                                    if let Some(src) = self.atlas.src_rect_for(card) {
-                                        if u <= 0.0 {
-                                            continue;
-                                        }
-                                        let mut rect = lerp_rect(s.from, s.to, ease_out(u));
-                                        rect.left += s.jx;
-                                        rect.right += s.jx;
-                                        rect.top += s.jy;
-                                        rect.bottom += s.jy;
-                                        let dest = snap_rect(rect);
-                                        let radius = card_corner_radius(&dest);
-                                        let rounded = D2D1_ROUNDED_RECT {
-                                            rect: dest,
-                                            radiusX: radius,
-                                            radiusY: radius,
-                                        };
-                                        let src = inset_rect(src, 0.5, 0.5);
-                                        draw_bitmap_with_round_corners(
-                                            &factory,
-                                            &rt,
-                                            &rounded,
-                                            bmp,
-                                            Some(&src),
-                                            1.0,
-                                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                                        )?;
-                                        rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
+                                if let Some(card) = s.card
+                                    && let Some(src) = self.atlas.src_rect_for(card)
+                                {
+                                    if u <= 0.0 {
+                                        continue;
                                     }
+                                    let mut rect = lerp_rect(s.from, s.to, ease_out(u));
+                                    rect.left += s.jx;
+                                    rect.right += s.jx;
+                                    rect.top += s.jy;
+                                    rect.bottom += s.jy;
+                                    let dest = snap_rect(rect);
+                                    let radius = card_corner_radius(&dest);
+                                    let rounded = D2D1_ROUNDED_RECT {
+                                        rect: dest,
+                                        radiusX: radius,
+                                        radiusY: radius,
+                                    };
+                                    let src = inset_rect(src, 0.5, 0.5);
+                                    draw_bitmap_with_round_corners(
+                                        &factory,
+                                        &rt,
+                                        &rounded,
+                                        bmp,
+                                        Some(&src),
+                                        1.0,
+                                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                    )?;
+                                    rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
                                 }
                             }
                         }
@@ -2111,19 +2114,19 @@ impl AppState {
                                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
                                     )?;
                                 }
-                                if let (Some(bmp), Some(card)) = (atlas_bmp_opt.as_ref(), s.card) {
-                                    if let Some(src) = self.atlas.src_rect_for(card) {
-                                        let src = inset_rect(src, 0.5, 0.5);
-                                        draw_bitmap_with_round_corners(
-                                            &factory,
-                                            &rt,
-                                            &rounded,
-                                            bmp,
-                                            Some(&src),
-                                            t.max(0.2),
-                                            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                                        )?;
-                                    }
+                                if let (Some(bmp), Some(card)) = (atlas_bmp_opt.as_ref(), s.card)
+                                    && let Some(src) = self.atlas.src_rect_for(card)
+                                {
+                                    let src = inset_rect(src, 0.5, 0.5);
+                                    draw_bitmap_with_round_corners(
+                                        &factory,
+                                        &rt,
+                                        &rounded,
+                                        bmp,
+                                        Some(&src),
+                                        t.max(0.2),
+                                        D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                    )?;
                                 }
                             }
                             rt.DrawRoundedRectangle(&rounded, &border, 2.0, None);
@@ -2546,12 +2549,12 @@ fn init_menu_and_accels(hwnd: HWND) -> HACCEL {
 fn update_difficulty_menu(hwnd: HWND, difficulty: crate::bot::BotDifficulty) {
     unsafe {
         let top = GetMenu(hwnd);
-        if top.0 != std::ptr::null_mut() {
+        if !top.0.is_null() {
             // "Game" is the first top-level menu; "Difficulty" is the 3rd item under it (index 2)
             let game = GetSubMenu(top, 0);
-            if game.0 != std::ptr::null_mut() {
+            if !game.0.is_null() {
                 let diff_menu = GetSubMenu(game, 2);
-                if diff_menu.0 != std::ptr::null_mut() {
+                if !diff_menu.0.is_null() {
                     let selected = match difficulty {
                         crate::bot::BotDifficulty::EasyLegacy => ID_OPTIONS_DIFFICULTY_EASY,
                         crate::bot::BotDifficulty::NormalHeuristic => ID_OPTIONS_DIFFICULTY_NORMAL,
@@ -2575,12 +2578,12 @@ fn update_difficulty_menu(hwnd: HWND, difficulty: crate::bot::BotDifficulty) {
 fn update_think_limit_menu(hwnd: HWND, config: ThinkConfig) {
     unsafe {
         let top = GetMenu(hwnd);
-        if top.0 != std::ptr::null_mut() {
+        if !top.0.is_null() {
             // "Game" is the first top-level menu; "Thinking Limit" is the 4th item under it (index 3)
             let game = GetSubMenu(top, 0);
-            if game.0 != std::ptr::null_mut() {
+            if !game.0.is_null() {
                 let think_menu = GetSubMenu(game, 3);
-                if think_menu.0 != std::ptr::null_mut() {
+                if !think_menu.0.is_null() {
                     let secs = if config.max_duration.is_zero() {
                         0
                     } else {
@@ -2749,15 +2752,14 @@ unsafe extern "system" fn window_proc(
                 for i in (0..rects.len()).rev() {
                     let mut r = rects[i];
                     // During passing, selected cards are lifted; reflect that in hit testing
-                    if state.controller.in_passing_phase() {
-                        if let Some(card) = south_hand.get(i) {
-                            if state.passing_select.iter().any(|c| c == card) {
-                                let h = r.bottom - r.top;
-                                let dy = h * 0.18;
-                                r.top -= dy;
-                                r.bottom -= dy;
-                            }
-                        }
+                    if state.controller.in_passing_phase()
+                        && let Some(card) = south_hand.get(i)
+                        && state.passing_select.iter().any(|c| c == card)
+                    {
+                        let h = r.bottom - r.top;
+                        let dy = h * 0.18;
+                        r.top -= dy;
+                        r.bottom -= dy;
                     }
                     if xf >= r.left && xf <= r.right && yf >= r.top && yf <= r.bottom {
                         if state.controller.in_passing_phase() {
@@ -2775,23 +2777,23 @@ unsafe extern "system" fn window_proc(
                             }
                         } else {
                             let legal = state.controller.legal_moves_set(PlayerPosition::South);
-                            if let Some(card) = south_hand.get(i).copied() {
-                                if legal.contains(&card) {
-                                    debug_out("mdhearts: ", &format!("South plays {}", card));
-                                    let from = r;
-                                    let to = compute_trick_rect_for(layout, PlayerPosition::South);
-                                    let _ = state.controller.play(PlayerPosition::South, card);
-                                    state.anim = Some(PlayAnim {
-                                        seat: PlayerPosition::South,
-                                        card,
-                                        from,
-                                        to,
-                                        start: std::time::Instant::now(),
-                                        dur_ms: 260,
-                                    });
-                                    unsafe {
-                                        let _ = InvalidateRect(Some(hwnd), None, true);
-                                    }
+                            if let Some(card) = south_hand.get(i).copied()
+                                && legal.contains(&card)
+                            {
+                                debug_out("mdhearts: ", &format!("South plays {}", card));
+                                let from = r;
+                                let to = compute_trick_rect_for(layout, PlayerPosition::South);
+                                let _ = state.controller.play(PlayerPosition::South, card);
+                                state.anim = Some(PlayAnim {
+                                    seat: PlayerPosition::South,
+                                    card,
+                                    from,
+                                    to,
+                                    start: std::time::Instant::now(),
+                                    dur_ms: 260,
+                                });
+                                unsafe {
+                                    let _ = InvalidateRect(Some(hwnd), None, true);
                                 }
                             }
                         }
@@ -2838,20 +2840,21 @@ unsafe extern "system" fn window_proc(
                     ),
                 );
                 // First, if a trick just completed and no animation is running, start the collect
-                if state.anim.is_none() && state.collect.is_none() {
-                    if let Some(summary) = state.controller.take_last_trick_summary() {
-                        debug_out(
-                            "mdhearts: ",
-                            &format!("Collect start winner {:?}", summary.winner),
-                        );
-                        state.collect = Some(CollectAnim {
-                            winner: summary.winner,
-                            cards: summary.plays,
-                            start: std::time::Instant::now(),
-                            delay_ms: 350,
-                            dur_ms: 320,
-                        });
-                    }
+                if state.anim.is_none()
+                    && state.collect.is_none()
+                    && let Some(summary) = state.controller.take_last_trick_summary()
+                {
+                    debug_out(
+                        "mdhearts: ",
+                        &format!("Collect start winner {:?}", summary.winner),
+                    );
+                    state.collect = Some(CollectAnim {
+                        winner: summary.winner,
+                        cards: summary.plays,
+                        start: std::time::Instant::now(),
+                        delay_ms: 350,
+                        dur_ms: 320,
+                    });
                 }
                 state.poll_thinking(hwnd);
                 // Only advance AI if not passing, no play/collect animation, and not awaiting pass acknowledgement
@@ -3055,15 +3058,6 @@ fn string_to_wide_z(value: &str) -> Vec<u16> {
     let mut v: Vec<u16> = OsStr::new(value).encode_wide().collect();
     v.push(0);
     v
-}
-
-fn debug_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("MDH_DEBUG_LOGS")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
-            .unwrap_or(false)
-    })
 }
 
 fn debug_out(prefix: &str, msg: &str) {
@@ -3764,12 +3758,12 @@ unsafe extern "system" fn about_window_proc(
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
             }
-            if let Some(cell) = about_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let new_dpi = dpi_from_wparam(wparam);
-                    state.set_dpi(new_dpi);
-                    let _ = state.resize(hwnd);
-                }
+            if let Some(cell) = about_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let new_dpi = dpi_from_wparam(wparam);
+                state.set_dpi(new_dpi);
+                let _ = state.resize(hwnd);
             }
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, true);
@@ -3777,10 +3771,10 @@ unsafe extern "system" fn about_window_proc(
             LRESULT(0)
         }
         WM_SIZE => {
-            if let Some(cell) = about_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let _ = state.resize(hwnd);
-                }
+            if let Some(cell) = about_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let _ = state.resize(hwnd);
             }
             LRESULT(0)
         }
@@ -3789,10 +3783,10 @@ unsafe extern "system" fn about_window_proc(
             unsafe {
                 let _ = BeginPaint(hwnd, &mut ps);
             }
-            if let Some(cell) = about_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let _ = state.draw(hwnd);
-                }
+            if let Some(cell) = about_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let _ = state.draw(hwnd);
             }
             unsafe {
                 let _ = EndPaint(hwnd, &ps);
@@ -4092,17 +4086,16 @@ fn load_bot_difficulty() -> Option<crate::bot::BotDifficulty> {
             Some(&mut size),
         )
         .is_ok()
+            && size >= 4
         {
-            if size >= 4 {
-                let raw = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
-                return match raw {
-                    0 => Some(crate::bot::BotDifficulty::EasyLegacy),
-                    1 => Some(crate::bot::BotDifficulty::NormalHeuristic),
-                    2 => Some(crate::bot::BotDifficulty::FutureHard),
-                    3 => Some(crate::bot::BotDifficulty::SearchLookahead),
-                    _ => None,
-                };
-            }
+            let raw = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+            return match raw {
+                0 => Some(crate::bot::BotDifficulty::EasyLegacy),
+                1 => Some(crate::bot::BotDifficulty::NormalHeuristic),
+                2 => Some(crate::bot::BotDifficulty::FutureHard),
+                3 => Some(crate::bot::BotDifficulty::SearchLookahead),
+                _ => None,
+            };
         }
     }
     None
@@ -5399,11 +5392,11 @@ unsafe extern "system" fn card_back_window_proc(
             LRESULT(1)
         },
         WM_CLOSE => {
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    state.result = None;
-                    state.store_result();
-                }
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                state.result = None;
+                state.store_result();
             }
             unsafe {
                 let _ = DestroyWindow(hwnd);
@@ -5433,12 +5426,12 @@ unsafe extern "system" fn card_back_window_proc(
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 );
             }
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let new_dpi = dpi_from_wparam(wparam);
-                    state.set_dpi(new_dpi);
-                    let _ = state.resize(hwnd);
-                }
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let new_dpi = dpi_from_wparam(wparam);
+                state.set_dpi(new_dpi);
+                let _ = state.resize(hwnd);
             }
             unsafe {
                 let _ = InvalidateRect(Some(hwnd), None, true);
@@ -5446,10 +5439,10 @@ unsafe extern "system" fn card_back_window_proc(
             LRESULT(0)
         }
         WM_SIZE => {
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let _ = state.resize(hwnd);
-                }
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let _ = state.resize(hwnd);
             }
             LRESULT(0)
         }
@@ -5458,10 +5451,10 @@ unsafe extern "system" fn card_back_window_proc(
             unsafe {
                 let _ = BeginPaint(hwnd, &mut ps);
             }
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let _ = state.draw(hwnd);
-                }
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let _ = state.draw(hwnd);
             }
             unsafe {
                 let _ = EndPaint(hwnd, &ps);
@@ -5470,39 +5463,39 @@ unsafe extern "system" fn card_back_window_proc(
         }
         WM_KEYDOWN => {
             let key = wparam.0 as u32;
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    match key {
-                        VK_ESCAPE => {
-                            state.result = None;
-                            state.store_result();
-                            unsafe {
-                                let _ = DestroyWindow(hwnd);
-                            }
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                match key {
+                    VK_ESCAPE => {
+                        state.result = None;
+                        state.store_result();
+                        unsafe {
+                            let _ = DestroyWindow(hwnd);
                         }
-                        VK_RETURN => {
-                            state.accept();
-                            state.store_result();
-                            unsafe {
-                                let _ = DestroyWindow(hwnd);
-                            }
-                        }
-                        VK_UP => {
-                            state.move_selection(-1);
-                            state.ensure_selection_visible_now(hwnd);
-                            unsafe {
-                                let _ = InvalidateRect(Some(hwnd), None, true);
-                            }
-                        }
-                        VK_DOWN => {
-                            state.move_selection(1);
-                            state.ensure_selection_visible_now(hwnd);
-                            unsafe {
-                                let _ = InvalidateRect(Some(hwnd), None, true);
-                            }
-                        }
-                        _ => {}
                     }
+                    VK_RETURN => {
+                        state.accept();
+                        state.store_result();
+                        unsafe {
+                            let _ = DestroyWindow(hwnd);
+                        }
+                    }
+                    VK_UP => {
+                        state.move_selection(-1);
+                        state.ensure_selection_visible_now(hwnd);
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        }
+                    }
+                    VK_DOWN => {
+                        state.move_selection(1);
+                        state.ensure_selection_visible_now(hwnd);
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, true);
+                        }
+                    }
+                    _ => {}
                 }
             }
             LRESULT(0)
@@ -5510,48 +5503,48 @@ unsafe extern "system" fn card_back_window_proc(
         value if value == WM_LBUTTONDOWN || value == WM_LBUTTONDBLCLK => {
             let raw_x = (lparam.0 & 0xFFFF) as i16 as f32;
             let raw_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let (sx, sy) = state.dpi.inv_scales();
-                    let layout = state.layout_size(client_size(hwnd));
-                    let metrics = state.list_metrics(layout);
-                    let x = raw_x * sx;
-                    let y = raw_y * sy + state.scroll_offset;
-                    for idx in 0..CARD_BACK_CHOICES.len() {
-                        let rect = state.position_for_choice(
-                            idx,
-                            metrics.margin,
-                            metrics.list_width,
-                            metrics.item_height,
-                        );
-                        if x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom {
-                            state.selected = idx;
-                            state.ensure_selection_visible_now(hwnd);
-                            unsafe {
-                                let _ = InvalidateRect(Some(hwnd), None, true);
-                            }
-                            if value == WM_LBUTTONDBLCLK {
-                                state.accept();
-                                state.store_result();
-                                unsafe {
-                                    let _ = DestroyWindow(hwnd);
-                                }
-                            }
-                            break;
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let (sx, sy) = state.dpi.inv_scales();
+                let layout = state.layout_size(client_size(hwnd));
+                let metrics = state.list_metrics(layout);
+                let x = raw_x * sx;
+                let y = raw_y * sy + state.scroll_offset;
+                for idx in 0..CARD_BACK_CHOICES.len() {
+                    let rect = state.position_for_choice(
+                        idx,
+                        metrics.margin,
+                        metrics.list_width,
+                        metrics.item_height,
+                    );
+                    if x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom {
+                        state.selected = idx;
+                        state.ensure_selection_visible_now(hwnd);
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, true);
                         }
+                        if value == WM_LBUTTONDBLCLK {
+                            state.accept();
+                            state.store_result();
+                            unsafe {
+                                let _ = DestroyWindow(hwnd);
+                            }
+                        }
+                        break;
                     }
                 }
             }
             LRESULT(0)
         }
         WM_VSCROLL => {
-            if let Some(cell) = card_back_state_cell(hwnd) {
-                if let Ok(mut state) = cell.try_borrow_mut() {
-                    let layout = state.layout_size(client_size(hwnd));
-                    if state.handle_vscroll(hwnd, wparam, layout) {
-                        unsafe {
-                            let _ = InvalidateRect(Some(hwnd), None, true);
-                        }
+            if let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let layout = state.layout_size(client_size(hwnd));
+                if state.handle_vscroll(hwnd, wparam, layout) {
+                    unsafe {
+                        let _ = InvalidateRect(Some(hwnd), None, true);
                     }
                 }
             }
@@ -5559,15 +5552,14 @@ unsafe extern "system" fn card_back_window_proc(
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam.0 >> 16) & 0xFFFF) as i16 as i32;
-            if delta != 0 {
-                if let Some(cell) = card_back_state_cell(hwnd) {
-                    if let Ok(mut state) = cell.try_borrow_mut() {
-                        let layout = state.layout_size(client_size(hwnd));
-                        if state.handle_mouse_wheel(hwnd, delta, layout) {
-                            unsafe {
-                                let _ = InvalidateRect(Some(hwnd), None, true);
-                            }
-                        }
+            if delta != 0
+                && let Some(cell) = card_back_state_cell(hwnd)
+                && let Ok(mut state) = cell.try_borrow_mut()
+            {
+                let layout = state.layout_size(client_size(hwnd));
+                if state.handle_mouse_wheel(hwnd, delta, layout) {
+                    unsafe {
+                        let _ = InvalidateRect(Some(hwnd), None, true);
                     }
                 }
             }
@@ -5660,10 +5652,10 @@ impl AtlasMeta {
     fn rank_col_index(&self, rank: hearts_core::model::rank::Rank) -> Option<u32> {
         if let Some(order) = &self.rank_order {
             for (idx, name) in order.iter().enumerate() {
-                if let Some(mapped) = rank_from_name(name) {
-                    if mapped == rank {
-                        return Some(idx as u32);
-                    }
+                if let Some(mapped) = rank_from_name(name)
+                    && mapped == rank
+                {
+                    return Some(idx as u32);
                 }
             }
         }

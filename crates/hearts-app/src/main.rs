@@ -18,6 +18,7 @@ mod bot;
 mod cli;
 mod controller;
 mod dataset;
+mod debug;
 mod endgame_export;
 mod platform;
 mod telemetry;

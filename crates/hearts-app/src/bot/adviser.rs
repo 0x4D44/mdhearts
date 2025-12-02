@@ -31,12 +31,12 @@ fn load_play_adviser() -> PhaseAdviser {
         .unwrap_or_else(|_| "assets/adviser/play.json".to_string());
     match fs::read_to_string(&path) {
         Ok(raw) => {
-            if let Ok(parsed) = serde_json::from_str::<AdviserFile>(&raw) {
-                if parsed.version == 1 {
-                    return PhaseAdviser {
-                        card_bias: parsed.card_bias,
-                    };
-                }
+            if let Ok(parsed) = serde_json::from_str::<AdviserFile>(&raw)
+                && parsed.version == 1
+            {
+                return PhaseAdviser {
+                    card_bias: parsed.card_bias,
+                };
             }
             PhaseAdviser::default()
         }

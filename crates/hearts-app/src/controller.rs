@@ -4,6 +4,7 @@ use crate::bot::MoonState;
 use crate::bot::{
     BotContext, BotDifficulty, DecisionLimit, PassPlanner, PlayPlanner, UnseenTracker,
 };
+use crate::debug::debug_enabled;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::model::card::Card;
 use hearts_core::model::passing::PassingDirection;
@@ -18,8 +19,9 @@ use windows::Win32::System::Diagnostics::Debug::OutputDebugStringW;
 #[cfg(windows)]
 use windows::core::PCWSTR;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TimeoutFallback {
+    #[default]
     HeuristicBest,
     FirstLegal,
     SkipAndLog,
@@ -57,12 +59,6 @@ impl TimeoutFallback {
     }
 }
 
-impl Default for TimeoutFallback {
-    fn default() -> Self {
-        TimeoutFallback::HeuristicBest
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct ThinkConfig {
     pub max_duration: Duration,
@@ -81,19 +77,19 @@ impl Default for ThinkConfig {
 impl ThinkConfig {
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
-        if let Ok(raw_ms) = std::env::var("MDH_THINK_LIMIT_MS") {
-            if let Ok(ms) = raw_ms.trim().parse::<u32>() {
-                cfg.max_duration = if ms == 0 {
-                    Duration::ZERO
-                } else {
-                    Duration::from_millis(ms as u64)
-                };
-            }
+        if let Ok(raw_ms) = std::env::var("MDH_THINK_LIMIT_MS")
+            && let Ok(ms) = raw_ms.trim().parse::<u32>()
+        {
+            cfg.max_duration = if ms == 0 {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(ms as u64)
+            };
         }
-        if let Ok(raw_fallback) = std::env::var("MDH_THINK_FALLBACK") {
-            if let Some(fallback) = TimeoutFallback::from_env_value(&raw_fallback) {
-                cfg.fallback = fallback;
-            }
+        if let Ok(raw_fallback) = std::env::var("MDH_THINK_FALLBACK")
+            && let Some(fallback) = TimeoutFallback::from_env_value(&raw_fallback)
+        {
+            cfg.fallback = fallback;
         }
         cfg
     }
@@ -192,16 +188,6 @@ pub struct GameController {
 
 impl GameController {
     fn dbg(msg: &str) {
-        fn debug_enabled() -> bool {
-            static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            *ON.get_or_init(|| {
-                std::env::var("MDH_DEBUG_LOGS")
-                    .map(|v| {
-                        v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")
-                    })
-                    .unwrap_or(false)
-            })
-        }
         if !debug_enabled() {
             return;
         }
@@ -667,10 +653,10 @@ fn mix_hint_bias_delta_from_hint(raw: &str, seat: PlayerPosition) -> Option<i32>
         }
     });
 
-    if let Some(target) = seat_hint {
-        if target != seat {
-            return None;
-        }
+    if let Some(target) = seat_hint
+        && target != seat
+    {
+        return None;
     }
 
     if delta_hint.is_none() {
@@ -785,9 +771,9 @@ fn parse_env_u8(key: &str) -> Option<u8> {
     std::env::var(key).ok().and_then(|s| s.parse::<u8>().ok())
 }
 fn parse_env_bool(key: &str) -> Option<bool> {
-    std::env::var(key).ok().and_then(|v| {
+    std::env::var(key).ok().map(|v| {
         let l = v.to_ascii_lowercase();
-        Some(l == "1" || l == "true" || l == "on")
+        l == "1" || l == "true" || l == "on"
     })
 }
 
@@ -847,10 +833,7 @@ impl GameController {
     }
 
     // Play a single AI move (if it's not stop_seat's turn). Returns the (seat, card) played.
-    pub fn autoplay_one_with_status(
-        &mut self,
-        stop_seat: PlayerPosition,
-    ) -> AutoplayOutcome {
+    pub fn autoplay_one_with_status(&mut self, stop_seat: PlayerPosition) -> AutoplayOutcome {
         if self.in_passing_phase() {
             return AutoplayOutcome::NotExpected;
         }
@@ -945,13 +928,14 @@ impl GameController {
             card_to_play = self.timeout_fallback_card(seat);
         }
 
-        if card_to_play.is_none() && (!timed_out || fallback_label.is_none()) {
-            if let Some(card) = legal.first().copied() {
-                if fallback_label.is_none() {
-                    fallback_label = Some("first_legal");
-                }
-                card_to_play = Some(card);
+        if card_to_play.is_none()
+            && (!timed_out || fallback_label.is_none())
+            && let Some(card) = legal.first().copied()
+        {
+            if fallback_label.is_none() {
+                fallback_label = Some("first_legal");
             }
+            card_to_play = Some(card);
         }
 
         if timed_out && fallback_label.is_none() {
@@ -973,12 +957,14 @@ impl GameController {
             seat,
             &self.unseen_tracker,
             self.bot_difficulty,
-            think_limit_ms,
-            elapsed_ms,
-            timed_out,
-            fallback_label,
-            search_stats,
-            last_bias_delta,
+            crate::telemetry::PostDecisionData {
+                think_limit_ms,
+                elapsed_ms,
+                timed_out,
+                fallback: fallback_label,
+                search_stats,
+                controller_bias_delta: last_bias_delta,
+            },
         );
 
         if let Some(card) = card_to_play {
@@ -1212,16 +1198,12 @@ mod tests {
             super::test_force_autoplay_timeout(),
             "force timeout flag should be active"
         );
-        let (result, records) = crate::telemetry::hard::capture_for_test(|| {
-            controller.autoplay_one(stop_seat)
-        });
+        let (result, records) =
+            crate::telemetry::hard::capture_for_test(|| controller.autoplay_one(stop_seat));
         assert!(result.is_some(), "expected autoplay move");
 
         assert!(!records.is_empty(), "expected telemetry records");
-        assert!(
-            records.len() >= 2,
-            "expected at least pre and post records"
-        );
+        assert!(records.len() >= 2, "expected at least pre and post records");
         let last = records.last().unwrap();
         assert_eq!(last.timed_out, Some(true));
         assert_eq!(last.fallback.as_deref(), Some("first_legal"));
@@ -1593,5 +1575,3 @@ mod tests {
     }
     */
 }
-
-

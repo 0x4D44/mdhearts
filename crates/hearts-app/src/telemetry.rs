@@ -85,6 +85,16 @@ pub struct HardTelemetrySummary {
     pub cache_hit_rate: f32,
 }
 
+/// Bundles post-decision telemetry data to reduce function parameter counts.
+pub struct PostDecisionData<'a> {
+    pub think_limit_ms: Option<u32>,
+    pub elapsed_ms: u32,
+    pub timed_out: bool,
+    pub fallback: Option<&'a str>,
+    pub search_stats: Option<SearchTelemetrySnapshot>,
+    pub controller_bias_delta: Option<i32>,
+}
+
 impl TelemetrySink {
     pub fn new(retention: usize) -> Self {
         Self {
@@ -127,8 +137,7 @@ impl TelemetrySink {
         }
         let mut file = File::create(&target)?;
         for record in &records {
-            let json = serde_json::to_string(record)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+            let json = serde_json::to_string(record).map_err(io::Error::other)?;
             writeln!(file, "{json}")?;
         }
         drop(file);
@@ -360,21 +369,16 @@ pub mod hard {
         seat: PlayerPosition,
         tracker: &UnseenTracker,
         difficulty: crate::bot::BotDifficulty,
-        think_limit_ms: Option<u32>,
-        elapsed_ms: u32,
-        timed_out: bool,
-        fallback: Option<&str>,
-        search_stats: Option<SearchTelemetrySnapshot>,
-        controller_bias_delta: Option<i32>,
+        data: PostDecisionData<'_>,
     ) {
         let mut record =
             HardTelemetryRecord::from_tracker(seat, tracker, Some(difficulty), Some("post"));
-        record.think_limit_ms = think_limit_ms;
-        record.elapsed_ms = Some(elapsed_ms);
-        record.timed_out = Some(timed_out);
-        record.fallback = fallback.map(|f| f.to_string());
-        record.search_stats = search_stats;
-        record.controller_bias_delta = controller_bias_delta;
+        record.think_limit_ms = data.think_limit_ms;
+        record.elapsed_ms = Some(data.elapsed_ms);
+        record.timed_out = Some(data.timed_out);
+        record.fallback = data.fallback.map(|f| f.to_string());
+        record.search_stats = data.search_stats;
+        record.controller_bias_delta = data.controller_bias_delta;
         with_active_sink(|sink| sink.push(record));
     }
 
@@ -469,26 +473,25 @@ mod tests {
     #[test]
     fn telemetry_sink_enforces_retention_on_push() {
         let sink = TelemetrySink::new(2);
-        let make_record =
-            |idx: u64| HardTelemetryRecord {
-                timestamp_ms: idx as u128,
-                decision_index: idx,
-                seat: "North".to_string(),
-                belief_entropy: [0.0; 4],
-                belief_cache_size: 0,
-                belief_cache_capacity: 0,
-                belief_cache_hits: 0,
-                belief_cache_misses: 0,
-                difficulty: None,
-                phase: None,
-                think_limit_ms: None,
-                elapsed_ms: None,
-                timed_out: None,
-                fallback: None,
-                search_stats: None,
-                notes: None,
-                controller_bias_delta: None,
-            };
+        let make_record = |idx: u64| HardTelemetryRecord {
+            timestamp_ms: idx as u128,
+            decision_index: idx,
+            seat: "North".to_string(),
+            belief_entropy: [0.0; 4],
+            belief_cache_size: 0,
+            belief_cache_capacity: 0,
+            belief_cache_hits: 0,
+            belief_cache_misses: 0,
+            difficulty: None,
+            phase: None,
+            think_limit_ms: None,
+            elapsed_ms: None,
+            timed_out: None,
+            fallback: None,
+            search_stats: None,
+            notes: None,
+            controller_bias_delta: None,
+        };
         sink.push(make_record(1));
         sink.push(make_record(2));
         sink.push(make_record(3));

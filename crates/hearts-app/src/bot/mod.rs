@@ -2,6 +2,7 @@ mod adviser;
 mod endgame;
 mod pass;
 pub(crate) mod play;
+pub mod scoring;
 pub mod search;
 pub mod search_deep;
 mod tracker;
@@ -25,18 +26,13 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BotDifficulty {
     EasyLegacy,
+    #[default]
     NormalHeuristic,
     FutureHard,
     SearchLookahead,
-}
-
-impl Default for BotDifficulty {
-    fn default() -> Self {
-        Self::NormalHeuristic
-    }
 }
 
 impl BotDifficulty {
@@ -94,15 +90,15 @@ pub struct DecisionLimit<'a> {
 
 impl<'a> DecisionLimit<'a> {
     pub fn expired(&self) -> bool {
-        if let Some(cancel) = self.cancel {
-            if cancel.load(Ordering::Relaxed) {
-                return true;
-            }
+        if let Some(cancel) = self.cancel
+            && cancel.load(Ordering::Relaxed)
+        {
+            return true;
         }
-        if let Some(deadline) = self.deadline {
-            if Instant::now() >= deadline {
-                return true;
-            }
+        if let Some(deadline) = self.deadline
+            && Instant::now() >= deadline
+        {
+            return true;
         }
         false
     }
