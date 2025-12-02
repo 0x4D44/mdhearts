@@ -2,6 +2,7 @@ use super::{
     BotContext, BotDifficulty, DecisionLimit, MoonState, PlayPlanner, detect_moon_pressure,
     snapshot_scores,
 };
+use crate::debug::debug_enabled;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::round::{PlayOutcome, RoundState};
@@ -51,6 +52,40 @@ impl Default for SearchConfig {
     }
 }
 
+/// Configuration for trick rollout simulation.
+/// Bundles parameters commonly passed together to reduce function parameter counts.
+#[derive(Debug, Clone, Copy)]
+pub struct RolloutConfig {
+    /// Whether next-trick probing is allowed
+    pub next3_allowed: bool,
+    /// Scale factor for continuation scoring (parts per thousand)
+    pub continuation_scale_permil: i32,
+    /// Time limit in milliseconds
+    pub limit_ms: Option<u32>,
+    /// Whether depth-2 search is enabled
+    pub depth2_enabled: bool,
+}
+
+impl Default for RolloutConfig {
+    fn default() -> Self {
+        Self {
+            next3_allowed: true,
+            continuation_scale_permil: 1000,
+            limit_ms: None,
+            depth2_enabled: false,
+        }
+    }
+}
+
+/// Seat-specific biases for continuation scoring.
+/// Bundles related seat biases to reduce function parameter counts.
+#[derive(Debug, Clone, Copy)]
+struct SeatBiases {
+    feed: i32,
+    self_capture: i32,
+    moon: i32,
+}
+
 #[derive(Clone, Copy)]
 struct ForcedDepth2Prepass {
     card: Card,
@@ -72,7 +107,7 @@ struct MixSeatHint {
 
 impl MixSeatHint {
     fn matches(&self, seat: PlayerPosition) -> bool {
-        self.seat.map_or(true, |target| target == seat)
+        self.seat.is_none_or(|target| target == seat)
     }
 }
 
@@ -112,7 +147,7 @@ impl SeatSchedule {
         let mut pairs: Vec<(u32, i32)> = raw
             .limits_ms
             .into_iter()
-            .zip(raw.continuation_scale.into_iter())
+            .zip(raw.continuation_scale)
             .take(len)
             .map(|(limit, scale)| (limit, scale.round() as i32))
             .collect();
@@ -166,7 +201,7 @@ struct ContinuationSchedule {
 
 impl ContinuationSchedule {
     fn insert(&mut self, mix: MixTag, seat: PlayerPosition, schedule: SeatSchedule) {
-        let entry = self.mixes.entry(mix).or_insert_with(|| Default::default());
+        let entry = self.mixes.entry(mix).or_default();
         entry[seat.index()] = Some(schedule);
     }
 
@@ -454,26 +489,25 @@ impl PlayPlannerHard {
         if depth2_topk > 0 && matches!(ctx.seat, PlayerPosition::North | PlayerPosition::East) {
             depth2_topk = depth2_topk.saturating_add(1);
         }
-        if let (Some(ms), Some(hint)) = (limit_ms_remaining, search_mix_hint()) {
-            if ms >= 12_000 {
-                match hint.mix {
-                    MixTag::Snnh => {
-                        if hint.matches(PlayerPosition::North) || hint.matches(PlayerPosition::East)
-                        {
-                            let forced = if ms >= 15_000 { 2 } else { 1 };
-                            depth2_topk = depth2_topk.max(forced);
-                            depth2_min_limit_ms = depth2_min_limit_ms.max(12_000);
-                        }
+        if let (Some(ms), Some(hint)) = (limit_ms_remaining, search_mix_hint())
+            && ms >= 12_000
+        {
+            match hint.mix {
+                MixTag::Snnh => {
+                    if hint.matches(PlayerPosition::North) || hint.matches(PlayerPosition::East) {
+                        let forced = if ms >= 15_000 { 2 } else { 1 };
+                        depth2_topk = depth2_topk.max(forced);
+                        depth2_min_limit_ms = depth2_min_limit_ms.max(12_000);
                     }
-                    MixTag::Shsh => {
-                        if hint.matches(PlayerPosition::South)
-                            || hint.matches(PlayerPosition::East)
-                            || hint.matches(PlayerPosition::West)
-                        {
-                            let forced = if ms >= 15_000 { 2 } else { 1 };
-                            depth2_topk = depth2_topk.max(forced);
-                            depth2_min_limit_ms = depth2_min_limit_ms.max(12_000);
-                        }
+                }
+                MixTag::Shsh => {
+                    if hint.matches(PlayerPosition::South)
+                        || hint.matches(PlayerPosition::East)
+                        || hint.matches(PlayerPosition::West)
+                    {
+                        let forced = if ms >= 15_000 { 2 } else { 1 };
+                        depth2_topk = depth2_topk.max(forced);
+                        depth2_min_limit_ms = depth2_min_limit_ms.max(12_000);
                     }
                 }
             }
@@ -482,7 +516,7 @@ impl PlayPlannerHard {
             let scaled = ((cfg.early_cutoff_margin as f32) * cutoff_scale).round() as i32;
             cfg.early_cutoff_margin = scaled.max(75);
         }
-        cfg.min_scan_before_cutoff = min_scan.min(cfg.branch_limit).max(1);
+        cfg.min_scan_before_cutoff = min_scan.clamp(1, cfg.branch_limit);
         cfg.high_budget = high_budget;
         cfg.depth2_topk = depth2_topk;
         cfg.depth2_min_limit_ms = depth2_min_limit_ms;
@@ -509,48 +543,46 @@ impl PlayPlannerHard {
                 if ab_margin > 0 {
                     ab_margin = ((ab_margin as f32) * 0.8).round() as i32;
                 }
-            } else if ms >= 10_000 {
-                if ab_margin > 0 {
-                    ab_margin = ((ab_margin as f32) * 0.9).round() as i32;
-                }
+            } else if ms >= 10_000 && ab_margin > 0 {
+                ab_margin = ((ab_margin as f32) * 0.9).round() as i32;
             }
             if matches!(seat, PlayerPosition::North | PlayerPosition::East) && ms >= 12_000 {
                 phaseb_topk = phaseb_topk.saturating_add(1);
             }
         }
-        if let Some(limit) = limit_ms {
-            if let Some(hint) = search_mix_hint() {
-                let target = hint.seat.unwrap_or(seat);
-                match hint.mix {
-                    MixTag::Snnh => {
-                        if matches!(target, PlayerPosition::North | PlayerPosition::East) {
-                            if limit >= 15_000 && ab_margin > 0 {
-                                ab_margin = ((ab_margin as f32) * 0.65).round() as i32;
-                                ab_margin = ab_margin.max(35);
-                            }
-                            if limit >= 18_000 && ab_margin > 0 {
-                                ab_margin = ab_margin.min(30);
-                            }
-                            if depth2_enabled {
-                                phaseb_topk = phaseb_topk.max(4);
-                            }
+        if let Some(limit) = limit_ms
+            && let Some(hint) = search_mix_hint()
+        {
+            let target = hint.seat.unwrap_or(seat);
+            match hint.mix {
+                MixTag::Snnh => {
+                    if matches!(target, PlayerPosition::North | PlayerPosition::East) {
+                        if limit >= 15_000 && ab_margin > 0 {
+                            ab_margin = ((ab_margin as f32) * 0.65).round() as i32;
+                            ab_margin = ab_margin.max(35);
+                        }
+                        if limit >= 18_000 && ab_margin > 0 {
+                            ab_margin = ab_margin.min(30);
+                        }
+                        if depth2_enabled {
+                            phaseb_topk = phaseb_topk.max(4);
                         }
                     }
-                    MixTag::Shsh => {
-                        if matches!(
-                            target,
-                            PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
-                        ) {
-                            if limit >= 15_000 && ab_margin > 0 {
-                                ab_margin = ((ab_margin as f32) * 0.6).round() as i32;
-                                ab_margin = ab_margin.min(90).max(25);
-                            }
-                            if limit >= 18_000 && ab_margin > 0 {
-                                ab_margin = ab_margin.min(70);
-                            }
-                            if limit >= 14_000 {
-                                phaseb_topk = phaseb_topk.saturating_add(2);
-                            }
+                }
+                MixTag::Shsh => {
+                    if matches!(
+                        target,
+                        PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
+                    ) {
+                        if limit >= 15_000 && ab_margin > 0 {
+                            ab_margin = ((ab_margin as f32) * 0.6).round() as i32;
+                            ab_margin = ab_margin.clamp(25, 90);
+                        }
+                        if limit >= 18_000 && ab_margin > 0 {
+                            ab_margin = ab_margin.min(70);
+                        }
+                        if limit >= 14_000 {
+                            phaseb_topk = phaseb_topk.saturating_add(2);
                         }
                     }
                 }
@@ -614,10 +646,10 @@ impl PlayPlannerHard {
         let mut moon_bias = 1000;
 
         if leader_gap > 0 {
-            feed_bias += (leader_gap.min(15) as i32) * 20;
-            self_bias -= (leader_gap.min(15) as i32) * 12;
+            feed_bias += leader_gap.min(15) * 20;
+            self_bias -= leader_gap.min(15) * 12;
         } else if leader_gap < 0 {
-            let lead = (-leader_gap).min(15) as i32;
+            let lead = (-leader_gap).min(15);
             feed_bias -= lead * 15;
             self_bias += lead * 10;
         }
@@ -643,7 +675,7 @@ impl PlayPlannerHard {
         (feed_bias, self_bias, moon_bias)
     }
 
-    fn apply_play_adviser_bias(entries: &mut Vec<(Card, i32)>, ctx: &BotContext<'_>) {
+    fn apply_play_adviser_bias(entries: &mut [(Card, i32)], ctx: &BotContext<'_>) {
         if entries.is_empty() {
             return;
         }
@@ -675,7 +707,7 @@ impl PlayPlannerHard {
         if legal.is_empty() {
             return None;
         }
-        if limit.map_or(false, |limit| limit.expired()) {
+        if limit.is_some_and(|limit| limit.expired()) {
             return None;
         }
 
@@ -775,10 +807,10 @@ impl PlayPlannerHard {
         }
         let mut continuation_scale_permil =
             Self::continuation_scale_permil(base_ab_margin, ab_margin, high_budget_mode);
-        if let Some(hints) = schedule_hints {
-            if let Some(scale) = hints.continuation_scale {
-                continuation_scale_permil = scale;
-            }
+        if let Some(hints) = schedule_hints
+            && let Some(scale) = hints.continuation_scale
+        {
+            continuation_scale_permil = scale;
         }
         if matches!(ctx.difficulty, super::BotDifficulty::FutureHard) {
             let seat_bonus = match ctx.seat {
@@ -815,7 +847,7 @@ impl PlayPlannerHard {
             depth2_enabled,
             schedule_hints,
         );
-        phaseb_topk = phaseb_topk.min(cfg.branch_limit).max(2);
+        phaseb_topk = phaseb_topk.clamp(2, cfg.branch_limit);
         if depth2_enabled {
             let mut depth2_cap = cfg.depth2_topk.saturating_add(3);
             if depth2_cap == 0 {
@@ -831,19 +863,22 @@ impl PlayPlannerHard {
         // capture tiny-next3 counter delta for this decision
         let n3_before = NEXT3_TINY_COUNT.with(|c| c.get());
         let dp_before = ENDGAME_DP_COUNT.with(|c| c.get());
+        let allow_next3 = matches!(tier, Tier::Wide);
         let mut forced_depth2_cache = if force_depth2 {
             Self::forced_depth2_prepass(
                 &explained,
                 ctx,
                 snapshot.max_player,
                 cfg,
-                continuation_scale_permil,
-                limit_ms_remaining,
-                tier,
+                RolloutConfig {
+                    next3_allowed: allow_next3,
+                    continuation_scale_permil,
+                    limit_ms: limit_ms_remaining,
+                    depth2_enabled,
+                },
                 &mut budget,
                 start,
                 &mut phase_c_probes,
-                depth2_enabled,
             )
         } else {
             None
@@ -858,24 +893,23 @@ impl PlayPlannerHard {
                 && idx == 0
                 && forced_depth2_cache
                     .as_ref()
-                    .map_or(false, |cache| cache.card == card);
+                    .is_some_and(|cache| cache.card == card);
             if budget.should_stop() && !allow_cached {
                 break;
             }
-            if ab_margin > 0 {
-                if let Some((_, alpha)) = best {
-                    if base + ab_margin < alpha {
-                        if debug_enabled() {
-                            eprintln!(
-                                "mdhearts: hard ab-skip {} base={} < alpha-{}",
-                                card, base, ab_margin
-                            );
-                        }
-                        scanned += 1;
-                        budget.tick();
-                        continue;
-                    }
+            if ab_margin > 0
+                && let Some((_, alpha)) = best
+                && base + ab_margin < alpha
+            {
+                if debug_enabled() {
+                    eprintln!(
+                        "mdhearts: hard ab-skip {} base={} < alpha-{}",
+                        card, base, ab_margin
+                    );
                 }
+                scanned += 1;
+                budget.tick();
+                continue;
             }
             let depth2_candidate =
                 (cfg.depth2_topk > 0 && idx < cfg.depth2_topk && phaseb_topk != 0)
@@ -885,7 +919,6 @@ impl PlayPlannerHard {
             let cont_raw = if phaseb_topk == 0 || idx < phaseb_topk {
                 phase_b_candidates = phase_b_candidates.saturating_add(1);
                 let before = budget.probe_calls;
-                let allow_next3 = matches!(tier, Tier::Wide);
                 let v = if depth2_candidate {
                     if allow_cached {
                         let cache = forced_depth2_cache.take().unwrap();
@@ -898,10 +931,12 @@ impl PlayPlannerHard {
                             snapshot.max_player,
                             &mut budget,
                             start,
-                            allow_next3,
-                            continuation_scale_permil,
-                            limit_ms_remaining,
-                            depth2_enabled,
+                            RolloutConfig {
+                                next3_allowed: allow_next3,
+                                continuation_scale_permil,
+                                limit_ms: limit_ms_remaining,
+                                depth2_enabled,
+                            },
                             None,
                         ) {
                             Some((value, res)) => {
@@ -918,10 +953,12 @@ impl PlayPlannerHard {
                         snapshot.max_player,
                         &mut budget,
                         start,
-                        allow_next3,
-                        continuation_scale_permil,
-                        limit_ms_remaining,
-                        depth2_enabled,
+                        RolloutConfig {
+                            next3_allowed: allow_next3,
+                            continuation_scale_permil,
+                            limit_ms: limit_ms_remaining,
+                            depth2_enabled,
+                        },
                     )
                 };
                 phase_c_probes += budget.probe_calls.saturating_sub(before);
@@ -945,10 +982,13 @@ impl PlayPlannerHard {
                         &cfg,
                         &mut budget,
                         start,
-                        continuation_scale_permil,
+                        RolloutConfig {
+                            next3_allowed: allow_next3,
+                            continuation_scale_permil,
+                            limit_ms: limit_ms_remaining,
+                            depth2_enabled,
+                        },
                         snapshot.max_player,
-                        limit_ms_remaining,
-                        depth2_enabled,
                     );
                 }
             }
@@ -962,10 +1002,10 @@ impl PlayPlannerHard {
             match best {
                 None => best = Some((card, total)),
                 Some((bc, bs)) => {
-                    if total > bs {
-                        best = Some((card, total));
-                    } else if total == bs
-                        && (card.suit as u8, card.rank.value()) < (bc.suit as u8, bc.rank.value())
+                    if total > bs
+                        || (total == bs
+                            && (card.suit as u8, card.rank.value())
+                                < (bc.suit as u8, bc.rank.value()))
                     {
                         best = Some((card, total));
                     }
@@ -974,29 +1014,28 @@ impl PlayPlannerHard {
             scanned += 1;
             budget.tick();
             // Early cutoff: if the next base score cannot overcome our current best even with a safety margin, stop.
-            if scanned >= cfg.min_scan_before_cutoff {
-                if let Some((_, best_total)) = best {
-                    if let Some((_, (next_card, next_base))) = iter.peek() {
-                        let safe_cap = if cfg.high_budget {
-                            (weights().cont_cap as f32 * 0.7) as i32
-                        } else {
-                            weights().cont_cap
-                        };
-                        let safety_margin = if safe_cap > 0 {
-                            safe_cap
-                        } else {
-                            cfg.early_cutoff_margin
-                        };
-                        if *next_base + safety_margin < best_total {
-                            if debug_enabled() {
-                                eprintln!(
-                                    "mdhearts: hard early cutoff at candidate {} (next_base={} + margin {} < best_total={})",
-                                    next_card, next_base, safety_margin, best_total
-                                );
-                            }
-                            break;
-                        }
+            if scanned >= cfg.min_scan_before_cutoff
+                && let Some((_, best_total)) = best
+                && let Some((_, (next_card, next_base))) = iter.peek()
+            {
+                let safe_cap = if cfg.high_budget {
+                    (weights().cont_cap as f32 * 0.7) as i32
+                } else {
+                    weights().cont_cap
+                };
+                let safety_margin = if safe_cap > 0 {
+                    safe_cap
+                } else {
+                    cfg.early_cutoff_margin
+                };
+                if *next_base + safety_margin < best_total {
+                    if debug_enabled() {
+                        eprintln!(
+                            "mdhearts: hard early cutoff at candidate {} (next_base={} + margin {} < best_total={})",
+                            next_card, next_base, safety_margin, best_total
+                        );
                     }
+                    break;
                 }
             }
             if budget.timed_out(start) {
@@ -1077,10 +1116,12 @@ impl PlayPlannerHard {
                     snapshot.max_player,
                     &mut budget,
                     start,
-                    false,
-                    continuation_scale_permil,
-                    None,
-                    false,
+                    RolloutConfig {
+                        next3_allowed: false,
+                        continuation_scale_permil,
+                        limit_ms: None,
+                        depth2_enabled: false,
+                    },
                 );
                 phase_c_probes += budget.probe_calls.saturating_sub(before);
                 v
@@ -1140,20 +1181,18 @@ impl PlayPlannerHard {
         out
     }
 
+    #[allow(clippy::too_many_arguments)] // 8 params after Stage 4 refactoring (was 12)
     fn forced_depth2_prepass(
         explained: &[(Card, i32)],
         ctx: &BotContext<'_>,
         leader_target: PlayerPosition,
         cfg: SearchConfig,
-        continuation_scale_permil: i32,
-        limit_ms_remaining: Option<u32>,
-        tier: Tier,
+        rollout_cfg: RolloutConfig,
         budget: &mut Budget,
         start: Instant,
         phase_c_probes: &mut usize,
-        depth2_enabled: bool,
     ) -> Option<ForcedDepth2Prepass> {
-        if !depth2_enabled {
+        if !rollout_cfg.depth2_enabled {
             return None;
         }
         let (card, _) = explained.first().copied()?;
@@ -1166,7 +1205,6 @@ impl PlayPlannerHard {
             budget.step_cap = prev_step_cap.map(|cap| cap.saturating_add(512));
         }
         let result = (|| -> Option<ForcedDepth2Prepass> {
-            let allow_next3 = matches!(tier, Tier::Wide);
             let before = budget.probe_calls;
             let maybe = rollout_current_trick_with_resolution(
                 card,
@@ -1174,10 +1212,7 @@ impl PlayPlannerHard {
                 leader_target,
                 budget,
                 start,
-                allow_next3,
-                continuation_scale_permil,
-                limit_ms_remaining,
-                depth2_enabled,
+                rollout_cfg,
                 None,
             );
             let delta = budget.probe_calls.saturating_sub(before);
@@ -1201,12 +1236,10 @@ impl PlayPlannerHard {
                 &forced_cfg,
                 budget,
                 start,
-                continuation_scale_permil,
+                rollout_cfg,
                 leader_target,
-                limit_ms_remaining,
-                depth2_enabled,
             );
-            if depth2_enabled && budget.depth2_samples() == depth2_before {
+            if rollout_cfg.depth2_enabled && budget.depth2_samples() == depth2_before {
                 budget.record_depth2_sample();
             }
             Some(ForcedDepth2Prepass {
@@ -1248,7 +1281,6 @@ impl PlayPlannerHard {
         let (tier, leverage_score, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
         let mut scanned = 0usize;
-        let continuation_scale_permil = 1000;
         for (idx, (card, base)) in v.into_iter().take(cfg.branch_limit).enumerate() {
             if budget.should_stop() {
                 break;
@@ -1260,10 +1292,12 @@ impl PlayPlannerHard {
                     snapshot.max_player,
                     &mut budget,
                     start,
-                    false,
-                    continuation_scale_permil,
-                    None,
-                    false,
+                    RolloutConfig {
+                        next3_allowed: false,
+                        continuation_scale_permil: 1000,
+                        limit_ms: None,
+                        depth2_enabled: false,
+                    },
                 )
             } else {
                 0
@@ -1297,7 +1331,7 @@ impl PlayPlannerHard {
             wide_boost_self_permil: parse_env_i32("MDH_HARD_WIDE_PERMIL_BOOST_SELFCAP")
                 .unwrap_or(0),
             cont_cap: weights().cont_cap,
-            continuation_scale_permil,
+            continuation_scale_permil: 1000,
             next3_tiny_hits: 0,
             endgame_dp_hits: 0,
             planner_nudge_hits,
@@ -1328,7 +1362,6 @@ impl PlayPlannerHard {
         let mut out = Vec::new();
         let (_, _, limits) = effective_limits(ctx);
         let phaseb_topk = limits.phaseb_topk;
-        let continuation_scale_permil = 1000;
         for (idx, (card, base)) in v.into_iter().take(cfg.branch_limit).enumerate() {
             if budget.should_stop() {
                 break;
@@ -1340,10 +1373,12 @@ impl PlayPlannerHard {
                     snapshot.max_player,
                     &mut budget,
                     start,
-                    false,
-                    continuation_scale_permil,
-                    None,
-                    false,
+                    RolloutConfig {
+                        next3_allowed: false,
+                        continuation_scale_permil: 1000,
+                        limit_ms: None,
+                        depth2_enabled: false,
+                    },
                     None,
                 )
             } else {
@@ -1365,10 +1400,7 @@ impl PlayPlannerHard {
         leader_target: PlayerPosition,
         budget: &mut Budget,
         start: Instant,
-        next3_allowed: bool,
-        continuation_scale_permil: i32,
-        limit_ms: Option<u32>,
-        depth2_enabled: bool,
+        rollout_cfg: RolloutConfig,
     ) -> i32 {
         // Belief-state sampling: sample multiple possible worlds
         if belief_sampling_enabled() {
@@ -1412,10 +1444,7 @@ impl PlayPlannerHard {
                     leader_target,
                     budget,
                     start,
-                    next3_allowed,
-                    continuation_scale_permil,
-                    limit_ms,
-                    depth2_enabled,
+                    rollout_cfg,
                     Some(&sampled_world),
                 );
 
@@ -1446,10 +1475,7 @@ impl PlayPlannerHard {
                     leader_target,
                     budget,
                     start,
-                    next3_allowed,
-                    continuation_scale_permil,
-                    limit_ms,
-                    depth2_enabled,
+                    rollout_cfg,
                     None,
                 );
             }
@@ -1461,10 +1487,7 @@ impl PlayPlannerHard {
                 leader_target,
                 budget,
                 start,
-                next3_allowed,
-                continuation_scale_permil,
-                limit_ms,
-                depth2_enabled,
+                rollout_cfg,
                 None,
             )
         }
@@ -1477,10 +1500,7 @@ impl PlayPlannerHard {
         leader_target: PlayerPosition,
         budget: &mut Budget,
         start: Instant,
-        next3_allowed: bool,
-        continuation_scale_permil: i32,
-        limit_ms: Option<u32>,
-        depth2_enabled: bool,
+        rollout_cfg: RolloutConfig,
         sampled_world: Option<&crate::bot::SampledWorld>,
     ) -> i32 {
         match rollout_current_trick_with_resolution(
@@ -1489,10 +1509,7 @@ impl PlayPlannerHard {
             leader_target,
             budget,
             start,
-            next3_allowed,
-            continuation_scale_permil,
-            limit_ms,
-            depth2_enabled,
+            rollout_cfg,
             sampled_world,
         ) {
             Some((value, _)) => value,
@@ -1506,10 +1523,7 @@ impl PlayPlannerHard {
         leader_target: PlayerPosition,
         budget: &mut Budget,
         start: Instant,
-        next3_allowed: bool,
-        continuation_scale_permil: i32,
-        limit_ms: Option<u32>,
-        depth2_enabled: bool,
+        rollout_cfg: RolloutConfig,
         sampled_world: Option<&crate::bot::SampledWorld>,
     ) -> (i32, ContParts) {
         if det_enabled() {
@@ -1526,10 +1540,7 @@ impl PlayPlannerHard {
                     leader_target,
                     budget,
                     start,
-                    next3_allowed,
-                    continuation_scale_permil,
-                    limit_ms,
-                    depth2_enabled,
+                    rollout_cfg,
                     sampled_world,
                 );
                 acc += v;
@@ -1565,10 +1576,7 @@ impl PlayPlannerHard {
                 leader_target,
                 budget,
                 start,
-                next3_allowed,
-                continuation_scale_permil,
-                limit_ms,
-                depth2_enabled,
+                rollout_cfg,
                 sampled_world,
             )
         }
@@ -1581,10 +1589,7 @@ impl PlayPlannerHard {
         leader_target: PlayerPosition,
         budget: &mut Budget,
         start: Instant,
-        next3_allowed: bool,
-        continuation_scale_permil: i32,
-        limit_ms: Option<u32>,
-        depth2_enabled: bool,
+        rollout_cfg: RolloutConfig,
         sampled_world: Option<&crate::bot::SampledWorld>,
     ) -> (i32, ContParts) {
         let mut parts = ContParts::default();
@@ -1595,8 +1600,13 @@ impl PlayPlannerHard {
         let my_score = ctx.scores.score(ctx.seat) as i32;
         let leader_gap = snapshot.max_score as i32 - my_score;
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
-        let (seat_feed_bias, seat_self_bias, seat_moon_bias) =
-            Self::seat_cont_bias(seat, leader_gap, moon_pressure, limit_ms, depth2_enabled);
+        let (seat_feed_bias, seat_self_bias, seat_moon_bias) = Self::seat_cont_bias(
+            seat,
+            leader_gap,
+            moon_pressure,
+            rollout_cfg.limit_ms,
+            rollout_cfg.depth2_enabled,
+        );
         let mut outcome = match sim.play_card(seat, card) {
             Ok(o) => o,
             Err(_) => return (0, parts),
@@ -1652,7 +1662,8 @@ impl PlayPlannerHard {
                 let scale =
                     1000 + (weights().scale_feed_permil.max(0) * p) + wide_boost_feed.max(0);
                 let v = (base * scale) / 1000;
-                let scaled = Self::apply_continuation_scale(v, continuation_scale_permil);
+                let scaled =
+                    Self::apply_continuation_scale(v, rollout_cfg.continuation_scale_permil);
                 let scaled = Self::apply_continuation_scale(scaled, seat_feed_bias);
                 parts.feed = scaled;
                 cont += scaled;
@@ -1662,7 +1673,8 @@ impl PlayPlannerHard {
                 let scale =
                     1000 + (weights().scale_self_permil.max(0) * p) + wide_boost_self.max(0);
                 let v = -(base * scale) / 1000;
-                let scaled = Self::apply_continuation_scale(v, continuation_scale_permil);
+                let scaled =
+                    Self::apply_continuation_scale(v, rollout_cfg.continuation_scale_permil);
                 let scaled = Self::apply_continuation_scale(scaled, seat_self_bias);
                 parts.self_capture = scaled;
                 cont += scaled;
@@ -1672,7 +1684,8 @@ impl PlayPlannerHard {
                 parts.next_start = start_bonus;
                 cont += start_bonus;
                 budget.probe_calls = budget.probe_calls.saturating_add(1);
-                let probe = next_trick_probe(&sim, seat, ctx, leader_target, next3_allowed);
+                let probe =
+                    next_trick_probe(&sim, seat, ctx, leader_target, rollout_cfg.next3_allowed);
                 parts.next_probe = probe;
                 cont += probe;
                 if weights().qs_risk_per != 0 {
@@ -1699,7 +1712,10 @@ impl PlayPlannerHard {
                     let state = ctx.tracker.moon_state(seat);
                     if matches!(state, MoonState::Considering | MoonState::Committed) {
                         let v = weights().moon_relief_perpen * p;
-                        let scaled = Self::apply_continuation_scale(v, continuation_scale_permil);
+                        let scaled = Self::apply_continuation_scale(
+                            v,
+                            rollout_cfg.continuation_scale_permil,
+                        );
                         let scaled = Self::apply_continuation_scale(scaled, seat_moon_bias);
                         parts.moon_relief = scaled;
                         cont += scaled;
@@ -1792,15 +1808,14 @@ fn choose_followup_search(
                 if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
                     return qs;
                 }
-                if !hearts_void {
-                    if let Some(card) = legal
+                if !hearts_void
+                    && let Some(card) = legal
                         .iter()
                         .copied()
                         .filter(|c| c.suit == Suit::Hearts)
                         .max_by_key(|c| c.rank.value())
-                    {
-                        return card;
-                    }
+                {
+                    return card;
                 }
             } else {
                 // Provisional winner is not the leader: avoid feeding penalties.
@@ -1821,15 +1836,14 @@ fn choose_followup_search(
                     return non_penalties[idx];
                 }
                 // If forced to give points, choose the smallest penalty (low hearts before QS).
-                if !hearts_void {
-                    if let Some(card) = legal
+                if !hearts_void
+                    && let Some(card) = legal
                         .iter()
                         .copied()
                         .filter(|c| c.suit == Suit::Hearts)
                         .min_by_key(|c| c.rank.value())
-                    {
-                        return card;
-                    }
+                {
+                    return card;
                 }
                 if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
                     return qs;
@@ -1851,15 +1865,14 @@ fn choose_followup_search(
                 };
                 return non_penalties[idx];
             }
-            if !hearts_void {
-                if let Some(card) = legal
+            if !hearts_void
+                && let Some(card) = legal
                     .iter()
                     .copied()
                     .filter(|c| c.suit == Suit::Hearts)
                     .min_by_key(|c| c.rank.value())
-                {
-                    return card;
-                }
+            {
+                return card;
             }
             if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
                 return qs;
@@ -2100,15 +2113,6 @@ pub struct ContParts {
     pub capped_delta: i32,
 }
 
-fn debug_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("MDH_DEBUG_LOGS")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
-            .unwrap_or(false)
-    })
-}
-
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Stats {
@@ -2214,15 +2218,13 @@ fn next_trick_probe(
         if let Some(lead_suit) = probe.current_trick().lead_suit() {
             let legal = legal_moves_for(&probe, first_opponent);
             let can_follow = legal.iter().any(|c| c.suit == lead_suit);
-            if !can_follow {
-                if let Some(alt) = legal
+            if !can_follow
+                && let Some(alt) = legal
                     .into_iter()
                     .max_by_key(|c| (c.penalty_value(), c.rank.value()))
-                {
-                    if alt != canon {
-                        replies.push(alt);
-                    }
-                }
+                && alt != canon
+            {
+                replies.push(alt);
             }
         }
         // Evaluate each reply variant; additionally branch on the second opponent reply when time permits.
@@ -2251,15 +2253,13 @@ fn next_trick_probe(
             if let Some(lead_suit2) = branch.current_trick().lead_suit() {
                 let legal2 = legal_moves_for(&branch, second_opponent);
                 let can_follow2 = legal2.iter().any(|c| c.suit == lead_suit2);
-                if !can_follow2 {
-                    if let Some(alt2) = legal2
+                if !can_follow2
+                    && let Some(alt2) = legal2
                         .into_iter()
                         .max_by_key(|c| (c.penalty_value(), c.rank.value()))
-                    {
-                        if alt2 != canon2 {
-                            replies2.push(alt2);
-                        }
-                    }
+                    && alt2 != canon2
+                {
+                    replies2.push(alt2);
                 }
             }
             for reply2 in replies2.into_iter() {
@@ -2304,15 +2304,13 @@ fn next_trick_probe(
                     if let Some(lead_suit3) = branch2.current_trick().lead_suit() {
                         let legal3 = legal_moves_for(&branch2, third_opponent);
                         let can_follow3 = legal3.iter().any(|c| c.suit == lead_suit3);
-                        if !can_follow3 {
-                            if let Some(alt3) = legal3
+                        if !can_follow3
+                            && let Some(alt3) = legal3
                                 .into_iter()
                                 .max_by_key(|c| (c.penalty_value(), c.rank.value()))
-                            {
-                                if alt3 != canon3 {
-                                    replies3.push(alt3);
-                                }
-                            }
+                            && alt3 != canon3
+                        {
+                            replies3.push(alt3);
                         }
                     }
                     for reply3 in replies3.into_iter() {
@@ -2400,8 +2398,8 @@ fn next_trick_probe(
 
 // Track how many times the tiny Normal-tier next3 gate triggered during a decision (debug/telemetry)
 thread_local! {
-    static NEXT3_TINY_COUNT: Cell<usize> = Cell::new(0);
-    static ENDGAME_DP_COUNT: Cell<usize> = Cell::new(0);
+    static NEXT3_TINY_COUNT: Cell<usize> = const { Cell::new(0) };
+    static ENDGAME_DP_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
 // ----- Endgame micro-solver (choose-only; env-gated) -----
@@ -2451,8 +2449,7 @@ fn micro_endgame_bonus(
     let mut total: i32 = 0;
     let mut tricks_simulated = 0usize;
     // Finish the current trick if it's mid-play
-    if !matches!(round.current_trick().lead_suit(), None) && round.current_trick().plays().len() > 0
-    {
+    if round.current_trick().lead_suit().is_some() && !round.current_trick().plays().is_empty() {
         let mut outcome: Option<PlayOutcome> = None; // will hold TrickCompleted
         // Play until this trick completes
         while !matches!(outcome, Some(PlayOutcome::TrickCompleted { .. })) {
@@ -2706,15 +2703,15 @@ impl<'a> Budget<'a> {
             .clamp(0.0, 100.0) as u8
     }
     fn limit_expired(&self) -> bool {
-        if let Some(cancel) = self.limit_cancel {
-            if cancel.load(Ordering::Relaxed) {
-                return true;
-            }
+        if let Some(cancel) = self.limit_cancel
+            && cancel.load(Ordering::Relaxed)
+        {
+            return true;
         }
-        if let Some(deadline) = self.limit_deadline {
-            if Instant::now() >= deadline {
-                return true;
-            }
+        if let Some(deadline) = self.limit_deadline
+            && Instant::now() >= deadline
+        {
+            return true;
         }
         false
     }
@@ -2743,6 +2740,7 @@ struct TrickResolution {
     penalties: u8,
 }
 
+#[allow(clippy::too_many_arguments)] // 8 params after Stage 4 refactoring (was 9)
 fn simulate_trick_resolution(
     round: &RoundState,
     seat: PlayerPosition,
@@ -2751,7 +2749,6 @@ fn simulate_trick_resolution(
     leader_target: PlayerPosition,
     budget: &mut Budget,
     start: Instant,
-    _next3_allowed: bool,
     sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Option<TrickResolution> {
     let mut sim = round.clone();
@@ -2802,15 +2799,14 @@ fn simulate_trick_resolution(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // 8 params after Stage 4 refactoring (was 10)
 fn continuation_from_resolution(
     resolution: &TrickResolution,
     seat: PlayerPosition,
     ctx: &BotContext<'_>,
     leader_target: PlayerPosition,
     continuation_scale_permil: i32,
-    seat_feed_bias: i32,
-    seat_self_bias: i32,
-    seat_moon_bias: i32,
+    seat_biases: SeatBiases,
     next3_allowed: bool,
     budget: &mut Budget,
 ) -> i32 {
@@ -2833,7 +2829,7 @@ fn continuation_from_resolution(
         let scale = 1000 + (weights().scale_feed_permil.max(0) * p) + wide_boost_feed.max(0);
         let v = (base * scale) / 1000;
         let v = PlayPlannerHard::apply_continuation_scale(v, continuation_scale_permil);
-        let v = PlayPlannerHard::apply_continuation_scale(v, seat_feed_bias);
+        let v = PlayPlannerHard::apply_continuation_scale(v, seat_biases.feed);
         cont += v;
     }
     if resolution.winner == seat && p > 0 {
@@ -2841,7 +2837,7 @@ fn continuation_from_resolution(
         let scale = 1000 + (weights().scale_self_permil.max(0) * p) + wide_boost_self.max(0);
         let v = -(base * scale) / 1000;
         let v = PlayPlannerHard::apply_continuation_scale(v, continuation_scale_permil);
-        let v = PlayPlannerHard::apply_continuation_scale(v, seat_self_bias);
+        let v = PlayPlannerHard::apply_continuation_scale(v, seat_biases.self_capture);
         cont += v;
     }
     if resolution.winner == seat {
@@ -2870,7 +2866,7 @@ fn continuation_from_resolution(
             if matches!(state, MoonState::Considering | MoonState::Committed) && p > 0 {
                 let v = weights().moon_relief_perpen * p;
                 let v = PlayPlannerHard::apply_continuation_scale(v, continuation_scale_permil);
-                let v = PlayPlannerHard::apply_continuation_scale(v, seat_moon_bias);
+                let v = PlayPlannerHard::apply_continuation_scale(v, seat_biases.moon);
                 cont += v;
             }
         }
@@ -2896,10 +2892,7 @@ fn rollout_current_trick_with_resolution(
     leader_target: PlayerPosition,
     budget: &mut Budget,
     start: Instant,
-    next3_allowed: bool,
-    continuation_scale_permil: i32,
-    limit_ms: Option<u32>,
-    depth2_enabled: bool,
+    rollout_cfg: RolloutConfig,
     sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Option<(i32, TrickResolution)> {
     let seat = ctx.seat;
@@ -2907,8 +2900,13 @@ fn rollout_current_trick_with_resolution(
     let my_score = ctx.scores.score(ctx.seat) as i32;
     let leader_gap = snapshot.max_score as i32 - my_score;
     let moon_pressure = detect_moon_pressure(ctx, &snapshot);
-    let (seat_feed_bias, seat_self_bias, seat_moon_bias) =
-        PlayPlannerHard::seat_cont_bias(seat, leader_gap, moon_pressure, limit_ms, depth2_enabled);
+    let (seat_feed_bias, seat_self_bias, seat_moon_bias) = PlayPlannerHard::seat_cont_bias(
+        seat,
+        leader_gap,
+        moon_pressure,
+        rollout_cfg.limit_ms,
+        rollout_cfg.depth2_enabled,
+    );
     let resolution = simulate_trick_resolution(
         ctx.round,
         seat,
@@ -2917,7 +2915,6 @@ fn rollout_current_trick_with_resolution(
         leader_target,
         budget,
         start,
-        next3_allowed,
         sampled_world,
     )?;
     let cont = continuation_from_resolution(
@@ -2925,11 +2922,13 @@ fn rollout_current_trick_with_resolution(
         seat,
         ctx,
         leader_target,
-        continuation_scale_permil,
-        seat_feed_bias,
-        seat_self_bias,
-        seat_moon_bias,
-        next3_allowed,
+        rollout_cfg.continuation_scale_permil,
+        SeatBiases {
+            feed: seat_feed_bias,
+            self_capture: seat_self_bias,
+            moon: seat_moon_bias,
+        },
+        rollout_cfg.next3_allowed,
         budget,
     );
     Some((cont, resolution))
@@ -2941,15 +2940,13 @@ fn evaluate_depth2_bonus(
     cfg: &SearchConfig,
     budget: &mut Budget,
     start: Instant,
-    continuation_scale_permil: i32,
+    rollout_cfg: RolloutConfig,
     leader_target: PlayerPosition,
-    limit_ms: Option<u32>,
-    depth2_enabled: bool,
 ) -> i32 {
-    if cfg.depth2_topk == 0 && !depth2_enabled {
+    if cfg.depth2_topk == 0 && !rollout_cfg.depth2_enabled {
         return 0;
     }
-    if resolution.round.current_trick().leader() != ctx.seat && !depth2_enabled {
+    if resolution.round.current_trick().leader() != ctx.seat && !rollout_cfg.depth2_enabled {
         return 0;
     }
     let depth_ctx = BotContext::new(
@@ -2977,8 +2974,8 @@ fn evaluate_depth2_bonus(
         depth_ctx.seat,
         leader_gap,
         moon_pressure,
-        limit_ms,
-        depth2_enabled,
+        rollout_cfg.limit_ms,
+        rollout_cfg.depth2_enabled,
     );
     for (card, base_child) in ordered.into_iter() {
         if considered >= cfg.depth2_topk {
@@ -2995,7 +2992,6 @@ fn evaluate_depth2_bonus(
             leader_target,
             budget,
             start,
-            true,
             None,
         );
         let cont_child = match maybe {
@@ -3004,10 +3000,12 @@ fn evaluate_depth2_bonus(
                 depth_ctx.seat,
                 &depth_ctx,
                 leader_target,
-                continuation_scale_permil,
-                seat_feed_bias,
-                seat_self_bias,
-                seat_moon_bias,
+                rollout_cfg.continuation_scale_permil,
+                SeatBiases {
+                    feed: seat_feed_bias,
+                    self_capture: seat_self_bias,
+                    moon: seat_moon_bias,
+                },
                 true,
                 budget,
             ),
@@ -3217,14 +3215,12 @@ fn belief_sample_count(ctx: &BotContext<'_>) -> usize {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(100) // MAXIMUM: 100 samples for Search difficulty
-            .max(1)
-            .min(200); // Much higher cap for Search mode
+            .clamp(1, 200); // Much higher cap for Search mode
     }
 
     std::env::var("MDH_BELIEF_SAMPLE_COUNT")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(15) // Normal: 15 samples
-        .max(1)
-        .min(50) // Normal cap
+        .clamp(1, 50) // Normal cap
 }

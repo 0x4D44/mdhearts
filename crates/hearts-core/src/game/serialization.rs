@@ -35,7 +35,7 @@ pub struct RoundSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RoundPhaseSnapshot {
     Passing {
-        submissions: [Option<[String; 3]>; 4],
+        submissions: Box<[Option<[String; 3]>; 4]>,
     },
     Playing,
 }
@@ -114,13 +114,11 @@ impl MatchSnapshot {
 
         if let Some(idx) = self.passing_index {
             state.set_passing_index(idx);
-        } else {
-            if let Some(idx) = PassingDirection::CYCLE
-                .iter()
-                .position(|d| d.as_str() == direction.as_str())
-            {
-                state.set_passing_index(idx);
-            }
+        } else if let Some(idx) = PassingDirection::CYCLE
+            .iter()
+            .position(|d| d.as_str() == direction.as_str())
+        {
+            state.set_passing_index(idx);
         }
 
         state
@@ -160,14 +158,15 @@ impl RoundSnapshot {
         let phase = match round.phase() {
             RoundPhase::Playing => RoundPhaseSnapshot::Playing,
             RoundPhase::Passing(state) => {
-                let mut submissions: [Option<[String; 3]>; 4] =
-                    std::array::from_fn(|_| None);
+                let mut submissions: [Option<[String; 3]>; 4] = std::array::from_fn(|_| None);
                 for seat in PlayerPosition::LOOP.iter().copied() {
                     if let Some(cards) = state.submissions()[seat.index()] {
                         submissions[seat.index()] = Some(cards.map(card_to_string));
                     }
                 }
-                RoundPhaseSnapshot::Passing { submissions }
+                RoundPhaseSnapshot::Passing {
+                    submissions: Box::new(submissions),
+                }
             }
         };
 
@@ -181,10 +180,7 @@ impl RoundSnapshot {
         }
     }
 
-    pub fn restore(
-        self,
-        passing_direction: PassingDirection,
-    ) -> Result<RoundState, String> {
+    pub fn restore(self, passing_direction: PassingDirection) -> Result<RoundState, String> {
         let hands_cards: [Vec<Card>; 4] = std::array::from_fn(|idx| {
             self.hands[idx]
                 .iter()
@@ -215,7 +211,7 @@ impl RoundSnapshot {
             RoundPhaseSnapshot::Passing { submissions } => {
                 let state = PassingState::with_submissions(
                     passing_direction,
-                    submissions.map(|opt| opt.map(|arr| arr.map(|s| parse_card(&s).unwrap()))),
+                    (*submissions).map(|opt| opt.map(|arr| arr.map(|s| parse_card(&s).unwrap()))),
                 );
                 // ensure submissions with None stay None; already set via map
                 RoundPhase::Passing(state.clone())
@@ -298,7 +294,7 @@ fn parse_card(code: &str) -> Option<Card> {
     Some(Card::new(rank, suit))
 }
 
-fn sort_cards(cards: &mut Vec<Card>) {
+fn sort_cards(cards: &mut [Card]) {
     cards.sort_by(|a, b| a.suit.cmp(&b.suit).then(a.rank.cmp(&b.rank)));
 }
 
@@ -382,8 +378,12 @@ mod tests {
             )
             .ok();
 
-        let mut state =
-            MatchState::with_seed_round_direction(7, 2, PassingDirection::Left, PlayerPosition::North);
+        let mut state = MatchState::with_seed_round_direction(
+            7,
+            2,
+            PassingDirection::Left,
+            PlayerPosition::North,
+        );
         state.scores_mut().set_totals([1, 2, 3, 4]);
         state.set_round(round.clone());
 
@@ -398,7 +398,11 @@ mod tests {
 
         let restored_round = restored.round();
         assert!(matches!(restored_round.phase(), RoundPhase::Passing(_)));
-        assert!(!restored_round.trick_history().is_empty() || restored_round.current_trick().plays().len() == round.current_trick().plays().len());
+        assert!(
+            !restored_round.trick_history().is_empty()
+                || restored_round.current_trick().plays().len()
+                    == round.current_trick().plays().len()
+        );
         assert_eq!(restored_round.starting_player(), PlayerPosition::North);
     }
 

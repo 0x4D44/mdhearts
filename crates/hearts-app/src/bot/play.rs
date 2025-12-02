@@ -2,6 +2,7 @@ use super::{
     BotContext, BotStyle, DecisionLimit, MoonState, card_sort_key, count_cards_in_suit,
     detect_moon_pressure, determine_style, snapshot_scores,
 };
+use crate::debug::debug_enabled;
 use hearts_core::model::card::Card;
 use hearts_core::model::player::PlayerPosition;
 use hearts_core::model::rank::Rank;
@@ -11,15 +12,6 @@ use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
-
-fn debug_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("MDH_DEBUG_LOGS")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
-            .unwrap_or(false)
-    })
-}
 
 fn test_trace_followup_enabled() -> bool {
     std::env::var("MDH_TEST_TRACE_FOLLOWUP")
@@ -43,9 +35,9 @@ fn hard_stage2_enabled() -> bool {
 }
 
 thread_local! {
-    static HARD_NUDGE_HITS: Cell<usize> = Cell::new(0);
+    static HARD_NUDGE_HITS: Cell<usize> = const { Cell::new(0) };
     static HARD_NUDGE_TRACE: RefCell<BTreeMap<&'static str, usize>> =
-        RefCell::new(BTreeMap::new());
+        const { RefCell::new(BTreeMap::new()) };
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -233,10 +225,10 @@ impl PlayPlanner {
             return None;
         }
 
-        if let Some(limit) = limit {
-            if limit.expired() {
-                return None;
-            }
+        if let Some(limit) = limit
+            && limit.expired()
+        {
+            return None;
         }
 
         reset_hard_nudge_hits();
@@ -250,10 +242,10 @@ impl PlayPlanner {
         let mut best: Option<(Card, i32)> = None;
 
         for &card in legal {
-            if let Some(limit) = limit {
-                if limit.expired() {
-                    break;
-                }
+            if let Some(limit) = limit
+                && limit.expired()
+            {
+                break;
             }
             let (winner, penalties) = simulate_trick(card, ctx, style, snapshot.max_player);
             let will_capture = winner == ctx.seat;
@@ -344,7 +336,7 @@ impl PlayPlanner {
                     projected[winner.index()].saturating_add(penalties as i32);
                 if will_capture {
                     let projected_self = projected[ctx.seat.index()];
-                    let mut best_other = std::i32::MIN;
+                    let mut best_other = i32::MIN;
                     for seat in PlayerPosition::LOOP.iter().copied() {
                         if seat == ctx.seat {
                             continue;
@@ -830,36 +822,35 @@ fn base_score(
         }
     }
 
-    if let Some(hint) = mix_hint {
-        if matches!(hint.mix, MixTag::Shsh)
-            && matches!(
-                hint.seat.unwrap_or(ctx.seat),
-                PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
-            )
-            && limit_ms >= 12_000
-        {
-            let trailing_gap = snapshot
-                .max_score
-                .saturating_sub(ctx.scores.score(ctx.seat))
-                .min(40) as i32;
-            if !will_capture && penalties > 0 {
-                let pressure = trailing_gap.max(1) * 35;
-                let leader_weight = if snapshot.max_player == ctx.seat {
-                    40
-                } else {
-                    120
-                };
-                score += penalties_i32 * (pressure + leader_weight);
-            }
-            if will_capture {
-                let self_gap = ctx
-                    .scores
-                    .score(ctx.seat)
-                    .saturating_sub(snapshot.min_score)
-                    .min(50) as i32;
-                let malus = 210 + self_gap * 20;
-                score -= penalties_i32 * malus.max(210);
-            }
+    if let Some(hint) = mix_hint
+        && matches!(hint.mix, MixTag::Shsh)
+        && matches!(
+            hint.seat.unwrap_or(ctx.seat),
+            PlayerPosition::East | PlayerPosition::South | PlayerPosition::West
+        )
+        && limit_ms >= 12_000
+    {
+        let trailing_gap = snapshot
+            .max_score
+            .saturating_sub(ctx.scores.score(ctx.seat))
+            .min(40) as i32;
+        if !will_capture && penalties > 0 {
+            let pressure = trailing_gap.max(1) * 35;
+            let leader_weight = if snapshot.max_player == ctx.seat {
+                40
+            } else {
+                120
+            };
+            score += penalties_i32 * (pressure + leader_weight);
+        }
+        if will_capture {
+            let self_gap = ctx
+                .scores
+                .score(ctx.seat)
+                .saturating_sub(snapshot.min_score)
+                .min(50) as i32;
+            let malus = 210 + self_gap * 20;
+            score -= penalties_i32 * malus.max(210);
         }
     }
 
@@ -921,7 +912,7 @@ fn base_score(
             projected_round[winner.index()] =
                 projected_round[winner.index()].saturating_add(penalties as i32);
             let projected_winner = projected_round[winner.index()];
-            let mut best_other = std::i32::MIN;
+            let mut best_other = i32::MIN;
             for seat in PlayerPosition::LOOP.iter().copied() {
                 if seat == winner {
                     continue;
@@ -933,7 +924,7 @@ fn base_score(
                 round_leader_saturated = true;
             }
         }
-        let winner_is_leader = effective_leader.map_or(false, |seat| seat == winner);
+        let winner_is_leader = effective_leader == Some(winner);
         let winner_is_effective_leader = winner_is_leader || round_leader_saturated;
         let safe_to_feed_nonleader = leader_is_self && effective_gap > 0;
         let gap_guard_min = if scores_flat {
@@ -1112,7 +1103,7 @@ fn base_score(
             score += penalties_i32 * weights().near100_shed_perpen;
         }
     }
-    let moon_pressure = detect_moon_pressure(ctx, &snapshot);
+    let moon_pressure = detect_moon_pressure(ctx, snapshot);
     if moon_pressure {
         let trick_pen = ctx.round.current_trick().penalty_total() as i32;
         let leader_pressure = (snapshot.max_score as i32).saturating_sub(70).max(0);
@@ -1258,15 +1249,14 @@ fn choose_followup_card(
     }
     // Defensive: if legality probing fails (e.g., strict opening rules vs. crafted tests),
     // fall back to a simple in-hand choice to avoid panics in simulations/tests.
-    if legal.is_empty() {
-        if let Some(card) = round
+    if legal.is_empty()
+        && let Some(card) = round
             .hand(seat)
             .iter()
             .copied()
             .min_by_key(|c| (c.penalty_value(), c.rank.value()))
-        {
-            return card;
-        }
+    {
+        return card;
     }
     let lead_suit = round.current_trick().lead_suit();
     let penalties_on_table: u8 = round
@@ -1342,34 +1332,34 @@ fn choose_followup_card(
         let can_overcall = legal
             .iter()
             .any(|c| c.suit == lead && c.rank.value() > current_lead_rank);
-        if can_overcall && hard_stage2_enabled() {
-            if let Some(current_winner) = provisional_winner(round) {
-                if current_winner != seat {
-                    let round_totals = round.penalty_totals();
-                    let leader_total = round_totals[current_winner.index()] as u32;
-                    let mut best_other_total = 0u32;
-                    for other in PlayerPosition::LOOP.iter().copied() {
-                        if other == current_winner {
-                            continue;
-                        }
-                        best_other_total = best_other_total.max(round_totals[other.index()] as u32);
-                    }
-                    let round_gap = leader_total.saturating_sub(best_other_total);
-                    let cap = stage2_round_gap_cap();
-                    let near_threshold = cap > 0 && round_gap >= cap.saturating_sub(1).max(1);
-                    let over_threshold = cap > 0 && leader_total >= cap;
-                    let runaway = over_threshold || near_threshold;
-                    if runaway && round_totals[seat.index()] as u32 <= leader_total {
-                        if let Some(card) = legal
-                            .iter()
-                            .copied()
-                            .filter(|c| c.suit == lead && c.rank.value() > current_lead_rank)
-                            .min_by_key(|c| c.rank.value())
-                        {
-                            return card;
-                        }
-                    }
+        if can_overcall
+            && hard_stage2_enabled()
+            && let Some(current_winner) = provisional_winner(round)
+            && current_winner != seat
+        {
+            let round_totals = round.penalty_totals();
+            let leader_total = round_totals[current_winner.index()] as u32;
+            let mut best_other_total = 0u32;
+            for other in PlayerPosition::LOOP.iter().copied() {
+                if other == current_winner {
+                    continue;
                 }
+                best_other_total = best_other_total.max(round_totals[other.index()] as u32);
+            }
+            let round_gap = leader_total.saturating_sub(best_other_total);
+            let cap = stage2_round_gap_cap();
+            let near_threshold = cap > 0 && round_gap >= cap.saturating_sub(1).max(1);
+            let over_threshold = cap > 0 && leader_total >= cap;
+            let runaway = over_threshold || near_threshold;
+            if runaway
+                && round_totals[seat.index()] as u32 <= leader_total
+                && let Some(card) = legal
+                    .iter()
+                    .copied()
+                    .filter(|c| c.suit == lead && c.rank.value() > current_lead_rank)
+                    .min_by_key(|c| c.rank.value())
+            {
+                return card;
             }
         }
 
@@ -1458,15 +1448,16 @@ fn choose_followup_card(
                 return card;
             }
         }
-        if round_gap > 0 && !hearts_void && !avoid_heavy_dump {
-            if let Some(card) = legal
+        if round_gap > 0
+            && !hearts_void
+            && !avoid_heavy_dump
+            && let Some(card) = legal
                 .iter()
                 .copied()
                 .filter(|c| c.suit == Suit::Hearts)
                 .max_by_key(|c| c.rank.value())
-            {
-                return card;
-            }
+        {
+            return card;
         }
         // If provisional winner is the scoreboard leader, prefer to dump QS or hearts to them
         if let (Some(pw), Some(leader)) = (provisional, leader_target)
@@ -1487,25 +1478,25 @@ fn choose_followup_card(
             }
         }
         // If the provisional winner is not the leader and there are already penalties on table, avoid feeding big penalties.
-        if round_gap == 0 {
-            if let (Some(pw), Some(leader)) = (provisional, leader_target) {
-                if pw != leader && penalties_on_table > 0 {
-                    if let Some(card) = legal
-                        .iter()
-                        .copied()
-                        .filter(|c| c.penalty_value() == 0)
-                        .min_by_key(|c| c.rank.value())
-                    {
-                        return card;
-                    }
-                    if let Some(card) = legal
-                        .iter()
-                        .copied()
-                        .min_by_key(|c| (c.penalty_value(), c.rank.value()))
-                    {
-                        return card;
-                    }
-                }
+        if round_gap == 0
+            && let (Some(pw), Some(leader)) = (provisional, leader_target)
+            && pw != leader
+            && penalties_on_table > 0
+        {
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .filter(|c| c.penalty_value() == 0)
+                .min_by_key(|c| c.rank.value())
+            {
+                return card;
+            }
+            if let Some(card) = legal
+                .iter()
+                .copied()
+                .min_by_key(|c| (c.penalty_value(), c.rank.value()))
+            {
+                return card;
             }
         }
         if !hearts_void
@@ -1519,10 +1510,10 @@ fn choose_followup_card(
             return card;
         }
         // Avoid generic QS fallback when feeding a non-leader with existing penalties
-        if leader_target.is_none() || provisional == leader_target || penalties_on_table == 0 {
-            if let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades()) {
-                return qs;
-            }
+        if (leader_target.is_none() || provisional == leader_target || penalties_on_table == 0)
+            && let Some(qs) = legal.iter().copied().find(|c| c.is_queen_of_spades())
+        {
+            return qs;
         }
 
         if !committed_moon && !legal.is_empty() {
@@ -1780,14 +1771,13 @@ fn play_card_with_tracker(
         tracker.note_card_played(seat, card);
     }
     let outcome = round.play_card(seat, card)?;
-    if let PlayOutcome::TrickCompleted { winner, penalties } = outcome {
-        if let Some(tracker) = tracker.as_mut() {
-            if let Some(trick) = round.trick_history().last() {
-                let plays: Vec<(PlayerPosition, Card)> =
-                    trick.plays().iter().map(|p| (p.position, p.card)).collect();
-                tracker.note_trick_completion(&plays, winner, penalties, round.hearts_broken());
-            }
-        }
+    if let PlayOutcome::TrickCompleted { winner, penalties } = outcome
+        && let Some(tracker) = tracker.as_mut()
+        && let Some(trick) = round.trick_history().last()
+    {
+        let plays: Vec<(PlayerPosition, Card)> =
+            trick.plays().iter().map(|p| (p.position, p.card)).collect();
+        tracker.note_trick_completion(&plays, winner, penalties, round.hearts_broken());
     }
     Ok(outcome)
 }

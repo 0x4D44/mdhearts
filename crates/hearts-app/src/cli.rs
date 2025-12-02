@@ -1,3 +1,4 @@
+use crate::debug::debug_enabled;
 use crate::endgame_export::EndgameExport;
 use hearts_core::game::match_state::MatchState;
 use hearts_core::game::serialization::MatchSnapshot;
@@ -48,6 +49,9 @@ impl From<std::io::Error> for CliError {
         CliError::Io(value)
     }
 }
+
+/// Result type for DP flip detection: (trick_index, normal_explanation, hard_explanation)
+type DpFlipResult = Option<(usize, Option<String>, Option<String>)>;
 
 impl From<serde_json::Error> for CliError {
     fn from(value: serde_json::Error) -> Self {
@@ -401,7 +405,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                         "  hard-stats: scanned={} elapsed={}ms",
                         stats.scanned, stats.elapsed_ms
                     );
-                    if debug_logs_enabled() {
+                    if debug_enabled() {
                         println!(
                             "    tier={:?} leverage={} util={}% limits: topk={} nextM={} ab={}",
                             stats.tier,
@@ -421,13 +425,13 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             stats.endgame_dp_hits,
                             stats.planner_nudge_hits
                         );
-                        if let Some(ref summary) = stats.planner_nudge_trace {
-                            if !summary.is_empty() {
-                                println!(
-                                    "    planner_nudge_guard={}",
-                                    format_nudge_trace_summary(Some(summary))
-                                );
-                            }
+                        if let Some(ref summary) = stats.planner_nudge_trace
+                            && !summary.is_empty()
+                        {
+                            println!(
+                                "    planner_nudge_guard={}",
+                                format_nudge_trace_summary(Some(summary))
+                            );
                         }
                     }
                 }
@@ -439,7 +443,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             if matches!(
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
-            ) && debug_logs_enabled()
+            ) && debug_enabled()
             {
                 let legal = controller.legal_moves(seat);
                 let ctx = controller.bot_context(seat);
@@ -541,7 +545,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                             "  hard-stats: scanned={} elapsed={}ms",
                             stats.scanned, stats.elapsed_ms
                         );
-                        if debug_logs_enabled() {
+                        if debug_enabled() {
                             println!(
                                 "    tier={:?} leverage={} util={}% limits: topk={} nextM={} ab={}",
                                 stats.tier,
@@ -560,13 +564,13 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                                 stats.endgame_dp_hits,
                                 stats.planner_nudge_hits
                             );
-                            if let Some(ref summary) = stats.planner_nudge_trace {
-                                if !summary.is_empty() {
-                                    println!(
-                                        "    planner_nudge_guard={}",
-                                        format_nudge_trace_summary(Some(summary))
-                                    );
-                                }
+                            if let Some(ref summary) = stats.planner_nudge_trace
+                                && !summary.is_empty()
+                            {
+                                println!(
+                                    "    planner_nudge_guard={}",
+                                    format_nudge_trace_summary(Some(summary))
+                                );
                             }
                         }
                     }
@@ -577,7 +581,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                 if matches!(
                     controller.bot_difficulty(),
                     crate::bot::BotDifficulty::FutureHard
-                ) && debug_logs_enabled()
+                ) && debug_enabled()
                 {
                     let legal = controller.legal_moves(seat);
                     let ctx = controller.bot_context(seat);
@@ -677,7 +681,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     "--import-snapshot <path> [--legacy-ok]",
                 ))?;
             let mut legacy_ok = false;
-            while let Some(flag) = args.next() {
+            for flag in args.by_ref() {
                 match flag.as_str() {
                     "--legacy-ok" => legacy_ok = true,
                     other => return Err(CliError::UnknownCommand(other.to_string())),
@@ -737,7 +741,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             if matches!(
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
-            ) && debug_logs_enabled()
+            ) && debug_enabled()
             {
                 let legal = controller.legal_moves(seat);
                 let ctx = controller.bot_context(seat);
@@ -897,7 +901,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     stats.scanned, stats.elapsed_ms
                 );
             }
-            if debug_logs_enabled() {
+            if debug_enabled() {
                 let legal = hard.legal_moves(seat);
                 let ctx = hard.bot_context(seat);
                 let verbose = crate::bot::PlayPlannerHard::explain_candidates_verbose(&legal, &ctx);
@@ -937,7 +941,7 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             }
 
             let diff_a = diffs
-                .get(0)
+                .first()
                 .copied()
                 .unwrap_or(crate::bot::BotDifficulty::NormalHeuristic);
             let diff_b = diffs
@@ -1107,77 +1111,76 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
             if matches!(
                 controller.bot_difficulty(),
                 crate::bot::BotDifficulty::FutureHard
-            ) {
-                if let Some(stats) = crate::bot::search::last_stats() {
-                    let mut stats_map = serde_json::Map::new();
-                    stats_map.insert("scanned".into(), stats.scanned.into());
-                    stats_map.insert("elapsed_ms".into(), stats.elapsed_ms.into());
-                    stats_map.insert("tier".into(), format!("{:?}", stats.tier).into());
-                    stats_map.insert("leverage".into(), stats.leverage_score.into());
-                    stats_map.insert("utilization".into(), stats.utilization.into());
-                    stats_map.insert(
-                        "limits".into(),
-                        serde_json::json!({
-                            "topk": stats.limits_in_effect.phaseb_topk,
-                            "nextM": stats.limits_in_effect.next_probe_m,
-                            "ab": stats.limits_in_effect.ab_margin
-                        }),
-                    );
-                    stats_map.insert("cont_cap".into(), stats.cont_cap.into());
-                    stats_map.insert(
-                        "continuation_scale_permil".into(),
-                        stats.continuation_scale_permil.into(),
-                    );
-                    stats_map.insert(
-                        "wide_boost_feed_permil".into(),
-                        stats.wide_boost_feed_permil.into(),
-                    );
-                    stats_map.insert(
-                        "wide_boost_self_permil".into(),
-                        stats.wide_boost_self_permil.into(),
-                    );
-                    stats_map.insert("next3_tiny_hits".into(), stats.next3_tiny_hits.into());
-                    stats_map.insert("endgame_dp_hits".into(), stats.endgame_dp_hits.into());
-                    stats_map.insert("planner_nudge_hits".into(), stats.planner_nudge_hits.into());
-                    if let Some(summary) = stats.planner_nudge_trace.as_ref() {
-                        if !summary.is_empty() {
-                            let arr: Vec<_> = summary
-                                .iter()
-                                .map(|(reason, count)| {
-                                    serde_json::json!({
-                                        "reason": reason,
-                                        "count": count
-                                    })
-                                })
-                                .collect();
-                            stats_map.insert("planner_nudge_guard".into(), arr.into());
-                        }
-                    }
-                    if let Some(bias) = stats.mix_hint_bias {
-                        let mut bias_map = serde_json::Map::new();
-                        bias_map.insert(
-                            "snnh_feed_bonus_hits".into(),
-                            bias.snnh_feed_bonus_hits.into(),
-                        );
-                        bias_map.insert(
-                            "snnh_capture_guard_hits".into(),
-                            bias.snnh_capture_guard_hits.into(),
-                        );
-                        bias_map.insert(
-                            "shsh_feed_bonus_hits".into(),
-                            bias.shsh_feed_bonus_hits.into(),
-                        );
-                        bias_map.insert(
-                            "shsh_capture_guard_hits".into(),
-                            bias.shsh_capture_guard_hits.into(),
-                        );
-                        stats_map.insert("mix_hint_bias".into(), bias_map.into());
-                    }
-                    if let Some(delta) = stats.controller_bias_delta {
-                        stats_map.insert("controller_bias_delta".into(), delta.into());
-                    }
-                    stats_obj = serde_json::Value::Object(stats_map);
+            ) && let Some(stats) = crate::bot::search::last_stats()
+            {
+                let mut stats_map = serde_json::Map::new();
+                stats_map.insert("scanned".into(), stats.scanned.into());
+                stats_map.insert("elapsed_ms".into(), stats.elapsed_ms.into());
+                stats_map.insert("tier".into(), format!("{:?}", stats.tier).into());
+                stats_map.insert("leverage".into(), stats.leverage_score.into());
+                stats_map.insert("utilization".into(), stats.utilization.into());
+                stats_map.insert(
+                    "limits".into(),
+                    serde_json::json!({
+                        "topk": stats.limits_in_effect.phaseb_topk,
+                        "nextM": stats.limits_in_effect.next_probe_m,
+                        "ab": stats.limits_in_effect.ab_margin
+                    }),
+                );
+                stats_map.insert("cont_cap".into(), stats.cont_cap.into());
+                stats_map.insert(
+                    "continuation_scale_permil".into(),
+                    stats.continuation_scale_permil.into(),
+                );
+                stats_map.insert(
+                    "wide_boost_feed_permil".into(),
+                    stats.wide_boost_feed_permil.into(),
+                );
+                stats_map.insert(
+                    "wide_boost_self_permil".into(),
+                    stats.wide_boost_self_permil.into(),
+                );
+                stats_map.insert("next3_tiny_hits".into(), stats.next3_tiny_hits.into());
+                stats_map.insert("endgame_dp_hits".into(), stats.endgame_dp_hits.into());
+                stats_map.insert("planner_nudge_hits".into(), stats.planner_nudge_hits.into());
+                if let Some(summary) = stats.planner_nudge_trace.as_ref()
+                    && !summary.is_empty()
+                {
+                    let arr: Vec<_> = summary
+                        .iter()
+                        .map(|(reason, count)| {
+                            serde_json::json!({
+                                "reason": reason,
+                                "count": count
+                            })
+                        })
+                        .collect();
+                    stats_map.insert("planner_nudge_guard".into(), arr.into());
                 }
+                if let Some(bias) = stats.mix_hint_bias {
+                    let mut bias_map = serde_json::Map::new();
+                    bias_map.insert(
+                        "snnh_feed_bonus_hits".into(),
+                        bias.snnh_feed_bonus_hits.into(),
+                    );
+                    bias_map.insert(
+                        "snnh_capture_guard_hits".into(),
+                        bias.snnh_capture_guard_hits.into(),
+                    );
+                    bias_map.insert(
+                        "shsh_feed_bonus_hits".into(),
+                        bias.shsh_feed_bonus_hits.into(),
+                    );
+                    bias_map.insert(
+                        "shsh_capture_guard_hits".into(),
+                        bias.shsh_capture_guard_hits.into(),
+                    );
+                    stats_map.insert("mix_hint_bias".into(), bias_map.into());
+                }
+                if let Some(delta) = stats.controller_bias_delta {
+                    stats_map.insert("controller_bias_delta".into(), delta.into());
+                }
+                stats_obj = serde_json::Value::Object(stats_map);
             }
             let weights = match controller.bot_difficulty() {
                 crate::bot::BotDifficulty::FutureHard => serde_json::json!({
@@ -1295,13 +1298,13 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
                     .ok()
                     .and_then(|s| s.parse::<u64>().ok()),
             };
-            if let Some(threshold) = thr {
-                if p95 > threshold {
-                    eprintln!(
-                        "WARNING: p95_us={} exceeds threshold {} (difficulty={:?})",
-                        p95, threshold, difficulty
-                    );
-                }
+            if let Some(threshold) = thr
+                && p95 > threshold
+            {
+                eprintln!(
+                    "WARNING: p95_us={} exceeds threshold {} (difficulty={:?})",
+                    p95, threshold, difficulty
+                );
             }
             Ok(CliOutcome::Handled)
         }
@@ -1707,12 +1710,6 @@ pub fn run_cli() -> Result<CliOutcome, CliError> {
     }
 }
 
-fn debug_logs_enabled() -> bool {
-    std::env::var("MDH_DEBUG_LOGS")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
-        .unwrap_or(false)
-}
-
 fn export_snapshot(path: PathBuf, seed: u64, seat: PlayerPosition) -> Result<(), CliError> {
     let state = MatchState::with_seed(seat, seed);
     let json = MatchSnapshot::to_json_full(&state)?;
@@ -1732,11 +1729,7 @@ fn export_snapshot(path: PathBuf, seed: u64, seat: PlayerPosition) -> Result<(),
     Ok(())
 }
 
-fn export_seed_snapshot(
-    path: PathBuf,
-    seed: u64,
-    seat: PlayerPosition,
-) -> Result<(), CliError> {
+fn export_seed_snapshot(path: PathBuf, seed: u64, seat: PlayerPosition) -> Result<(), CliError> {
     let state = MatchState::with_seed(seat, seed);
     let json = MatchSnapshot::to_json(&state)?;
     if let Some(parent) = path.parent() {
@@ -1768,7 +1761,7 @@ fn import_snapshot(path: PathBuf, legacy_ok: bool) -> Result<(), CliError> {
     let is_legacy = snapshot.round.is_none();
     if is_legacy && !legacy_ok {
         return Err(CliError::InvalidValue {
-            flag: "--import-snapshot".into(),
+            flag: "--import-snapshot",
             value: "legacy snapshot (missing round data); rerun with --legacy-ok or re-export using --export-snapshot".into(),
         });
     }
@@ -2006,10 +1999,7 @@ fn parse_hard_cli_flags(args: &mut impl Iterator<Item = String>) -> Result<(), C
     Ok(())
 }
 
-fn seek_dp_flip_for(
-    seed: u64,
-    target_seat: PlayerPosition,
-) -> Result<Option<(usize, Option<String>, Option<String>)>, CliError> {
+fn seek_dp_flip_for(seed: u64, target_seat: PlayerPosition) -> Result<DpFlipResult, CliError> {
     let mut controller =
         crate::controller::GameController::new_with_seed(Some(seed), PlayerPosition::North);
     controller.set_bot_difficulty(crate::bot::BotDifficulty::FutureHard);

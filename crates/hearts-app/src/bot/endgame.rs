@@ -96,12 +96,8 @@ impl EndgamePosition {
             .map(|p| (p.position, p.card))
             .collect();
 
-        // Leader
-        let leader = if trick_cards.is_empty() {
-            round.current_trick().leader()
-        } else {
-            round.current_trick().leader()
-        };
+        // Leader is always the trick leader
+        let leader = round.current_trick().leader();
 
         EndgamePosition {
             hands,
@@ -412,16 +408,14 @@ fn endgame_max_cards(ctx: &BotContext<'_>) -> usize {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(13) // PERFECT: 13 cards = entire hand for Search difficulty
-            .max(2)
-            .min(13);
+            .clamp(2, 13);
     }
 
     std::env::var("MDH_ENDGAME_MAX_CARDS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(7) // Normal: 7 cards
-        .max(2)
-        .min(10)
+        .clamp(2, 10)
 }
 
 // ============================================================================
@@ -446,10 +440,10 @@ impl PlayPlannerHard {
                 return None; // No time left
             }
             // If we have very little time left (< 5ms), skip endgame solver
-            if let Some(remaining) = l.remaining_millis() {
-                if remaining < 5 {
-                    return None;
-                }
+            if let Some(remaining) = l.remaining_millis()
+                && remaining < 5
+            {
+                return None;
             }
         }
 

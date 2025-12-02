@@ -58,15 +58,16 @@ impl TranspositionTable {
     }
 
     pub fn probe(&mut self, hash: u64, depth: u8, alpha: i32, beta: i32) -> Option<i32> {
-        if let Some(entry) = self.entries.get(&hash) {
-            if entry.hash == hash && entry.depth >= depth {
-                self.hits += 1;
-                match entry.node_type {
-                    NodeType::Exact => return Some(entry.score),
-                    NodeType::LowerBound if entry.score >= beta => return Some(entry.score),
-                    NodeType::UpperBound if entry.score <= alpha => return Some(entry.score),
-                    _ => {}
-                }
+        if let Some(entry) = self.entries.get(&hash)
+            && entry.hash == hash
+            && entry.depth >= depth
+        {
+            self.hits += 1;
+            match entry.node_type {
+                NodeType::Exact => return Some(entry.score),
+                NodeType::LowerBound if entry.score >= beta => return Some(entry.score),
+                NodeType::UpperBound if entry.score <= alpha => return Some(entry.score),
+                _ => {}
             }
         }
         self.misses += 1;
@@ -82,10 +83,10 @@ impl TranspositionTable {
         node_type: NodeType,
     ) {
         // Evict random entry if table is full
-        if self.entries.len() >= self.max_size {
-            if let Some(&key) = self.entries.keys().next() {
-                self.entries.remove(&key);
-            }
+        if self.entries.len() >= self.max_size
+            && let Some(&key) = self.entries.keys().next()
+        {
+            self.entries.remove(&key);
         }
 
         self.entries.insert(
@@ -399,7 +400,7 @@ impl DeepSearch {
         _round: &RoundState,
         _seat: PlayerPosition,
     ) -> Vec<Card> {
-        let mut moves: Vec<_> = legal.iter().copied().collect();
+        let mut moves: Vec<_> = legal.to_vec();
 
         // Simple ordering: prefer low cards to avoid taking penalties
         // This is a rough heuristic for opponent play
@@ -697,7 +698,7 @@ impl DeepSearch {
         let temp_ctx = BotContext::new(
             seat,
             round,
-            &dummy_scores,
+            dummy_scores,
             PassingDirection::Hold,
             &dummy_tracker,
             dummy_difficulty,
@@ -765,16 +766,14 @@ fn deep_search_max_depth(ctx: &BotContext<'_>) -> u8 {
             .ok()
             .and_then(|s| s.parse::<u8>().ok())
             .unwrap_or(10) // MAXIMUM: 10 plies for Search difficulty
-            .max(1)
-            .min(13); // Can search whole hand
+            .clamp(1, 13); // Can search whole hand
     }
 
     std::env::var("MDH_SEARCH_MAX_DEPTH")
         .ok()
         .and_then(|s| s.parse::<u8>().ok())
         .unwrap_or(3) // Normal: 3 plies
-        .max(1)
-        .min(6)
+        .clamp(1, 6)
 }
 
 /// Transposition table size (number of positions to cache)
@@ -787,16 +786,14 @@ fn deep_search_tt_size(ctx: &BotContext<'_>) -> usize {
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(10_000_000) // MAXIMUM: 10M positions for Search difficulty
-            .max(1000)
-            .min(20_000_000);
+            .clamp(1000, 20_000_000);
     }
 
     std::env::var("MDH_SEARCH_TT_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(500_000) // Normal: 500k
-        .max(1000)
-        .min(10_000_000)
+        .clamp(1000, 10_000_000)
 }
 
 /// Time budget per move in milliseconds
@@ -809,16 +806,14 @@ fn deep_search_time_ms(ctx: &BotContext<'_>) -> u32 {
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
             .unwrap_or(2000) // MAXIMUM: 2000ms for Search difficulty
-            .max(10)
-            .min(60000); // Up to 60 seconds
+            .clamp(10, 60000); // Up to 60 seconds
     }
 
     std::env::var("MDH_SEARCH_TIME_MS")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(100) // Normal: 100ms
-        .max(10)
-        .min(5000)
+        .clamp(10, 5000)
 }
 
 // ============================================================================

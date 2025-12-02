@@ -1,6 +1,7 @@
 use super::{
     BotContext, BotStyle, card_sort_key, count_cards_in_suit, determine_style, snapshot_scores,
 };
+use crate::debug::debug_enabled;
 use hearts_core::model::card::Card;
 use hearts_core::model::hand::Hand;
 use hearts_core::model::rank::Rank;
@@ -9,15 +10,6 @@ use std::cmp::Ordering;
 use std::sync::OnceLock;
 
 pub struct PassPlanner;
-
-fn debug_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("MDH_DEBUG_LOGS")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on"))
-            .unwrap_or(false)
-    })
-}
 
 impl PassPlanner {
     pub fn choose(hand: &Hand, ctx: &BotContext<'_>) -> Option<[Card; 3]> {
@@ -76,13 +68,13 @@ impl PassPlanner {
             }
         }
 
-        if debug_enabled() {
-            if let Some((score, picks, _)) = &best {
-                eprintln!(
-                    "mdhearts: pass best score={} cards=[{}, {}, {}]",
-                    score, picks[0], picks[1], picks[2]
-                );
-            }
+        if debug_enabled()
+            && let Some((score, picks, _)) = &best
+        {
+            eprintln!(
+                "mdhearts: pass best score={} cards=[{}, {}, {}]",
+                score, picks[0], picks[1], picks[2]
+            );
         }
 
         best.map(|(_, picks, _)| picks)

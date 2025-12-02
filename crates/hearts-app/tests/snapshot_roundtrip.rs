@@ -11,8 +11,14 @@ fn full_snapshot_fixture_restores_round_state() {
 
     assert_eq!(state.seed(), snapshot.seed);
     assert_eq!(state.round_number(), snapshot.round_number);
-    assert_eq!(state.passing_direction().as_str(), snapshot.passing_direction);
-    assert_eq!(state.passing_direction(), hearts_core::model::passing::PassingDirection::Left);
+    assert_eq!(
+        state.passing_direction().as_str(),
+        snapshot.passing_direction
+    );
+    assert_eq!(
+        state.passing_direction(),
+        hearts_core::model::passing::PassingDirection::Left
+    );
     assert_eq!(state.round().starting_player(), PlayerPosition::North);
 
     // Hands should match fixture (3 cards each, sorted).
