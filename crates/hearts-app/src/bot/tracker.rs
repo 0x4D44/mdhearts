@@ -390,6 +390,18 @@ fn belief_cache_capacity_from_env() -> usize {
         .unwrap_or(128)
 }
 
+/// Check if belief-weighted sampling is enabled (default: true)
+fn belief_weighted_sampling_enabled() -> bool {
+    match std::env::var("MDH_BELIEF_WEIGHTED_SAMPLING") {
+        Ok(val) => {
+            let v = val.trim().to_ascii_lowercase();
+            // Only disable if explicitly set to 0/false/off
+            !matches!(v.as_str(), "0" | "false" | "off")
+        }
+        Err(_) => true, // Default enabled
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoonState {
     Inactive,
@@ -632,7 +644,7 @@ impl UnseenTracker {
         &self,
         rng: &mut impl Rng,
         our_seat: PlayerPosition,
-        round: &RoundState,
+        _round: &RoundState,
     ) -> SampledWorld {
         let mut world = SampledWorld::new();
         let seed = rng.r#gen();
@@ -641,20 +653,40 @@ impl UnseenTracker {
         // Collect all unseen cards
         let mut unseen_cards: Vec<Card> = self.unseen.iter().copied().collect();
 
-        // Simple approach: shuffle and deal respecting voids
-        // TODO: More sophisticated belief-weighted sampling
-        unseen_cards.shuffle(rng);
-
         // Determine how many cards each player should get
+        // Each opponent should have approximately (unseen_count / 3) cards
+        let unseen_count = unseen_cards.len();
+        let base_per_player = unseen_count / 3;
+        let remainder = unseen_count % 3;
+
         let mut cards_per_player = [0usize; 4];
+        let mut remainder_assigned = 0usize;
         for seat in PlayerPosition::LOOP.iter().copied() {
             if seat == our_seat {
                 // We already know our hand, don't sample for ourselves
                 cards_per_player[seat.index()] = 0;
             } else {
-                // Other players get their fair share
-                cards_per_player[seat.index()] = round.hand(seat).len() + (unseen_cards.len() / 3);
+                // Other players get their fair share, distribute remainder evenly
+                let extra = if remainder_assigned < remainder { 1 } else { 0 };
+                remainder_assigned += extra;
+                cards_per_player[seat.index()] = base_per_player + extra;
             }
+        }
+
+        if belief_weighted_sampling_enabled() {
+            // Belief-weighted sampling: sort cards by certainty (max probability spread)
+            // so that cards with clear ownership signals are assigned first
+            unseen_cards.sort_by(|a, b| {
+                let certainty_a = self.card_certainty(*a, our_seat);
+                let certainty_b = self.card_certainty(*b, our_seat);
+                // Sort descending by certainty (most certain first)
+                certainty_b
+                    .partial_cmp(&certainty_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        } else {
+            // Fallback: simple shuffle for backwards compatibility
+            unseen_cards.shuffle(rng);
         }
 
         // Distribute cards respecting void constraints
@@ -664,7 +696,7 @@ impl UnseenTracker {
                 continue;
             }
 
-            // Find which players can receive this card (not void in its suit)
+            // Find which players can receive this card (not void in its suit, have capacity)
             let mut eligible: Vec<PlayerPosition> = PlayerPosition::LOOP
                 .iter()
                 .copied()
@@ -676,7 +708,19 @@ impl UnseenTracker {
                 .collect();
 
             if eligible.is_empty() {
-                // If no one is eligible due to voids, relax the constraint
+                // If no one is eligible due to voids/capacity, relax constraints
+                eligible = PlayerPosition::LOOP
+                    .iter()
+                    .copied()
+                    .filter(|&seat| {
+                        seat != our_seat
+                            && world.hands[seat.index()].len() < cards_per_player[seat.index()]
+                    })
+                    .collect();
+            }
+
+            if eligible.is_empty() {
+                // Still no one eligible (all full), give to anyone except ourselves
                 eligible = PlayerPosition::LOOP
                     .iter()
                     .copied()
@@ -689,9 +733,15 @@ impl UnseenTracker {
                 let weights: Vec<f32> = eligible
                     .iter()
                     .map(|&seat| {
-                        self.beliefs[seat.index()]
+                        let base_prob = self.beliefs[seat.index()]
                             .card_probability(*card)
-                            .max(0.001)
+                            .max(0.001);
+                        // Apply void penalty - if player is void in this suit, use minimum weight
+                        if self.is_void(seat, card.suit) {
+                            0.001
+                        } else {
+                            base_prob
+                        }
                     })
                     .collect();
 
@@ -714,6 +764,39 @@ impl UnseenTracker {
         }
 
         world
+    }
+
+    /// Calculate the "certainty" of a card's ownership - higher means more certain
+    /// which player has it (used for sorting in belief-weighted sampling)
+    fn card_certainty(&self, card: Card, our_seat: PlayerPosition) -> f32 {
+        let mut probs = Vec::with_capacity(3);
+        for seat in PlayerPosition::LOOP.iter().copied() {
+            if seat == our_seat {
+                continue;
+            }
+            let prob = if self.is_void(seat, card.suit) {
+                0.0
+            } else {
+                self.beliefs[seat.index()].card_probability(card)
+            };
+            probs.push(prob);
+        }
+
+        if probs.is_empty() {
+            return 0.0;
+        }
+
+        // Certainty = max probability - average of others
+        // Higher means one player is much more likely to have this card
+        let max_prob = probs.iter().cloned().fold(0.0f32, f32::max);
+        let sum: f32 = probs.iter().sum();
+        let avg = sum / probs.len() as f32;
+
+        // Also boost certainty for cards where players are void
+        let void_count = probs.iter().filter(|&&p| p == 0.0).count();
+        let void_bonus = void_count as f32 * 0.5;
+
+        (max_prob - avg) + void_bonus
     }
 }
 
