@@ -28,10 +28,16 @@ fn hard_stage1_enabled() -> bool {
 }
 
 fn hard_stage2_enabled() -> bool {
+    // Stage 2 is now enabled by default - only disable if explicitly set to 0/false/off
     let v2 = std::env::var("MDH_FEATURE_HARD_STAGE2").unwrap_or_default();
     let v12 = std::env::var("MDH_FEATURE_HARD_STAGE12").unwrap_or_default();
     let v = if !v2.is_empty() { v2 } else { v12 };
-    v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("on")
+    // Return true unless explicitly disabled
+    if v.is_empty() {
+        return true; // Default enabled
+    }
+    let v_lower = v.trim().to_ascii_lowercase();
+    !matches!(v_lower.as_str(), "0" | "false" | "off")
 }
 
 thread_local! {
@@ -265,14 +271,15 @@ impl PlayPlanner {
             // Void creation bonus.
             let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
             if suit_remaining <= 1 {
-                score += 750;
-                dbg.add("void_creation", 750);
+                let bonus = weights().void_creation_bonus;
+                score += bonus;
+                dbg.add("void_creation", bonus);
             }
 
             // Prefer dumping high cards when following suit.
             if let Some(lead) = lead_suit {
                 if card.suit == lead {
-                    let d = -((card.rank.value() as i32) * 24);
+                    let d = -((card.rank.value() as i32) * weights().follow_high_rank_multiplier);
                     score += d;
                     dbg.add("follow_high_rank_penalty", d);
                 } else {
@@ -282,15 +289,16 @@ impl PlayPlanner {
                 }
             } else {
                 // We are leading.
-                let d = -((card.rank.value() as i32) * 10);
+                let d = -((card.rank.value() as i32) * weights().lead_rank_bias_multiplier);
                 score += d;
                 dbg.add("lead_rank_bias", d);
                 if card.suit == Suit::Hearts
                     && !ctx.round.hearts_broken()
                     && style != BotStyle::HuntLeader
                 {
-                    score -= 1_100;
-                    dbg.add("lead_unbroken_hearts_penalty", -1100);
+                    let penalty = -weights().lead_unbroken_hearts_penalty;
+                    score += penalty;
+                    dbg.add("lead_unbroken_hearts_penalty", penalty);
                 }
                 // Early-round caution: even if hearts are broken, avoid leading hearts too early in Cautious style
                 if style == BotStyle::Cautious
@@ -303,13 +311,15 @@ impl PlayPlanner {
                     dbg.add("early_round_lead_hearts_caution", p);
                 }
                 if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
-                    let d = 10_000 + (card.penalty_value() as i32 * 400);
+                    let d = weights().hunt_leader_lead_base
+                        + (card.penalty_value() as i32 * weights().hunt_leader_lead_perpen);
                     score += d;
                     dbg.add("hunt_leader_lead_dump", d);
                 }
                 if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
-                    score += 1_300;
-                    dbg.add("moon_lead_hearts_bonus", 1300);
+                    let bonus = weights().moon_lead_hearts_bonus;
+                    score += bonus;
+                    dbg.add("moon_lead_hearts_bonus", bonus);
                 }
             }
 
@@ -413,27 +423,28 @@ impl PlayPlanner {
             );
             let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
             if suit_remaining <= 1 {
-                score += 750;
+                score += weights().void_creation_bonus;
             }
             if let Some(lead) = lead_suit {
                 if card.suit == lead {
-                    score -= (card.rank.value() as i32) * 24;
+                    score -= (card.rank.value() as i32) * weights().follow_high_rank_multiplier;
                 } else {
                     score += card.penalty_value() as i32 * weights().off_suit_dump_bonus;
                 }
             } else {
-                score -= (card.rank.value() as i32) * 10;
+                score -= (card.rank.value() as i32) * weights().lead_rank_bias_multiplier;
                 if card.suit == Suit::Hearts
                     && !ctx.round.hearts_broken()
                     && style != BotStyle::HuntLeader
                 {
-                    score -= 1_100;
+                    score -= weights().lead_unbroken_hearts_penalty;
                 }
                 if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
-                    score += 10_000 + (card.penalty_value() as i32 * 400);
+                    score += weights().hunt_leader_lead_base
+                        + (card.penalty_value() as i32 * weights().hunt_leader_lead_perpen);
                 }
                 if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
-                    score += 1_300;
+                    score += weights().moon_lead_hearts_bonus;
                 }
             }
             if snapshot.max_player == ctx.seat && snapshot.max_score >= 90 {
@@ -511,27 +522,27 @@ pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style:
 
     let suit_remaining = count_cards_in_suit(ctx.hand(), card.suit);
     if suit_remaining <= 1 {
-        score += 750;
+        score += weights().void_creation_bonus;
     }
 
     if let Some(lead) = lead_suit {
         if card.suit == lead {
-            score -= (card.rank.value() as i32) * 24;
+            score -= (card.rank.value() as i32) * weights().follow_high_rank_multiplier;
         } else {
-            // Use same weight as production code (was hardcoded 500, now uses actual weight)
             score += card.penalty_value() as i32 * weights().off_suit_dump_bonus;
         }
     } else {
-        score -= (card.rank.value() as i32) * 10;
+        score -= (card.rank.value() as i32) * weights().lead_rank_bias_multiplier;
         if card.suit == Suit::Hearts && !ctx.round.hearts_broken() && style != BotStyle::HuntLeader
         {
-            score -= 1_100;
+            score -= weights().lead_unbroken_hearts_penalty;
         }
         if style == BotStyle::HuntLeader && card.penalty_value() > 0 {
-            score += 10_000 + (card.penalty_value() as i32 * 400);
+            score += weights().hunt_leader_lead_base
+                + (card.penalty_value() as i32 * weights().hunt_leader_lead_perpen);
         }
         if style == BotStyle::AggressiveMoon && card.suit == Suit::Hearts {
-            score += 1_300;
+            score += weights().moon_lead_hearts_bonus;
         }
     }
 
@@ -641,31 +652,32 @@ fn base_score(
     let mix_hint = mix_hint_for_play();
 
     if will_capture {
-        score -= 4_800;
-        score -= penalties_i32 * 700;
+        score -= weights().base_capture_penalty;
+        score -= penalties_i32 * weights().base_capture_perpen;
     } else {
-        score += 600;
-        score += penalties_i32 * 500;
+        score += weights().base_shed_bonus;
+        score += penalties_i32 * weights().base_shed_perpen;
     }
 
     if penalties == 0 && will_capture {
         // Winning a clean trick is still mildly negative to keep low profile.
-        score -= (card.rank.value() as i32) * 18;
+        score -= (card.rank.value() as i32) * weights().clean_trick_rank_multiplier;
     }
 
     if let Some(lead) = lead_suit
         && card.suit != lead
         && !ctx.round.current_trick().plays().is_empty()
     {
-        score += 200;
+        score += weights().off_suit_play_bonus;
     }
 
     match style {
         BotStyle::AggressiveMoon => {
             if will_capture {
-                score += 5_500 + penalties_i32 * 900;
+                score +=
+                    weights().moon_capture_bonus + penalties_i32 * weights().moon_capture_perpen;
             } else {
-                score -= penalties_i32 * 800;
+                score -= penalties_i32 * weights().moon_shed_perpen;
             }
         }
         BotStyle::HuntLeader => {
@@ -1171,6 +1183,7 @@ fn simulate_trick(
 }
 
 struct Weights {
+    // Existing weights
     off_suit_dump_bonus: i32,
     cards_played_bias: i32,
     early_hearts_lead_caution: i32,
@@ -1181,6 +1194,23 @@ struct Weights {
     nonleader_feed_perpen: i32,
     leader_feed_gap_per10: i32,
     endgame_feed_cap_perpen: i32,
+    // Newly exposed weights (previously hardcoded)
+    void_creation_bonus: i32,
+    follow_high_rank_multiplier: i32,
+    lead_rank_bias_multiplier: i32,
+    lead_unbroken_hearts_penalty: i32,
+    hunt_leader_lead_base: i32,
+    hunt_leader_lead_perpen: i32,
+    moon_lead_hearts_bonus: i32,
+    base_capture_penalty: i32,
+    base_capture_perpen: i32,
+    base_shed_bonus: i32,
+    base_shed_perpen: i32,
+    clean_trick_rank_multiplier: i32,
+    off_suit_play_bonus: i32,
+    moon_capture_bonus: i32,
+    moon_capture_perpen: i32,
+    moon_shed_perpen: i32,
 }
 
 fn parse_env_i32(key: &str) -> Option<i32> {
@@ -1190,6 +1220,7 @@ fn parse_env_i32(key: &str) -> Option<i32> {
 fn weights() -> &'static Weights {
     static CACHED: OnceLock<Weights> = OnceLock::new();
     CACHED.get_or_init(|| Weights {
+        // Existing weights
         off_suit_dump_bonus: parse_env_i32("MDH_W_OFFSUIT_BONUS").unwrap_or(600),
         cards_played_bias: parse_env_i32("MDH_W_CARDS_PLAYED").unwrap_or(10),
         early_hearts_lead_caution: parse_env_i32("MDH_W_EARLY_HEARTS_LEAD").unwrap_or(600),
@@ -1200,13 +1231,30 @@ fn weights() -> &'static Weights {
         nonleader_feed_perpen: parse_env_i32("MDH_W_NONLEADER_FEED_PERPEN").unwrap_or(2000),
         leader_feed_gap_per10: parse_env_i32("MDH_W_LEADER_FEED_GAP_PER10").unwrap_or(40),
         endgame_feed_cap_perpen: parse_env_i32("MDH_W_ENDGAME_FEED_CAP").unwrap_or(0),
+        // Newly exposed weights (previously hardcoded)
+        void_creation_bonus: parse_env_i32("MDH_W_VOID_CREATION_BONUS").unwrap_or(750),
+        follow_high_rank_multiplier: parse_env_i32("MDH_W_FOLLOW_HIGH_RANK_MULT").unwrap_or(24),
+        lead_rank_bias_multiplier: parse_env_i32("MDH_W_LEAD_RANK_BIAS_MULT").unwrap_or(10),
+        lead_unbroken_hearts_penalty: parse_env_i32("MDH_W_LEAD_UNBROKEN_HEARTS").unwrap_or(1100),
+        hunt_leader_lead_base: parse_env_i32("MDH_W_HUNT_LEADER_LEAD_BASE").unwrap_or(10000),
+        hunt_leader_lead_perpen: parse_env_i32("MDH_W_HUNT_LEADER_LEAD_PERPEN").unwrap_or(400),
+        moon_lead_hearts_bonus: parse_env_i32("MDH_W_MOON_LEAD_HEARTS_BONUS").unwrap_or(1300),
+        base_capture_penalty: parse_env_i32("MDH_W_BASE_CAPTURE_PENALTY").unwrap_or(4800),
+        base_capture_perpen: parse_env_i32("MDH_W_BASE_CAPTURE_PERPEN").unwrap_or(700),
+        base_shed_bonus: parse_env_i32("MDH_W_BASE_SHED_BONUS").unwrap_or(600),
+        base_shed_perpen: parse_env_i32("MDH_W_BASE_SHED_PERPEN").unwrap_or(500),
+        clean_trick_rank_multiplier: parse_env_i32("MDH_W_CLEAN_TRICK_RANK_MULT").unwrap_or(18),
+        off_suit_play_bonus: parse_env_i32("MDH_W_OFF_SUIT_PLAY_BONUS").unwrap_or(200),
+        moon_capture_bonus: parse_env_i32("MDH_W_MOON_CAPTURE_BONUS").unwrap_or(5500),
+        moon_capture_perpen: parse_env_i32("MDH_W_MOON_CAPTURE_PERPEN").unwrap_or(900),
+        moon_shed_perpen: parse_env_i32("MDH_W_MOON_SHED_PERPEN").unwrap_or(800),
     })
 }
 
 pub fn debug_weights_string() -> String {
     let w = weights();
     format!(
-        "off_suit_dump_bonus={} cards_played_bias={} early_hearts_lead_caution={} near100_self_capture_base={} near100_shed_perpen={} hunt_feed_perpen={} leader_feed_base={} nonleader_feed_perpen={} leader_feed_gap_per10={} endgame_feed_cap_perpen={}",
+        "off_suit_dump_bonus={} cards_played_bias={} early_hearts_lead_caution={} near100_self_capture_base={} near100_shed_perpen={} hunt_feed_perpen={} leader_feed_base={} nonleader_feed_perpen={} leader_feed_gap_per10={} endgame_feed_cap_perpen={} void_creation_bonus={} follow_high_rank_mult={} lead_rank_bias_mult={} lead_unbroken_hearts={} hunt_leader_lead_base={} hunt_leader_lead_perpen={} moon_lead_hearts_bonus={} base_capture_penalty={} base_capture_perpen={} base_shed_bonus={} base_shed_perpen={} clean_trick_rank_mult={} off_suit_play_bonus={} moon_capture_bonus={} moon_capture_perpen={} moon_shed_perpen={}",
         w.off_suit_dump_bonus,
         w.cards_played_bias,
         w.early_hearts_lead_caution,
@@ -1216,7 +1264,23 @@ pub fn debug_weights_string() -> String {
         w.leader_feed_base,
         w.nonleader_feed_perpen,
         w.leader_feed_gap_per10,
-        w.endgame_feed_cap_perpen
+        w.endgame_feed_cap_perpen,
+        w.void_creation_bonus,
+        w.follow_high_rank_multiplier,
+        w.lead_rank_bias_multiplier,
+        w.lead_unbroken_hearts_penalty,
+        w.hunt_leader_lead_base,
+        w.hunt_leader_lead_perpen,
+        w.moon_lead_hearts_bonus,
+        w.base_capture_penalty,
+        w.base_capture_perpen,
+        w.base_shed_bonus,
+        w.base_shed_perpen,
+        w.clean_trick_rank_multiplier,
+        w.off_suit_play_bonus,
+        w.moon_capture_bonus,
+        w.moon_capture_perpen,
+        w.moon_shed_perpen
     )
 }
 
