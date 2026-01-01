@@ -70,7 +70,7 @@ fn hard_endgame_dp_hits_when_enabled() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

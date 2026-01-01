@@ -104,7 +104,7 @@ fn hard_guard_round_leader_saturated_blocks_feed() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -217,7 +217,7 @@ fn hard_flat_scores_uses_round_leader_penalties_gt0() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -307,7 +307,7 @@ fn hard_flat_scores_nudge_suppressed_below_min_gap() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -390,7 +390,7 @@ fn hard_flat_scores_uses_round_leader_penalties_eq0() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -482,7 +482,7 @@ fn stage2_avoid_clean_capture_when_over_cap() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

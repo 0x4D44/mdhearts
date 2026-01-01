@@ -57,7 +57,7 @@ fn passing_to_trailing_prefers_penalties() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         passing,
         &tracker,
         BotDifficulty::NormalHeuristic,

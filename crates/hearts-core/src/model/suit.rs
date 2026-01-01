@@ -58,4 +58,14 @@ mod tests {
         assert_eq!(Suit::from_index(2), Some(Suit::Spades));
         assert_eq!(Suit::from_index(4), None);
     }
+
+    #[test]
+    fn properties_are_correct() {
+        assert!(Suit::Hearts.is_heart());
+        assert!(!Suit::Clubs.is_heart());
+        assert!(Suit::Clubs.is_black());
+        assert!(Suit::Spades.is_black());
+        assert!(!Suit::Diamonds.is_black());
+        assert!(!Suit::Hearts.is_black());
+    }
 }

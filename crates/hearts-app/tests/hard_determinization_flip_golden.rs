@@ -115,7 +115,7 @@ fn hard_determinization_flips_neartie_constructed() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

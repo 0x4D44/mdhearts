@@ -77,7 +77,7 @@ fn hard_endgame_dp_explain_parity_in_explain() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

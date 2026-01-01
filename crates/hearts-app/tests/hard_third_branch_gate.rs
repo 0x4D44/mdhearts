@@ -99,7 +99,7 @@ fn hard_third_branch_increases_or_equals_continuation() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &sc,
+        sc,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

@@ -65,7 +65,7 @@ fn hard_budget_deterministic_explain_and_choose_are_stable() {
     let ctx = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

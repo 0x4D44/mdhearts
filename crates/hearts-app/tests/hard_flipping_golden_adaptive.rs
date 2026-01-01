@@ -104,7 +104,7 @@ fn west_seed_1082_expected_tops_under_adaptive_and_sampling() {
     let n_top = normal
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 
@@ -125,7 +125,7 @@ fn west_seed_1082_expected_tops_under_adaptive_and_sampling() {
     let h_top = hard
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 

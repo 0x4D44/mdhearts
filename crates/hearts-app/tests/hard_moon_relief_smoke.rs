@@ -76,7 +76,7 @@ fn hard_continuation_moon_relief_appears_when_committed() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

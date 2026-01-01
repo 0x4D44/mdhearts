@@ -36,7 +36,7 @@ fn exact_flip_seed_2031_east() {
     let n_top = normal
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 
@@ -58,7 +58,7 @@ fn exact_flip_seed_2031_east() {
     let h_top = hard
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 

@@ -71,7 +71,7 @@ fn hard_endgame_dp_strict_flip_golden() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

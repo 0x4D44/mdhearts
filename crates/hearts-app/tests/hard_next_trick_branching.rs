@@ -92,7 +92,7 @@ fn hard_next_trick_probe_second_opponent_branching_influences_choice() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

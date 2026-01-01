@@ -18,7 +18,7 @@ impl PassPlanner {
         }
 
         let style = determine_style(ctx);
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let passing_target = ctx.passing_direction.target(ctx.seat);
         // In Hearts: low score = winning/leading, high score = losing/trailing
         // "leader" = person with lowest score (winning the game)
@@ -398,7 +398,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -434,7 +434,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -482,7 +482,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -531,7 +531,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             passing,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -568,13 +568,13 @@ mod tests {
         let ctx_unseen = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             passing,
             &tracker_unseen,
             BotDifficulty::NormalHeuristic,
         );
         let style = determine_style(&ctx_unseen);
-        let snapshot = snapshot_scores(&ctx_unseen.scores);
+        let snapshot = snapshot_scores(ctx_unseen.scores);
         let passing_target = ctx_unseen.passing_direction.target(ctx_unseen.seat);
         let passing_to_trailing = passing_target == snapshot.max_player;
         let passing_to_leader = passing_target == snapshot.min_player;
@@ -598,12 +598,12 @@ mod tests {
         let ctx_seen = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             passing,
             &tracker_seen,
             BotDifficulty::NormalHeuristic,
         );
-        let snapshot_seen = snapshot_scores(&ctx_seen.scores);
+        let snapshot_seen = snapshot_scores(ctx_seen.scores);
         let score_seen = super::score_card(
             queen,
             hand_ref,

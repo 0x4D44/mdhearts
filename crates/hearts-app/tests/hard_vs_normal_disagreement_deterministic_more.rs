@@ -23,7 +23,7 @@ fn assert_disagree(seed: u64, seat: PlayerPosition) {
     let n_top = normal
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 
@@ -44,16 +44,14 @@ fn assert_disagree(seed: u64, seat: PlayerPosition) {
     let h_top = hard
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 
     assert_ne!(
-        n_top,
-        h_top,
-        "Expected Normal and Hard to disagree deterministically on {}/{}",
-        seed,
-        format!("{:?}", seat)
+        n_top, h_top,
+        "Expected Normal and Hard to disagree deterministically on {}/{:?}",
+        seed, seat
     );
 
     unsafe {

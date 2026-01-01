@@ -80,7 +80,7 @@ fn qs_is_ok_to_dump_when_no_existing_penalties() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -104,7 +104,7 @@ fn qs_is_ok_to_dump_when_no_existing_penalties() {
         use hearts_core::game::match_state::MatchState;
         let mut ms = MatchState::new(starting);
         *ms.round_mut() = round.clone();
-        *ms.scores_mut() = scores.clone();
+        *ms.scores_mut() = scores;
         ms
     })
     .explain_candidates_for(our_seat);

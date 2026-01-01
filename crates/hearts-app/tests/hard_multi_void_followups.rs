@@ -101,7 +101,7 @@ fn hard_multi_void_followups_self_capture_vs_leader_feed() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

@@ -60,7 +60,7 @@ fn hard_budget_step_cap_reduces_scanned_candidates() {
     let ctx = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

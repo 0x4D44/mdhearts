@@ -318,7 +318,7 @@ pub mod hard {
 
     #[cfg(test)]
     thread_local! {
-        static THREAD_LOCAL_SINK: RefCell<Option<TelemetrySink>> = RefCell::new(None);
+        static THREAD_LOCAL_SINK: RefCell<Option<TelemetrySink>> = const { RefCell::new(None) };
     }
 
     pub fn sink() -> &'static TelemetrySink {
@@ -335,13 +335,13 @@ pub mod hard {
     fn with_active_sink<R>(f: impl FnOnce(&TelemetrySink) -> R) -> R {
         #[cfg(test)]
         {
-            return THREAD_LOCAL_SINK.with(|cell| {
+            THREAD_LOCAL_SINK.with(|cell| {
                 if let Some(ref sink) = *cell.borrow() {
                     f(sink)
                 } else {
                     f(sink())
                 }
-            });
+            })
         }
         #[cfg(not(test))]
         {
@@ -499,5 +499,94 @@ mod tests {
         assert_eq!(snapshot.len(), 2);
         assert_eq!(snapshot[0].decision_index, 2);
         assert_eq!(snapshot[1].decision_index, 3);
+    }
+
+    #[test]
+    fn test_capture_helper_isolates_records() {
+        use crate::bot::{BotDifficulty, UnseenTracker};
+
+        // This test ensures the thread-local capture works
+        let (_, records) = hard::capture_for_test(|| {
+            let tracker = UnseenTracker::new();
+            hard::record_pre_decision(PlayerPosition::North, &tracker, BotDifficulty::FutureHard);
+        });
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].seat, "North");
+
+        // Verify the global sink was NOT touched (this is harder to verify without resetting global,
+        // but we assume isolation if capture worked)
+    }
+
+    #[test]
+    fn test_export_and_retention() {
+        // Create a temp dir
+        let temp_dir = std::env::temp_dir().join("mdhearts_telemetry_test");
+        let _ = fs::remove_dir_all(&temp_dir); // Ensure clean start
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let sink = TelemetrySink::new(5);
+        let record = HardTelemetryRecord {
+            timestamp_ms: 100,
+            decision_index: 1,
+            seat: "West".to_string(),
+            belief_entropy: [0.0; 4],
+            belief_cache_size: 0,
+            belief_cache_capacity: 0,
+            belief_cache_hits: 0,
+            belief_cache_misses: 0,
+            difficulty: None,
+            phase: None,
+            think_limit_ms: None,
+            elapsed_ms: None,
+            timed_out: None,
+            fallback: None,
+            search_stats: None,
+            notes: None,
+            controller_bias_delta: None,
+        };
+        sink.push(record);
+
+        // Export 1
+        let path1 = temp_dir.join("export1.ndjson");
+        let _ = sink.export_ndjson(Some(path1.clone())).unwrap();
+        assert!(path1.exists());
+
+        // Export 2
+        let path2 = temp_dir.join("export2.ndjson");
+        let _ = sink.export_ndjson(Some(path2.clone())).unwrap();
+        assert!(path2.exists());
+
+        // Create dummy files to test retention
+        for i in 3..=10 {
+            let p = temp_dir.join(format!("dummy{}.ndjson", i));
+            File::create(&p).unwrap();
+            // Sleep briefly to ensure mtime differs? Windows mtime resolution is coarse.
+            // We'll rely on enforce_retention logic which uses modified time.
+            // However, enforce_retention sorts.
+            // If timestamps are identical, order is undefined but it should delete *some*.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Now trigger retention by exporting into the dir again.
+        // We set retention low (e.g. 5) by manually calling private helper?
+        // No, export_ndjson uses self.retention.
+        // self.retention is 5.
+        // Currently we have export1, export2, dummy3..10 (8 files) = 10 files.
+        // Next export should trim to 5.
+
+        let path_final = temp_dir.join("final.ndjson");
+        let _ = sink.export_ndjson(Some(path_final)).unwrap();
+
+        // Check count
+        let count = fs::read_dir(&temp_dir).unwrap().count();
+        // Should be <= 5 (retention)
+        // Wait, export_ndjson calls enforce_retention AFTER creating the new file.
+        // So it creates final.ndjson, then checks if total > 5.
+
+        assert!(count <= 5, "Expected <= 5 files, found {}", count);
+
+        // Cleanup
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }

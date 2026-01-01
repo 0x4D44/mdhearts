@@ -6,7 +6,7 @@ fn full_snapshot_fixture_restores_round_state() {
     // Use bundled fixture to ensure full snapshots round-trip correctly.
     let data = include_str!("fixtures/full_snapshot_example.json");
 
-    let snapshot: MatchSnapshot = MatchSnapshot::from_json(&data).expect("valid snapshot json");
+    let snapshot: MatchSnapshot = MatchSnapshot::from_json(data).expect("valid snapshot json");
     let state = snapshot.clone().restore_full();
 
     assert_eq!(state.seed(), snapshot.seed);

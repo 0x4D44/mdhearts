@@ -58,18 +58,14 @@ fn assert_exact_flip(seed: u64, seat: PlayerPosition, expected_normal: Card, exp
     let h_top = top_choice(hard.explain_candidates_for(seat));
 
     assert_eq!(
-        n_top,
-        expected_normal,
-        "Normal top changed for {}/{}",
-        seed,
-        format!("{:?}", seat)
+        n_top, expected_normal,
+        "Normal top changed for {}/{:?}",
+        seed, seat
     );
     assert_eq!(
-        h_top,
-        expected_hard,
-        "Hard top changed for {}/{}",
-        seed,
-        format!("{:?}", seat)
+        h_top, expected_hard,
+        "Hard top changed for {}/{:?}",
+        seed, seat
     );
 
     unsafe {

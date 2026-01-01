@@ -5682,7 +5682,7 @@ impl AtlasMeta {
 }
 
 #[cfg(test)]
-mod tests {
+mod worker_tests {
     use super::*;
     use crate::bot::BotDifficulty;
     use crate::controller::{GameController, TimeoutFallback};

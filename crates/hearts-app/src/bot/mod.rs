@@ -152,7 +152,7 @@ impl<'a> BotContext<'a> {
 }
 
 pub(crate) fn determine_style(ctx: &BotContext<'_>) -> BotStyle {
-    let snapshot = snapshot_scores(&ctx.scores);
+    let snapshot = snapshot_scores(ctx.scores);
     let my_score = ctx.scores.score(ctx.seat);
     let hand = ctx.hand();
 
@@ -212,7 +212,7 @@ fn should_try_shoot_moon(
     control_hearts >= 4 && high_spades >= 2 && has_ace_spades
 }
 
-pub(crate) fn snapshot_scores(scores: &ScoreBoard) -> ScoreSnapshot {
+pub(crate) fn snapshot_scores(scores: ScoreBoard) -> ScoreSnapshot {
     let mut min_score = u32::MAX;
     let mut max_score = u32::MIN;
     let mut min_player = PlayerPosition::North;
@@ -324,7 +324,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -357,7 +357,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -379,7 +379,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -401,7 +401,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::FutureHard,
@@ -436,7 +436,7 @@ mod tests {
         let ctx = BotContext::new(
             seat,
             &round,
-            &scores,
+            scores,
             PassingDirection::Hold,
             &tracker,
             BotDifficulty::NormalHeuristic,
@@ -456,7 +456,7 @@ mod tests {
             let ctx = BotContext::new(
                 seat,
                 &round,
-                &scores,
+                scores,
                 PassingDirection::Hold,
                 &tracker,
                 BotDifficulty::NormalHeuristic,
@@ -470,7 +470,7 @@ mod tests {
             let ctx = BotContext::new(
                 seat,
                 &round,
-                &scores,
+                scores,
                 PassingDirection::Hold,
                 &tracker,
                 BotDifficulty::NormalHeuristic,

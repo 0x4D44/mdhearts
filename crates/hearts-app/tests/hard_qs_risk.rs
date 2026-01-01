@@ -72,7 +72,7 @@ fn hard_qs_risk_penalizes_high_spade_capture() {
     let ctx = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

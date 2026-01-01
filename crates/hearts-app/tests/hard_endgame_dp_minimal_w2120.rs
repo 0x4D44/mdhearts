@@ -1,7 +1,6 @@
 use hearts_app::bot::{BotContext, BotDifficulty, PlayPlannerHard};
 use hearts_app::endgame_export::{EndgameExport, EndgameRehydrate};
 use hearts_core::model::player::PlayerPosition;
-use serde_json;
 
 fn load_endgame_2120_west() -> EndgameRehydrate {
     let export: EndgameExport =
@@ -44,7 +43,7 @@ fn hard_endgame_dp_minimal_w2120_flip_difference() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         passing_direction,
         &tracker,
         BotDifficulty::FutureHard,

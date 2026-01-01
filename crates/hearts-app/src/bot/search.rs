@@ -415,7 +415,7 @@ impl PlayPlannerHard {
                 cutoff_scale *= margin_scale;
             }
         }
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
         let my_score = ctx.scores.score(ctx.seat);
         let leader_gap = snapshot.max_score.saturating_sub(my_score);
@@ -740,7 +740,7 @@ impl PlayPlannerHard {
         let best_base = explained.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
         let mut best: Option<(Card, i32)> = None;
         let start = Instant::now();
@@ -1093,7 +1093,7 @@ impl PlayPlannerHard {
         let best_base = v.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
         let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
@@ -1274,7 +1274,7 @@ impl PlayPlannerHard {
         let best_base = v.first().map(|x| x.1).unwrap_or(0);
         let boost_gap = parse_env_i32("MDH_HARD_CONT_BOOST_GAP").unwrap_or(0);
         let boost_factor = parse_env_i32("MDH_HARD_CONT_BOOST_FACTOR").unwrap_or(1);
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
         let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
@@ -1356,7 +1356,7 @@ impl PlayPlannerHard {
         let mut v = PlayPlanner::explain_candidates(legal, ctx);
         Self::apply_play_adviser_bias(&mut v, ctx);
         v.sort_by(|a, b| b.1.cmp(&a.1));
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let start = Instant::now();
         let mut budget = Budget::new(cfg.time_cap_ms, deterministic, step_cap, None, None);
         let mut out = Vec::new();
@@ -1596,7 +1596,7 @@ impl PlayPlannerHard {
         // Simulate only the remainder of the current trick with a simple, void-aware policy.
         let mut sim = ctx.round.clone();
         let seat = ctx.seat;
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let my_score = ctx.scores.score(ctx.seat) as i32;
         let leader_gap = snapshot.max_score as i32 - my_score;
         let moon_pressure = detect_moon_pressure(ctx, &snapshot);
@@ -2896,7 +2896,7 @@ fn rollout_current_trick_with_resolution(
     sampled_world: Option<&crate::bot::SampledWorld>,
 ) -> Option<(i32, TrickResolution)> {
     let seat = ctx.seat;
-    let snapshot = snapshot_scores(&ctx.scores);
+    let snapshot = snapshot_scores(ctx.scores);
     let my_score = ctx.scores.score(ctx.seat) as i32;
     let leader_gap = snapshot.max_score as i32 - my_score;
     let moon_pressure = detect_moon_pressure(ctx, &snapshot);
@@ -2966,7 +2966,7 @@ fn evaluate_depth2_bonus(
     let best_base = ordered.first().map(|x| x.1).unwrap_or(0);
     let mut best_total = best_base;
     let mut considered = 0usize;
-    let snapshot = snapshot_scores(&depth_ctx.scores);
+    let snapshot = snapshot_scores(depth_ctx.scores);
     let my_score = depth_ctx.scores.score(depth_ctx.seat) as i32;
     let leader_gap = snapshot.max_score as i32 - my_score;
     let moon_pressure = detect_moon_pressure(&depth_ctx, &snapshot);
@@ -3116,7 +3116,7 @@ fn effective_limits(ctx: &BotContext<'_>) -> (Tier, u8, Limits) {
 
 fn compute_leverage(ctx: &BotContext<'_>) -> (Tier, u8) {
     // Simple first pass per HLD: scoreboard pressure, near-100 risk, and penalties on table.
-    let snap = super::snapshot_scores(&ctx.scores);
+    let snap = super::snapshot_scores(ctx.scores);
     let my = ctx.scores.score(ctx.seat) as i32;
     let lead_score = snap.max_score as i32;
     let mut s: i32 = 0;

@@ -77,7 +77,7 @@ fn hard_prefers_dumping_qs_over_small_heart_to_leader() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

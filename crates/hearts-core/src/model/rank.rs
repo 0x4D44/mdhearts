@@ -95,4 +95,10 @@ mod tests {
         assert_eq!(Rank::Queen.to_string(), "Q");
         assert_eq!(Rank::Ten.to_string(), "10");
     }
+
+    #[test]
+    fn value_returns_u8_repr() {
+        assert_eq!(Rank::Two.value(), 2);
+        assert_eq!(Rank::Ace.value(), 14);
+    }
 }

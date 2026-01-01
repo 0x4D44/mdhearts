@@ -34,7 +34,7 @@ fn build_round(seat: PlayerPosition, hand: &[Card], passing: PassingDirection) -
     let mut hands = [Hand::new(), Hand::new(), Hand::new(), Hand::new()];
     hands[seat.index()] = Hand::with_cards(hand.to_vec());
     // Fill other hands with dummy cards to have 13 cards each
-    for i in 0..4 {
+    for (i, other_hand) in hands.iter_mut().enumerate() {
         if i != seat.index() {
             let mut cards = Vec::new();
             for rank in [
@@ -56,7 +56,7 @@ fn build_round(seat: PlayerPosition, hand: &[Card], passing: PassingDirection) -
                     cards.push(Card::new(rank, Suit::Diamonds));
                 }
             }
-            hands[i] = Hand::with_cards(cards);
+            *other_hand = Hand::with_cards(cards);
         }
     }
 
@@ -90,7 +90,7 @@ fn assert_valid_pass(
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         passing,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -344,7 +344,7 @@ fn pass_always_includes_queen_of_spades() {
     let ctx = BotContext::new(
         PlayerPosition::North,
         &round,
-        &scores,
+        scores,
         PassingDirection::Left,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -388,7 +388,7 @@ fn pass_avoids_creating_dangerous_void_in_spades() {
     let ctx = BotContext::new(
         PlayerPosition::South,
         &round,
-        &scores,
+        scores,
         PassingDirection::Right,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -417,7 +417,7 @@ fn pass_behavior_differs_by_score_context() {
     let ctx1 = BotContext::new(
         PlayerPosition::North,
         &round1,
-        &scores1,
+        scores1,
         PassingDirection::Left,
         &tracker1,
         BotDifficulty::NormalHeuristic,
@@ -433,7 +433,7 @@ fn pass_behavior_differs_by_score_context() {
     let ctx2 = BotContext::new(
         PlayerPosition::North,
         &round2,
-        &scores2,
+        scores2,
         PassingDirection::Left,
         &tracker2,
         BotDifficulty::NormalHeuristic,

@@ -82,7 +82,7 @@ fn endgame_feed_hearts_to_leader_when_void() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,

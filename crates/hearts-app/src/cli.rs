@@ -60,7 +60,10 @@ impl From<serde_json::Error> for CliError {
 }
 
 pub fn run_cli() -> Result<CliOutcome, CliError> {
-    let mut args = std::env::args().skip(1);
+    run_cli_with_args(std::env::args().skip(1))
+}
+
+pub fn run_cli_with_args(mut args: impl Iterator<Item = String>) -> Result<CliOutcome, CliError> {
     let Some(cmd) = args.next() else {
         return Ok(CliOutcome::NotHandled);
     };

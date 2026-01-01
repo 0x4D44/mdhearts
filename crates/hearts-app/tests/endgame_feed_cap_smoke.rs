@@ -81,7 +81,7 @@ fn endgame_feed_cap_does_not_break_choice() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
