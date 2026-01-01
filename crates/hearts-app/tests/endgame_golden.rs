@@ -82,7 +82,7 @@ fn endgame_feed_points_to_leader() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,

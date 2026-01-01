@@ -173,7 +173,7 @@ fn hard_nudge_prefers_feeding_unique_leader() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -208,7 +208,7 @@ fn hard_nudge_uses_round_leader_when_scores_flat() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -257,7 +257,7 @@ fn hard_nudge_skips_when_leader_ambiguous() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

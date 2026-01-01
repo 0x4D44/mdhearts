@@ -85,7 +85,7 @@ fn avoid_feeding_nonleader_when_penalties_on_table() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -110,7 +110,7 @@ fn avoid_feeding_nonleader_when_penalties_on_table() {
         use hearts_core::game::match_state::MatchState;
         let mut ms = MatchState::new(starting);
         *ms.round_mut() = round.clone();
-        *ms.scores_mut() = scores.clone();
+        *ms.scores_mut() = scores;
         ms
     })
     .explain_candidates_for(our_seat);

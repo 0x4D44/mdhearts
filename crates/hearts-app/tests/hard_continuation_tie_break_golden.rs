@@ -72,7 +72,7 @@ fn hard_tie_break_boosts_continuation_totals_when_enabled() {
     let ctx = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

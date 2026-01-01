@@ -28,7 +28,7 @@ fn hard_vs_normal_disagree_under_deterministic_seed_1040_west() {
     let n_top = normal
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 
@@ -49,7 +49,7 @@ fn hard_vs_normal_disagree_under_deterministic_seed_1040_west() {
     let h_top = hard
         .explain_candidates_for(seat)
         .into_iter()
-        .max_by_key(|(_, s)| s.clone())
+        .max_by_key(|(_, s)| *s)
         .map(|(c, _)| c)
         .unwrap();
 

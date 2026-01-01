@@ -67,7 +67,7 @@ fn hard_phaseb_topk_preserves_base_for_non_probed() {
     let ctx = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

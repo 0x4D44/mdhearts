@@ -67,7 +67,7 @@ fn avoid_passing_penalties_to_leader() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         passing,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -109,7 +109,7 @@ fn avoid_passing_qs_to_leader_right() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         passing,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -152,7 +152,7 @@ fn avoid_passing_qs_to_leader_across() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         passing,
         &tracker,
         BotDifficulty::NormalHeuristic,

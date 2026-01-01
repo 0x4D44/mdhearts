@@ -75,7 +75,7 @@ fn cautious_early_lead_avoids_hearts_when_possible() {
     let ctx = BotContext::new(
         leader,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -121,7 +121,7 @@ fn void_creation_preferred_on_lead_over_neutral_alternative() {
     let ctx = BotContext::new(
         leader,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,

@@ -77,7 +77,7 @@ fn hard_endgame_dp_minimal_flip() {
     let ctx = hearts_app::bot::BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

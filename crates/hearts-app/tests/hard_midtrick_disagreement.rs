@@ -34,10 +34,9 @@ fn find_midtrick_disagreement(seed: u64, seat: PlayerPosition, max_checks: usize
         if let (Some((n_top, _)), Some((h_top, _))) = (
             n_expl.iter().max_by_key(|(_, s)| *s),
             h_expl.iter().max_by_key(|(_, s)| *s),
-        ) {
-            if *n_top != *h_top {
-                return true;
-            }
+        ) && *n_top != *h_top
+        {
+            return true;
         }
         // Move forward to the next decision point
         if ctrl.autoplay_one(seat).is_none() {
@@ -75,5 +74,4 @@ fn hard_vs_normal_disagree_on_midtrick_in_curated_set() {
     if !found {
         eprintln!("No disagreement found in curated mid-trick set (non-fatal smoke)");
     }
-    assert!(true);
 }

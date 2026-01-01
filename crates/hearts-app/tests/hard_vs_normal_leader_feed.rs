@@ -80,7 +80,7 @@ fn hard_increases_margin_for_leader_feed_qs() {
     let ctx_normal = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -88,7 +88,7 @@ fn hard_increases_margin_for_leader_feed_qs() {
     let ctx_hard = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

@@ -107,7 +107,7 @@ fn hard_constructed_midtrick_neartie_continuation_decides() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

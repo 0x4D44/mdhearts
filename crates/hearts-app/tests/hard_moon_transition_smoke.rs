@@ -73,7 +73,7 @@ fn hard_moon_transition_considering_to_committed_keeps_relief_positive() {
     let ctx_considering = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,
@@ -104,7 +104,7 @@ fn hard_moon_transition_considering_to_committed_keeps_relief_positive() {
     let ctx_committed = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

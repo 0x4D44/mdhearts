@@ -63,7 +63,7 @@ fn hard_ctrl_handoff_penalty_reduces_cont_when_leading_void_suit() {
     let ctx = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

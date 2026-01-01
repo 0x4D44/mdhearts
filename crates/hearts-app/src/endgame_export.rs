@@ -74,8 +74,11 @@ pub struct PlayExport {
 #[derive(Debug)]
 pub struct EndgameRehydrate {
     pub round: RoundState,
+    #[allow(dead_code)]
     pub scores: ScoreBoard,
+    #[allow(dead_code)]
     pub passing_direction: PassingDirection,
+    #[allow(dead_code)]
     pub tracker: UnseenTracker,
     pub next_to_play: PlayerPosition,
 }
@@ -371,4 +374,76 @@ fn expected_player(trick: &Trick) -> PlayerPosition {
         .last()
         .map(|Play { position, .. }| position.next())
         .unwrap_or_else(|| trick.leader())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hearts_core::model::rank::Rank;
+    use hearts_core::model::suit::Suit;
+
+    #[test]
+    fn test_parsing_helpers() {
+        assert!(matches!(parse_card("AS"), Ok(c) if c.rank == Rank::Ace && c.suit == Suit::Spades));
+        assert!(
+            matches!(parse_card("10H"), Ok(c) if c.rank == Rank::Ten && c.suit == Suit::Hearts)
+        );
+        assert!(matches!(parse_card("2C"), Ok(c) if c.rank == Rank::Two && c.suit == Suit::Clubs));
+        assert!(
+            matches!(parse_card("KD"), Ok(c) if c.rank == Rank::King && c.suit == Suit::Diamonds)
+        );
+
+        assert!(parse_card("XX").is_err());
+        assert!(parse_card("A").is_err());
+        assert!(parse_card("11H").is_err());
+
+        assert!(matches!(parse_seat("North"), Ok(PlayerPosition::North)));
+        assert!(matches!(parse_seat("w"), Ok(PlayerPosition::West)));
+        assert!(parse_seat("invalid").is_err());
+
+        assert!(matches!(
+            parse_moon_state("considering"),
+            Ok(MoonState::Considering)
+        ));
+        assert!(parse_moon_state("invalid").is_err());
+    }
+
+    #[test]
+    fn test_endgame_roundtrip() {
+        // Setup a simple game state
+        let mut controller = GameController::new_with_seed(Some(12345), PlayerPosition::North);
+        // Play one trick to have history
+        if controller.in_passing_phase() {
+            let pass = controller.simple_pass_for(PlayerPosition::South).unwrap();
+            controller.submit_pass(PlayerPosition::South, pass).unwrap();
+            controller
+                .submit_auto_passes_for_others(PlayerPosition::South)
+                .unwrap();
+            controller.resolve_passes().unwrap();
+        }
+
+        // Capture
+        let export = EndgameExport::capture(&controller, PlayerPosition::South, Some(12345));
+
+        // Verify fields
+        assert_eq!(export.seat, "South");
+        assert!(export.seed == Some(12345));
+        assert!(export.hands.contains_key("S"));
+        assert!(export.hands.get("S").unwrap().len() >= 13);
+
+        // Roundtrip via JSON
+        let json = serde_json::to_string(&export).unwrap();
+        let loaded: EndgameExport = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(loaded.seat, export.seat);
+        assert_eq!(loaded.hands.len(), 4);
+
+        // Rehydrate
+        let rehydrated = loaded.rehydrate().expect("rehydrate success");
+        assert_eq!(rehydrated.next_to_play, controller.expected_to_play());
+        assert_eq!(
+            rehydrated.round.current_trick().leader(),
+            controller.trick_leader()
+        );
+    }
 }

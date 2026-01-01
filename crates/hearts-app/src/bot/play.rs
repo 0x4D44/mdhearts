@@ -243,7 +243,7 @@ impl PlayPlanner {
 
         let style = determine_style(ctx);
         let limit_ms = limit.and_then(|lim| lim.remaining_millis());
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
         let mut best: Option<(Card, i32)> = None;
 
@@ -404,7 +404,7 @@ impl PlayPlanner {
         }
         reset_mix_hint_bias_stats();
         let style = determine_style(ctx);
-        let snapshot = snapshot_scores(&ctx.scores);
+        let snapshot = snapshot_scores(ctx.scores);
         let lead_suit = ctx.round.current_trick().lead_suit();
         let mut out: Vec<(Card, i32)> = Vec::new();
         for &card in legal {
@@ -504,7 +504,7 @@ impl DebugParts {
 
 #[cfg(test)]
 pub(crate) fn score_candidate_for_tests(card: Card, ctx: &BotContext<'_>, style: BotStyle) -> i32 {
-    let snapshot = snapshot_scores(&ctx.scores);
+    let snapshot = snapshot_scores(ctx.scores);
     let lead_suit = ctx.round.current_trick().lead_suit();
     let (winner, penalties) = simulate_trick(card, ctx, style, snapshot.max_player);
     let will_capture = winner == ctx.seat;

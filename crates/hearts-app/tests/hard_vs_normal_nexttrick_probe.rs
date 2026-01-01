@@ -85,7 +85,7 @@ fn hard_prefers_lead_setting_up_feed_nexttrick() {
     let ctx_norm = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -93,7 +93,7 @@ fn hard_prefers_lead_setting_up_feed_nexttrick() {
     let ctx_hard = BotContext::new(
         starting,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

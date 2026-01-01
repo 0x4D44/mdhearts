@@ -69,7 +69,7 @@ fn hard_determinization_strict_flip_wip() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

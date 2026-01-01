@@ -69,7 +69,7 @@ fn hard_moon_relief_applies_when_considering() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

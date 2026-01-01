@@ -82,7 +82,7 @@ fn hard_verbose_contains_continuation_terms() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

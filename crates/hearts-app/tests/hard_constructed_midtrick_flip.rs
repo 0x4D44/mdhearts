@@ -114,7 +114,7 @@ fn hard_constructed_midtrick_flips_vs_normal() {
     let _ctx_norm = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,
@@ -122,7 +122,7 @@ fn hard_constructed_midtrick_flips_vs_normal() {
     let ctx_hard = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

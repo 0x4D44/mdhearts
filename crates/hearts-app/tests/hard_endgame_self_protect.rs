@@ -80,7 +80,7 @@ fn hard_endgame_avoids_self_capture_when_near_100() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

@@ -83,7 +83,7 @@ fn endgame_feed_cap_golden_qs_to_leader() {
     let ctx = BotContext::new(
         our_seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::NormalHeuristic,

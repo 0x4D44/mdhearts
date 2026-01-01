@@ -77,7 +77,7 @@ fn hard_avoids_feeding_nonleader_when_penalties_on_table() {
     let ctx = BotContext::new(
         seat,
         &round,
-        &scores,
+        scores,
         PassingDirection::Hold,
         &tracker,
         BotDifficulty::FutureHard,

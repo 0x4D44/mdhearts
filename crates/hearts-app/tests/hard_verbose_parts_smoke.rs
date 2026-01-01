@@ -41,7 +41,8 @@ fn hard_verbose_parts_sum_matches_continuation() {
     for (c, b, cont, t) in expl {
         m_expl.insert(c.to_string(), (b, cont, t));
     }
-    let mut m_parts: HashMap<String, (i32, i32, i32, i32, i32, i32, i32, i32)> = HashMap::new();
+    type PartsTuple = (i32, i32, i32, i32, i32, i32, i32, i32);
+    let mut m_parts: HashMap<String, PartsTuple> = HashMap::new();
     for (c, b, p, _t) in parts {
         m_parts.insert(
             c.to_string(),
