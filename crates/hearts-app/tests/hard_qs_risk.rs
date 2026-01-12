@@ -40,8 +40,34 @@ fn empty_scores() -> ScoreBoard {
     ScoreBoard::new()
 }
 
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn new(key: &'static str, value: &str) -> Self {
+        let original = std::env::var_os(key);
+        unsafe { std::env::set_var(key, value) };
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(ref original) = self.original {
+            unsafe { std::env::set_var(self.key, original) };
+        } else {
+            unsafe { std::env::remove_var(self.key) };
+        }
+    }
+}
+
 #[test]
 fn hard_qs_risk_penalizes_high_spade_capture() {
+    let _guard = EnvVarGuard::new("MDH_HARD_BRANCH_LIMIT", "10");
+    let _guard_steps = EnvVarGuard::new("MDH_HARD_TEST_STEPS", "1000");
+    let _guard_time = EnvVarGuard::new("MDH_HARD_TIME_CAP_MS", "1000");
     // West leads spades; has Ace and Two. East holds Q♠ but will follow low. Risk should penalize Ace capture.
     let starting = PlayerPosition::West;
     let west = vec![

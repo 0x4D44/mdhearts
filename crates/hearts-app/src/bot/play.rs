@@ -1169,6 +1169,7 @@ fn simulate_trick(
             Some(ctx.tracker),
             ctx.seat,
             Some(leader_target),
+            true,
         );
         outcome = match sim.play_card(next_seat, response) {
             Ok(result) => result,
@@ -1300,6 +1301,7 @@ fn choose_followup_card(
     tracker: Option<&crate::bot::tracker::UnseenTracker>,
     origin: PlayerPosition,
     leader_target: Option<PlayerPosition>,
+    allow_sim: bool,
 ) -> Card {
     let legal = legal_moves_for(round, seat);
     if test_trace_followup_enabled() {
@@ -1429,7 +1431,7 @@ fn choose_followup_card(
 
         let follow_cards: Vec<Card> = legal.iter().copied().filter(|c| c.suit == lead).collect();
         if !follow_cards.is_empty() {
-            if follow_cards.len() > 1 && hard_stage2_enabled() {
+            if follow_cards.len() > 1 && hard_stage2_enabled() && allow_sim {
                 let simulated: Vec<(Card, SimOutcome)> = follow_cards
                     .iter()
                     .copied()
@@ -1580,7 +1582,7 @@ fn choose_followup_card(
             return qs;
         }
 
-        if !committed_moon && !legal.is_empty() {
+        if !committed_moon && !legal.is_empty() && allow_sim {
             let simulated: Vec<(Card, SimOutcome)> = legal
                 .iter()
                 .copied()
@@ -1641,6 +1643,7 @@ fn choose_followup_card(
         && !legal.is_empty()
         && !committed_moon
         && !dp_enabled
+        && allow_sim
         && (round_gap > 0
             || others_have_penalties
             || penalties_on_table > 0
@@ -1985,6 +1988,7 @@ fn simulate_lead_outcome(
                         tracker_ref,
                         origin,
                         leader_target,
+                        false,
                     );
                     if test_trace_followup_enabled() {
                         eprintln!(
@@ -2353,6 +2357,7 @@ mod tests {
             None,
             PlayerPosition::West,
             None,
+            true,
         );
         assert_eq!(choice.suit, Suit::Hearts);
         assert_eq!(choice.rank, Rank::Ten);
@@ -2385,6 +2390,7 @@ mod tests {
             None,
             PlayerPosition::East,
             None,
+            true,
         );
         assert_eq!(choice.suit, Suit::Diamonds);
         assert_eq!(choice.rank, Rank::Three);
@@ -2415,6 +2421,7 @@ mod tests {
             None,
             PlayerPosition::West,
             Some(PlayerPosition::East),
+            true,
         );
         assert!(choice.is_queen_of_spades());
     }
@@ -2445,6 +2452,7 @@ mod tests {
             None,
             PlayerPosition::West,
             Some(PlayerPosition::West), // Leader is West, not provisional winner
+            true,
         );
         // Policy: it's still fine to dump hearts when broken even if provisional winner isn't leader.
         assert_eq!(choice.suit, Suit::Hearts);
@@ -2475,6 +2483,7 @@ mod tests {
             None,
             PlayerPosition::West,
             Some(PlayerPosition::East),
+            true,
         );
         assert_eq!(choice.suit, Suit::Hearts);
         assert_eq!(choice.rank, Rank::Ten);
@@ -2554,6 +2563,7 @@ mod tests {
             Some(&tracker),
             seat,
             Some(PlayerPosition::West),
+            true,
         );
         assert_eq!(choice, Card::new(Rank::Two, Suit::Diamonds));
 
@@ -2692,6 +2702,7 @@ mod tests {
             None,
             PlayerPosition::West,
             Some(PlayerPosition::West),
+            true,
         );
         assert_eq!(choice, Card::new(Rank::Ten, Suit::Clubs));
 
@@ -2783,6 +2794,7 @@ mod tests {
             None,
             PlayerPosition::East,
             Some(PlayerPosition::West),
+            true,
         );
         assert_eq!(choice, Card::new(Rank::Three, Suit::Diamonds));
 
@@ -2840,6 +2852,7 @@ mod tests {
             None,
             PlayerPosition::West,
             Some(PlayerPosition::West),
+            true,
         );
         assert_eq!(choice, Card::new(Rank::Ten, Suit::Hearts));
 
@@ -2922,6 +2935,7 @@ mod tests {
             None,
             PlayerPosition::West,
             Some(PlayerPosition::West),
+            true,
         );
         assert_eq!(choice, Card::new(Rank::Queen, Suit::Hearts));
 
@@ -3038,6 +3052,7 @@ mod tests {
             Some(&tracker),
             PlayerPosition::West,
             None,
+            true,
         );
         let sim_choice = super::simulate_lead_outcome(
             &round,

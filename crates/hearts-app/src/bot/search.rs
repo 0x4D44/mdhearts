@@ -41,7 +41,7 @@ impl Default for SearchConfig {
         Self {
             branch_limit: 6,
             max_depth: 1,
-            time_cap_ms: 10,
+            time_cap_ms: 50,
             next_branch_limit: 3,
             early_cutoff_margin: 300,
             min_scan_before_cutoff: 1,
@@ -319,7 +319,7 @@ impl PlayPlannerHard {
         let cap = std::env::var("MDH_HARD_TIME_CAP_MS")
             .ok()
             .and_then(|s| s.parse::<u32>().ok())
-            .unwrap_or(10);
+            .unwrap_or(50);
         let nbl = std::env::var("MDH_HARD_NEXT_BRANCH_LIMIT")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())

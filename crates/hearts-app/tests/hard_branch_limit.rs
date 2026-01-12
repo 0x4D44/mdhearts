@@ -2,12 +2,33 @@ use hearts_app::bot::BotDifficulty;
 use hearts_app::controller::GameController;
 use hearts_core::model::player::PlayerPosition;
 
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn new(key: &'static str, value: &str) -> Self {
+        let original = std::env::var_os(key);
+        unsafe { std::env::set_var(key, value) };
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(ref original) = self.original {
+            unsafe { std::env::set_var(self.key, original) };
+        } else {
+            unsafe { std::env::remove_var(self.key) };
+        }
+    }
+}
+
 #[test]
 fn hard_branch_limit_respected() {
     // Force a small branch limit and verify explain returns no more than that many candidates.
-    unsafe {
-        std::env::set_var("MDH_HARD_BRANCH_LIMIT", "3");
-    }
+    let _guard = EnvVarGuard::new("MDH_HARD_BRANCH_LIMIT", "3");
     let seed = 777u64;
     let seat = PlayerPosition::East;
     let mut controller = GameController::new_with_seed(Some(seed), PlayerPosition::North);
