@@ -40,6 +40,29 @@ fn empty_scores() -> ScoreBoard {
     ScoreBoard::new()
 }
 
+struct EnvVarGuard {
+    key: &'static str,
+    original: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn new(key: &'static str, value: &str) -> Self {
+        let original = std::env::var_os(key);
+        unsafe { std::env::set_var(key, value) };
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(ref original) = self.original {
+            unsafe { std::env::set_var(self.key, original) };
+        } else {
+            unsafe { std::env::remove_var(self.key) };
+        }
+    }
+}
+
 #[test]
 fn hard_budget_step_cap_reduces_scanned_candidates() {
     let starting = PlayerPosition::East;
@@ -76,23 +99,21 @@ fn hard_budget_step_cap_reduces_scanned_candidates() {
             })
             .collect::<Vec<_>>()
     };
-    // Tight step cap
-    unsafe {
-        std::env::set_var("MDH_HARD_DETERMINISTIC", "1");
-        std::env::set_var("MDH_HARD_TEST_STEPS", "5");
-    }
-    let _ = PlayPlannerHard::explain_candidates(&legal, &ctx);
-    let stats_small = search::last_stats().unwrap();
-    // Larger step cap
-    unsafe {
-        std::env::set_var("MDH_HARD_TEST_STEPS", "100");
-    }
-    let _ = PlayPlannerHard::explain_candidates(&legal, &ctx);
-    let stats_large = search::last_stats().unwrap();
-    unsafe {
-        std::env::remove_var("MDH_HARD_DETERMINISTIC");
-        std::env::remove_var("MDH_HARD_TEST_STEPS");
-    }
+
+    let _det_guard = EnvVarGuard::new("MDH_HARD_DETERMINISTIC", "1");
+
+    let stats_small = {
+        let _guard = EnvVarGuard::new("MDH_HARD_TEST_STEPS", "5");
+        let _ = PlayPlannerHard::explain_candidates(&legal, &ctx);
+        search::last_stats().unwrap()
+    };
+
+    let stats_large = {
+        let _guard = EnvVarGuard::new("MDH_HARD_TEST_STEPS", "100");
+        let _ = PlayPlannerHard::explain_candidates(&legal, &ctx);
+        search::last_stats().unwrap()
+    };
+
     assert!(
         stats_small.scanned <= stats_large.scanned,
         "expected fewer/equal scanned with tight step cap: small={} large={}",

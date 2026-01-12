@@ -68,6 +68,7 @@ fn west_seed_1141_expected_tops_under_adaptive_and_sampling() {
     let expected = [
         Card::new(Rank::Four, Suit::Diamonds),
         Card::new(Rank::Ace, Suit::Diamonds),
+        Card::new(Rank::Five, Suit::Diamonds),
     ];
     assert!(
         expected.contains(&h_top),

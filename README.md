@@ -1,28 +1,36 @@
-# MDHearts 🂩
+# MDHearts
 
-[![CI](https://github.com/your-username/mdhearts/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mdhearts/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+**MDHearts** is a high-performance, modern implementation of the classic card game **Hearts**, written in **Rust**. 
 
-**MDHearts** is a modern, high-performance implementation of the classic Microsoft Hearts card game, engineered in Rust. It combines a polished native Windows UI (Direct2D) with a research-grade AI framework capable of ultra-hard gameplay analysis.
+It features a native Windows (Direct2D) user interface and a sophisticated, multi-tiered Artificial Intelligence system designed for competitive play and research. The project is structured as a Cargo workspace, separating core game logic from the application layer and UI.
 
-![Screenshot placeholder - add a screenshot of the game here](assets/screenshot_placeholder.png)
+---
 
-## ✨ Key Features
+## 🌟 Key Features
 
--   **🎮 Native Experience:** Built with the Win32 API and Direct2D for buttery smooth, hardware-accelerated rendering (60 FPS).
--   **🤖 Advanced AI:** Four distinct difficulty levels ranging from a simple heuristic bot to a "Search" engine that uses Monte Carlo simulations and alpha-beta pruning.
--   **⚡ High Performance:** Core game logic is highly optimized, with "Hard" bots making sub-15ms decisions and the engine simulating thousands of games per second for evaluation.
--   **🔬 Research Tooling:** Includes a suite of CLI tools for batch evaluation, deterministic replays, and detailed decision explanation—perfect for AI tuning and regression testing.
--   **🛠️ Modular Architecture:** Clean separation between the core game engine (`hearts-core`), the UI layer (`hearts-ui`), and the application shell (`hearts-app`).
+*   **Native Windows UI:** Uses Direct2D and DirectWrite for crisp, hardware-accelerated rendering and native OS integration.
+*   **Advanced AI:** Features multiple bot difficulty levels, ranging from basic heuristics to advanced Monte Carlo-style search algorithms.
+*   **High Performance:** Written in 100% Rust, optimizing for zero-allocation game loops during AI simulation.
+*   **Determinism:** Fully deterministic game replay support via seed control, essential for AI debugging and regression testing.
+*   **Headless Simulation:** Extensive CLI tools for running millions of hands to statistically verify AI improvements.
+
+## 🏗️ Architecture
+
+The project is organized as a Cargo workspace with three primary crates:
+
+| Crate | Description |
+| :--- | :--- |
+| **`hearts-core`** | **The Source of Truth.** Pure Rust implementation of Hearts rules, state management, scoring, and card models. Platform-agnostic. |
+| **`hearts-ui`** | **Presentation Layer.** Handles Direct2D rendering, asset management, and view logic. |
+| **`hearts-app`** | **Application Layer.** The entry point. Handles the Win32 message loop, orchestrates the `GameController`, and manages AI threads. |
 
 ## 🚀 Getting Started
 
 ### Prerequisites
+*   **OS:** Windows 10 or 11 (Required for the GUI).
+*   **Build Tool:** Rust (latest stable).
 
--   **Operating System:** Windows 10/11 (x64)
--   **Tools:** [Rust Toolchain](https://rustup.rs/) (stable)
-
-### Installation
+### Building and Running
 
 1.  **Clone the repository:**
     ```bash
@@ -30,86 +38,67 @@
     cd mdhearts
     ```
 
-2.  **Build and Run:**
+2.  **Run the Game (GUI):**
+    This compiles the project and launches the native Windows application.
     ```bash
     cargo run -p hearts-app --bin mdhearts --release
     ```
 
-### Running Tests
+3.  **Run Tests:**
+    Run the comprehensive test suite (including the rigorous AI logic tests).
+    ```bash
+    cargo test --all
+    ```
 
-MDHearts maintains a high standard of code quality with extensive test coverage.
+## 🤖 The AI System
 
+MDHearts includes several distinct AI "Planners":
+
+1.  **Easy / Legacy:** Basic rule-following. Avoids penalties but lacks strategic depth.
+2.  **Normal (Heuristic):** A strong heuristic-based bot. It understands "Shooting the Moon", defensive passing, and suit voiding.
+3.  **Hard (FutureHard):** Implements a 1-ply search with "wide" candidate consideration. It simulates the current trick to make optimal decisions based on probability.
+4.  **Search (MCTS-like):** A deeper search bot (still experimental) capable of looking ahead multiple tricks.
+
+### AI Configuration
+
+You can control the bot difficulty via environment variables or CLI arguments.
+
+**Environment Variables:**
+*   `MDH_BOT_DIFFICULTY`: Sets the bot logic (`easy`, `normal`, `hard`, `search`).
+*   `MDH_DEBUG_LOGS`: Set to `1` to see the AI's internal scoring and decision-making process in the console.
+*   `MDH_HARD_TIME_CAP_MS`: Limits the thinking time for the Hard/Search bots (default: 10ms).
+
+## 🛠️ CLI Tools & Evaluation
+
+MDHearts is built for research. It includes powerful CLI tools to evaluate bot performance.
+
+### Headless Match
+Run a single headless match and see the result:
 ```bash
-# Run unit and integration tests
-cargo test --all
-
-# Run benchmarks (requires criterion)
-cargo bench -p hearts-app
+cargo run -p hearts-app --bin mdhearts -- --headless --seed 12345
 ```
 
-## 🧠 AI System
-
-The game features four difficulty levels configurable via the `MDH_BOT_DIFFICULTY` environment variable or CLI arguments:
-
-| Difficulty | Description | Tech Stack |
-| :--- | :--- | :--- |
-| **Easy** | Basic rules follower. Avoids penalties but has no long-term plan. | Simple Heuristics |
-| **Normal** (Default) | Competent player. Counts cards, avoids voids, and tries to shoot the moon opportunistically. | Weighted Heuristics |
-| **Hard** | Strong opponent. Simulates tricks to evaluate outcomes, uses shallow search, and plays aggressively. | Shallow Search + Heuristics |
-| **Search** | Expert level. Uses iterative deepening, belief-state sampling (for hidden cards), and a perfect endgame solver. | MCTS / Alpha-Beta Pruning |
-
-To play against the hardest bot:
-```powershell
-$env:MDH_BOT_DIFFICULTY = "hard"
-cargo run -p hearts-app --bin mdhearts --release
+### Batch Comparison
+Run 1000 games comparing the "Hard" bot (West) against "Normal" bots (others):
+```bash
+# Usage: <subject_seat> <games> <batch_size>
+cargo run -p hearts-app --bin mdhearts --release -- --compare-batch west 1000 50
 ```
 
-## 🛠️ CLI Tools for Research
-
-MDHearts isn't just a game; it's a platform for AI research. The CLI exposes powerful commands for analyzing game states.
-
--   **Explain a Move:** See why the AI made a specific choice.
-    ```bash
-    mdhearts --explain-once <seed> <seat> <difficulty>
-    ```
--   **Export Game State:** Save a snapshot to JSON for debugging.
-    ```bash
-    mdhearts --export-snapshot <path> <seed> <seat>
-    ```
--   **Run a Match Batch:** Simulate thousands of games to measure win rates.
-    ```bash
-    mdhearts --match-batch <seat> <start_seed> <count> hard normal
-    ```
-
-See [`docs/CLI_TOOLS.md`](docs/CLI_TOOLS.md) for the complete reference.
+### Explain Decision
+Force the AI to explain why it chose a specific card for a specific game state (snapshot):
+```bash
+cargo run -p hearts-app --bin mdhearts -- --explain-once <path_to_snapshot.json>
+```
 
 ## 📂 Project Structure
 
-```text
-mdhearts/
-├── crates/
-│   ├── hearts-core/       # Pure Rust game logic (Platform-agnostic)
-│   ├── hearts-ui/         # Asset management and theming
-│   └── hearts-app/        # Windows App, AI logic, and CLI entry point
-├── tools/                 # PowerShell/Bash scripts for CI and evaluation
-├── assets/                # Game assets (cards, config)
-└── designs/               # Architecture decision records (ADRs) and plans
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please check out our [Contributing Guide](docs/CONTRIBUTING_AI_TUNING.md) and [Coding Standards](docs/CODING_STANDARDS.md).
-
-1.  Fork the repo.
-2.  Create your feature branch (`git checkout -b feature/amazing-feature`).
-3.  Commit your changes.
-4.  Push to the branch.
-5.  Open a Pull Request.
+*   `assets/`: Images and resources (card sprites).
+*   `crates/`: Source code for the Rust crates.
+*   `designs/`: Engineering journals, implementation plans, and AI tuning reports.
+*   `docs/`: Detailed documentation on CLI usage, setup, and coding standards.
+*   `tools/`: PowerShell and Shell scripts for automated evaluation pipelines (e.g., `run_eval.ps1`).
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-**Note:** This project serves as a comprehensive example of modern Rust application development, demonstrating FFI integration, complex state management, and high-performance computing patterns.
+Private / Proprietary. (See `LICENSE` file if applicable).
